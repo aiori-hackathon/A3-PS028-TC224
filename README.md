@@ -1,83 +1,91 @@
-# Happy Eyeballs Webtester
+# AIORI-3-HACKATHON-PROJECTS
+This repository will contain the code and resources for the AIORI-3 hackathon that will be developed during the AIORI-3
 
-This is the source code for the online Happy Eyeballs webtester: [www.happy-eyeballs.net](https://www.happy-eyeballs.net).
-It was initially developed as part of the paper "Lazy Eye Inspection: Capturing the State of Happy Eyeballs Implementations" by Patrick Sattler.
-Please use [the provided citation](#citation)
+# Happy Eyeballs: IPv4/IPv6 Fallback Measurement
 
-The current development team is:
-- [Patrick Sattler](https://www.patricksattler.eu)
-- [Johannes Zirngibl](https://zirngibl.github.io)
-- Matthias Kirstein
-- Tim Betzer
+**Team:** AlgoRhythm · **Hackathon:** AIORI 3 · **Problem Statement:** PS-028  
+**Domain:** Internet Measurement
 
+Team Introduction Video on YouTube: https://youtu.be/5LLxlW9f6r4?si=hoTZUTnZqHj3ni9-
 
+## Overview
 
-## Install
+This project evaluates how existing web clients establish connections when IPv4 and IPv6 paths experience controlled delays or failures. It uses a reproducible dual-stack laboratory to measure connection setup time, winning address family, failed connection attempts, and fallback behavior.
 
-We use [Ansible](https://docs.ansible.com/ansible/latest/index.html) to automatically set up and deploy this tool to hosts.
+**Objective:** Quantitatively compare two existing client implementations and explain their observed behavior using connection timelines and packet-level evidence.
 
-### Prerequisites
+## Problem Statement
 
-- [Ansible](https://docs.ansible.com/ansible/latest/index.html) on the local machine
-- An interface where [tc netem](https://www.man7.org/linux/man-pages/man8/tc-netem.8.html) delay is working (usually needs to be non-virtual)
-- 2 IPv4 and 2 IPv6 addresses for the nameserver
-- One IPv4 and IPv6 address for the webtester frontend
-- One IPv4 and IPv6 address to check if the client actually supports both IP versions and for tests without netem delays
-- As many IPv4 and IPv6 addresses as delays should be tested (our default configuration uses 21 delays)
-- One IPv4 and IPv6 address for HTTP/3 tests
-- One IPv4 and IPv6 address for Happy Eyeballs version 3 related tests
+In dual-stack networks, IPv4 and IPv6 may have different connectivity and performance characteristics. A broken or slow path can delay connection establishment if a client waits too long before attempting an alternative.
 
-### Configuration
+The **Happy Eyeballs algorithm**, specified in [RFC 8305](https://www.rfc-editor.org/rfc/rfc8305.html), mitigates this problem by coordinating connection attempts across available address families.
 
-Check the [example configuration file](./setup/hosts.yml) for a complete example setup.
-The main points to update are the host that the webtester should be deployed to, the domains, network interfaces, IP addresses, and delays.
-For detailed explanations of each configuration option, refer to the inline comments within the example config.
+This project investigates how effectively existing clients handle controlled network impairments, without developing a new browser stack or making unsupported conformance claims.
 
-### Ansible
+## Proposed Methodology
 
-After configuring the host in `setup/hosts.yml`, the setup playbook can be run using `ansible-playbook setup/setup.yml -i setup/hosts.yml`.
+1. **Environment:** Establish an isolated dual-stack client–DNS–server testbed with deterministic DNS responses.
+2. **Client selection:** Pin two existing web client implementations or versions and document their configurations.
+3. **Fault injection:** Apply reproducible network delays, packet loss, link failures, and DNS response delays.
+4. **Instrumentation:** Collect client connection timelines, structured event logs, and packet captures.
+5. **Analysis:** Compare connection performance, address-family selection, and fallback behavior across repeated trials.
 
-We added several tags to control the setup process:
-- `system`: installs required packages (such as Docker) and creates the user
-- `interface`: assigns the configured addresses to the interfaces and configures the tc delays
-  - `interface-ip-delete`: include this tag specifically if you want to delete the configured addresses from the interface
-- `dns`: sets up the nameserver
-- `caddy`: sets up caddy
-- `webtester`: sets up the webtester (frontend)
-- `resultupload`: sets up the result upload server
-- `packetcapture`: sets up the packet capture service and tshark service
+## Experimental Design
 
-Note: all tags have their own "subtags" (such as `system-podman`) for only executing specific subtasks.
-Those can be found in the `tasks/main.yml` inside the individual ansible roles.
+Use a healthy baseline plus six controlled failure/delay scenarios:
 
+| Scenario | Controlled condition |
+|---|---|
+| S1 | IPv6 connection path unavailable |
+| S2 | IPv4 connection path unavailable |
+| S3 | Increased IPv6 path latency |
+| S4 | Increased IPv4 path latency |
+| S5 | Packet loss on one address-family path |
+| S6 | Delayed DNS response for one address family |
 
-## Helpful setup and debug commands
+Run **at least 20 repetitions per client per scenario**. This gives a minimum of 280 trials across two clients, six impaired scenarios, and the healthy baseline.
 
-### Drop tc config
+Keep server configuration, application protocol, client settings, and measurement procedures consistent. Prevent connection reuse and DNS caching from unintentionally contaminating trials.
 
-`tc qdisc del dev ${interface} root`
+## Measurement and Analysis
 
-## Citation
+**Primary metrics**
+- Connection setup time and service-readiness time, reported separately.
+- Winning address family: IPv4 or IPv6.
+- Failed, successful, and cancelled connection attempts.
+- Fallback delay and overall connection success rate.
+- DNS resolution latency and per-attempt event timelines.
 
-Citation to use when referring to this project:
+Report median, 95th-percentile latency, interquartile range, and confidence intervals where appropriate. Use packet captures to validate observed connection attempts and distinguish network failures from client-side behavior.
 
-```
-@inproceedings{sattler2025happyeyeballs,
-    title = {{Lazy Eye Inspection: Capturing the State of Happy Eyeballs Implementations}},
-    author = {Sattler, Patrick and Kirstein, Matthias and Wüstrich, Lars and Zirngibl, Johannes and Carle, Georg},
-    booktitle = {Proceedings of the 2025 Internet Measurement Conference},
-    year = {2025},
-    location = {Madison, WI, USA},
-    abbreviation = {IMC'25},
-    publisher = {ACM},
-    month = oct,
-    homepage = {https://www.happy-eyeballs.net/},
-    month_numeric = {10}
-}
-```
+## Expected Deliverables
 
-## License
+- Reproducible dual-stack scenario runner.
+- Two documented and tested client configurations.
+- Six controlled failure/delay scenarios and repeated-trial dataset.
+- Timestamped connection timelines and packet captures.
+- Per-scenario comparative analysis and technical report.
+- Demonstration and pseudocode for the experimental workflow.
 
-This project is licensed under the Mozilla Public License Version 2.0 ([see LICENSE](LICENSE)).
+## Scientific Principles
 
-UI elements in `setup/webtester/src/components/ui` are from shadcn and licensed with [MIT](LICENSES/MIT.txt)
+- Use an isolated lab; do not inject faults into public or production networks.
+- Record exact client versions, configuration, DNS behavior, and specification revision.
+- Preserve raw measurements and document exclusions, failures, and limitations.
+- Base conclusions on observable evidence rather than undocumented implementation assumptions.
+- Treat Happy Eyeballs v3 as a pinned Internet-Draft unless its publication status is verified at experiment launch.
+
+## Standards and Related Work
+
+- [RFC 8305 — Happy Eyeballs Version 2](https://www.rfc-editor.org/rfc/rfc8305.html)
+- [RFC 6724 — Default Address Selection](https://www.rfc-editor.org/rfc/rfc6724.html)
+- [Happy Eyeballs Version 3 — IETF Datatracker](https://datatracker.ietf.org/doc/draft-ietf-happy-happyeyeballs-v3/)
+- [IETF Happy Eyeballs WebTester](https://github.com/happy-eyeballs/he-webtester)
+
+Our contribution is a controlled, evidence-driven comparison of existing clients, designed to make IPv4/IPv6 connection behavior measurable, explainable, and reproducible.
+
+## Project Status
+
+**Status:** Experimental framework and methodology proposed; implementation and measurements to be documented as completed.
+
+**Team AlgoRhythm — Measure. Compare. Improve.**
