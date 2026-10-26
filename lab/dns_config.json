@@ -1,0 +1,20 @@
+{
+  "zone": "he.test.",
+  "default_ttl": 1,
+  "rules": {
+    "A": {
+      "address": "10.0.2.10",
+      "delay_ms": 0,
+      "rcode": "NOERROR"
+    },
+    "AAAA": {
+      "address": "2001:db8:2::10",
+      "delay_ms": 0,
+      "rcode": "NOERROR"
+    }
+  },
+  "behavior": {
+    "unknown_domain_rcode": "NXDOMAIN",
+    "unsupported_type_rcode": "NOERROR"
+  }
+}
