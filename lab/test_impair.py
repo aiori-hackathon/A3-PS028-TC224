@@ -437,6 +437,16 @@ class TestCLIOptions(unittest.TestCase):
         args5 = parser.parse_args(["list"])
         self.assertEqual(args5.command, "list")
 
+        args6 = parser.parse_args(["test-scenarios", "--scenario", "S1", "--dry-run"])
+        self.assertEqual(args6.command, "test-scenarios")
+        self.assertEqual(args6.scenario, "S1")
+        self.assertTrue(args6.dry_run)
+
+        args7 = parser.parse_args(["self-test-scenarios", "--scenarios", "S0,S2", "--json"])
+        self.assertEqual(args7.command, "self-test-scenarios")
+        self.assertEqual(args7.scenarios, "S0,S2")
+        self.assertTrue(args7.json)
+
     def test_dry_run_flag_positions(self):
         parser = impair.build_parser()
 

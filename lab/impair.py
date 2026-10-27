@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-PS-028 Happy Eyeballs Measurement Lab: Scenario Controller
-Work Package A4: Network Impairment and Scenario Controller
+PS-028 Happy Eyeballs Measurement Lab: Scenario Controller & Self-Test Suite
+Work Packages A4 & A5: Network Impairment Controller and Repeatable S0-S6 Self-Test Harness
 
-Provides apply, clear, and self-test-baseline operations for the seven
+Provides apply, clear, self-test-baseline, and test-scenarios operations for the seven
 Study Guide scenarios (S0 - S6). Ensures strict isolation, preserves A1-A3
 invariance, uses only project-owned nftables tables and tc qdiscs, and coordinates
 safely with the DNS lock and backups.
@@ -826,6 +826,17 @@ def list_scenarios(scenarios_path: Path = DEFAULT_SCENARIOS_PATH) -> None:
 # CLI Entry Point
 # ==============================================================================
 
+def positive_int(val: str) -> int:
+    """Validate positive integer for CLI arguments."""
+    try:
+        ival = int(val)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"Invalid integer value: '{val}'")
+    if ival <= 0:
+        raise argparse.ArgumentTypeError(f"Probe count must be a positive integer (> 0), got {ival}")
+    return ival
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="PS-028 Scenario Impairment Controller (Work Package A4)"
@@ -870,6 +881,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("list", parents=[sub_common], help="List all available scenarios and descriptions")
 
+    test_p = subparsers.add_parser("test-scenarios", parents=[sub_common], help="Run repeatable self-test harness for S0-S6 (Work Package A5)")
+    test_p.add_argument("--scenario", type=str, default=None, help="Single scenario to test (S0, S1, S2, S3, S4, S5, S6)")
+    test_p.add_argument("--scenarios", type=str, default=None, help="Comma-separated list of scenarios to test")
+    test_p.add_argument("--probes", type=positive_int, default=50, help="Number of SYN probes for scenario S5 (default: 50, must be > 0)")
+    test_p.add_argument("--json", action="store_true", default=False, help="Output structured test results in JSON format")
+
+    subparsers.add_parser("self-test-scenarios", parents=[test_p], conflict_handler="resolve", help="Alias for test-scenarios")
+
     return parser
 
 
@@ -895,6 +914,32 @@ def main() -> int:
             return 0
         elif args.command == "list":
             list_scenarios(scenarios_path=args.scenarios_file)
+            return 0
+        elif args.command in ("test-scenarios", "self-test-scenarios"):
+            probes = getattr(args, "probes", 50)
+            if not isinstance(probes, int) or isinstance(probes, bool) or probes <= 0:
+                log_error(f"Invalid probe count: {probes}. Must be greater than zero (> 0).")
+                return 1
+
+            try:
+                import lab.self_test_scenarios as sts
+            except ImportError:
+                import self_test_scenarios as sts
+
+            selected = None
+            if getattr(args, "scenario", None):
+                selected = [args.scenario]
+            elif getattr(args, "scenarios", None):
+                selected = [s.strip() for s in args.scenarios.split(",") if s.strip()]
+
+            results = sts.run_all_self_tests(
+                scenarios=selected,
+                scenarios_path=args.scenarios_file,
+                dry_run=args.dry_run,
+                probe_count=getattr(args, "probes", 50)
+            )
+            if getattr(args, "json", False):
+                print(json.dumps({"status": "PASS", "results": results}, indent=2))
             return 0
         else:
             parser.print_help()
