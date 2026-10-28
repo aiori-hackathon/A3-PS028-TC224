@@ -1,3 +1,16 @@
 .idea
 
 setup/hosts-staging.yml
+# PS-028 lab runtime artifacts
+lab/.lab.lock
+lab/.verify_dns.lock
+lab/.resolv_installed_by_ps028
+lab/__pycache__/
+lab/access.log
+lab/dns.log
+lab/dns_stderr.log
+lab/error.log
+lab/dns.pid
+lab/nginx.pid
+lab/.impair_state.json
+lab/dns_config.json.impair_bak
