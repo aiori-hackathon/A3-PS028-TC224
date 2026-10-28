@@ -939,74 +939,75 @@ def run_scenario_self_test(
     cleanup_error: Optional[Exception] = None
     baseline_error: Optional[Exception] = None
 
-    try:
-        # Step 1: Apply scenario
-        impair.apply_scenario(sc_key, scenarios_path=scenarios_path, dry_run=dry_run)
-
-        # Step 2: Run verification
-        if sc_key == "S5":
-            result_details = verifier(probe_count=probe_count, dry_run=dry_run)
-        else:
-            result_details = verifier(dry_run=dry_run)
-
-        test_passed = True
-        impair.log_ok(f"Scenario {sc_key} self-test verification SUCCEEDED.")
-    except Exception as e:
-        scenario_error = e
-        impair.log_error(f"Scenario {sc_key} self-test verification FAILED: {scenario_error}")
-    finally:
-        # Step 3: MANDATORY CLEANUP (Always attempted)
-        impair.log_info(f"Post-scenario {sc_key} lifecycle: clearing impairments and restoring baseline...")
+    with impair.acquire_lab_lock():
         try:
-            impair.clear_impairments(dry_run=dry_run)
-        except Exception as clr_err:
-            cleanup_error = clr_err
-            impair.log_error(f"Post-scenario {sc_key} cleanup failed: {clr_err}")
+            # Step 1: Apply scenario
+            impair.apply_scenario(sc_key, scenarios_path=scenarios_path, dry_run=dry_run)
 
-        # Step 4: MANDATORY BASELINE VERIFICATION (Always attempted, even if cleanup raised)
-        impair.log_info(f"Running self-test-baseline after scenario {sc_key}...")
-        try:
-            baseline_passed = impair.self_test_baseline(dry_run=dry_run)
-            if not baseline_passed:
-                baseline_error = impair.ImpairmentError(
-                    f"CRITICAL: Baseline self-test failed following scenario {sc_key} execution!"
-                )
-                impair.log_error(str(baseline_error))
+            # Step 2: Run verification
+            if sc_key == "S5":
+                result_details = verifier(probe_count=probe_count, dry_run=dry_run)
             else:
-                impair.log_ok(f"Post-scenario {sc_key} baseline verified pristine.")
-        except Exception as base_err:
-            baseline_error = base_err
-            impair.log_error(f"Post-scenario {sc_key} baseline check exception: {base_err}")
+                result_details = verifier(dry_run=dry_run)
 
-    # Step 5: Composite error handling preserving all errors
-    errors: List[str] = []
-    if scenario_error:
-        errors.append(f"Scenario verification error: {scenario_error}")
-    if cleanup_error:
-        errors.append(f"Cleanup error: {cleanup_error}")
-    if baseline_error:
-        errors.append(f"Baseline error: {baseline_error}")
+            test_passed = True
+            impair.log_ok(f"Scenario {sc_key} self-test verification SUCCEEDED.")
+        except Exception as e:
+            scenario_error = e
+            impair.log_error(f"Scenario {sc_key} self-test verification FAILED: {scenario_error}")
+        finally:
+            # Step 3: MANDATORY CLEANUP (Always attempted)
+            impair.log_info(f"Post-scenario {sc_key} lifecycle: clearing impairments and restoring baseline...")
+            try:
+                impair.clear_impairments(dry_run=dry_run)
+            except Exception as clr_err:
+                cleanup_error = clr_err
+                impair.log_error(f"Post-scenario {sc_key} cleanup failed: {clr_err}")
 
-    if errors:
-        if len(errors) == 1:
-            err_msg = errors[0]
-        else:
-            err_msg = (
-                f"Scenario {sc_key} lifecycle failed with multiple errors:\n"
-                + "\n".join(f"  [{i+1}] {e}" for i, e in enumerate(errors))
-            )
-        exc = impair.ImpairmentError(err_msg)
-        exc.scenario_error = scenario_error
-        exc.cleanup_error = cleanup_error
-        exc.baseline_error = baseline_error
-        raise exc
+            # Step 4: MANDATORY BASELINE VERIFICATION (Always attempted, even if cleanup raised)
+            impair.log_info(f"Running self-test-baseline after scenario {sc_key}...")
+            try:
+                baseline_passed = impair.self_test_baseline(dry_run=dry_run)
+                if not baseline_passed:
+                    baseline_error = impair.ImpairmentError(
+                        f"CRITICAL: Baseline self-test failed following scenario {sc_key} execution!"
+                    )
+                    impair.log_error(str(baseline_error))
+                else:
+                    impair.log_ok(f"Post-scenario {sc_key} baseline verified pristine.")
+            except Exception as base_err:
+                baseline_error = base_err
+                impair.log_error(f"Post-scenario {sc_key} baseline check exception: {base_err}")
 
-    return {
-        "scenario": sc_key,
-        "passed": test_passed,
-        "details": result_details,
-        "post_baseline_verified": True
-    }
+        # Step 5: Composite error handling preserving all errors
+        errors: List[str] = []
+        if scenario_error:
+            errors.append(f"Scenario verification error: {scenario_error}")
+        if cleanup_error:
+            errors.append(f"Cleanup error: {cleanup_error}")
+        if baseline_error:
+            errors.append(f"Baseline error: {baseline_error}")
+
+        if errors:
+            if len(errors) == 1:
+                err_msg = errors[0]
+            else:
+                err_msg = (
+                    f"Scenario {sc_key} lifecycle failed with multiple errors:\n"
+                    + "\n".join(f"  [{i+1}] {e}" for i, e in enumerate(errors))
+                )
+            exc = impair.ImpairmentError(err_msg)
+            exc.scenario_error = scenario_error
+            exc.cleanup_error = cleanup_error
+            exc.baseline_error = baseline_error
+            raise exc
+
+        return {
+            "scenario": sc_key,
+            "passed": test_passed,
+            "details": result_details,
+            "post_baseline_verified": True
+        }
 
 
 def run_all_self_tests(

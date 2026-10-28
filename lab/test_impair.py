@@ -181,6 +181,140 @@ class TestNFTablesManagement(unittest.TestCase):
             check=False
         )
 
+    def test_validate_allowed_s1_s2_s5_rule_structures(self):
+        """Valid S1, S2, and S5 rule structures must pass validation."""
+        s1_rule = 'oifname "ps028-rt-sv6" ip6 daddr 2001:db8:2::10 tcp flags syn / syn,ack drop'
+        s2_rule = 'oifname "ps028-rt-sv6" ip6 daddr 2001:db8:2::10 tcp flags syn / syn,ack reject with tcp reset'
+        s5_rule = 'oifname "ps028-rt-sv6" ip6 daddr 2001:db8:2::10 tcp flags syn / syn,ack numgen random mod 100 < 50 drop'
+
+        self.assertEqual(impair.validate_nftables_rule(s1_rule, scenario_id="S1"), s1_rule)
+        self.assertEqual(impair.validate_nftables_rule(s2_rule, scenario_id="S2"), s2_rule)
+        self.assertEqual(impair.validate_nftables_rule(s5_rule, scenario_id="S5"), s5_rule)
+
+    def test_negative_rejects_empty_or_non_string(self):
+        """Rule must reject empty, non-string, or whitespace inputs."""
+        for bad in ("", "   ", None, 123, []):
+            with self.assertRaises(impair.ImpairmentError):
+                impair.validate_nftables_rule(bad)
+
+    def test_negative_rejects_injection_and_forbidden_keywords(self):
+        """Reject semicolons, newlines, and dangerous commands."""
+        forbidden_cases = [
+            'oifname "ps028-rt-sv6" ip6 daddr 2001:db8:2::10 tcp flags syn / syn,ack drop; echo injection',
+            'oifname "ps028-rt-sv6"\nip6 daddr 2001:db8:2::10 drop',
+            'flush ruleset',
+            'flush table inet ps028_impair',
+            'delete table inet filter',
+            'add table inet evil_table',
+        ]
+        for case in forbidden_cases:
+            with self.subTest(case=case):
+                with self.assertRaises(impair.ImpairmentError):
+                    impair.validate_nftables_rule(case)
+
+    def test_negative_rejects_unauthorized_interfaces(self):
+        """Reject rules targeting host interfaces (eth0, lo, docker0)."""
+        unauthorized_ifaces = ["eth0", "lo", "docker0", "ps028-cl-rt", "wlan0"]
+        for iface in unauthorized_ifaces:
+            with self.subTest(iface=iface):
+                rule = f'oifname "{iface}" ip6 daddr 2001:db8:2::10 tcp flags syn / syn,ack drop'
+                with self.assertRaises(impair.ImpairmentError) as ctx:
+                    impair.validate_nftables_rule(rule)
+                self.assertIn("unauthorized interface", str(ctx.exception).lower())
+
+    def test_negative_rejects_invalid_or_unauthorized_ips(self):
+        """Reject invalid IP syntax or unauthorized destination IPs."""
+        bad_ips = [
+            ("999.999.999.999", "invalid"),
+            ("invalid::ipv6", "invalid"),
+            ("2001:4860:4860::8888", "unauthorized destination"),
+            ("1.1.1.1", "unauthorized destination"),
+        ]
+        for ip_str, desc in bad_ips:
+            with self.subTest(ip=ip_str, desc=desc):
+                rule = f'oifname "ps028-rt-sv6" ip6 daddr {ip_str} tcp flags syn / syn,ack drop'
+                with self.assertRaises(impair.ImpairmentError):
+                    impair.validate_nftables_rule(rule)
+
+    def test_negative_rejects_missing_tcp_syn_flags(self):
+        """Reject rules that omit or specify wrong TCP flags."""
+        bad_flag_rules = [
+            'oifname "ps028-rt-sv6" ip6 daddr 2001:db8:2::10 drop',
+            'oifname "ps028-rt-sv6" ip6 daddr 2001:db8:2::10 tcp flags ack drop',
+            'oifname "ps028-rt-sv6" ip6 daddr 2001:db8:2::10 udp dport 80 drop',
+        ]
+        for rule in bad_flag_rules:
+            with self.subTest(rule=rule):
+                with self.assertRaises(impair.ImpairmentError) as ctx:
+                    impair.validate_nftables_rule(rule)
+                self.assertIn("tcp syn flags", str(ctx.exception).lower())
+
+    def test_negative_rejects_unsupported_actions(self):
+        """Reject unsupported actions (e.g. accept, masquerade, redirect)."""
+        bad_actions = [
+            'oifname "ps028-rt-sv6" ip6 daddr 2001:db8:2::10 tcp flags syn / syn,ack accept',
+            'oifname "ps028-rt-sv6" ip6 daddr 2001:db8:2::10 tcp flags syn / syn,ack masquerade',
+            'oifname "ps028-rt-sv6" ip6 daddr 2001:db8:2::10 tcp flags syn / syn,ack redirect',
+        ]
+        for rule in bad_actions:
+            with self.subTest(rule=rule):
+                with self.assertRaises(impair.ImpairmentError) as ctx:
+                    impair.validate_nftables_rule(rule)
+                self.assertIn("does not match any allowed", str(ctx.exception).lower())
+
+    def test_negative_rejects_invalid_s5_loss_parameters(self):
+        """Reject malformed numgen random mod parameters in S5 loss rules."""
+        invalid_numgen_rules = [
+            'oifname "ps028-rt-sv6" ip6 daddr 2001:db8:2::10 tcp flags syn / syn,ack numgen random mod 0 < 50 drop',
+            'oifname "ps028-rt-sv6" ip6 daddr 2001:db8:2::10 tcp flags syn / syn,ack numgen random mod 100 < 0 drop',
+            'oifname "ps028-rt-sv6" ip6 daddr 2001:db8:2::10 tcp flags syn / syn,ack numgen random mod 100 < 100 drop',
+            'oifname "ps028-rt-sv6" ip6 daddr 2001:db8:2::10 tcp flags syn / syn,ack numgen random mod 100 < 150 drop',
+        ]
+        for rule in invalid_numgen_rules:
+            with self.subTest(rule=rule):
+                with self.assertRaises(impair.ImpairmentError) as ctx:
+                    impair.validate_nftables_rule(rule)
+                self.assertIn("numgen loss parameters", str(ctx.exception).lower())
+
+    def test_negative_rejects_cross_scenario_rule_mismatch(self):
+        """Reject rules that don't match the designated scenario structure."""
+        s1_rule = 'oifname "ps028-rt-sv6" ip6 daddr 2001:db8:2::10 tcp flags syn / syn,ack drop'
+        s2_rule = 'oifname "ps028-rt-sv6" ip6 daddr 2001:db8:2::10 tcp flags syn / syn,ack reject with tcp reset'
+        s5_rule = 'oifname "ps028-rt-sv6" ip6 daddr 2001:db8:2::10 tcp flags syn / syn,ack numgen random mod 100 < 50 drop'
+
+        # S1 rule in S2 or S5 must fail
+        with self.assertRaises(impair.ImpairmentError):
+            impair.validate_nftables_rule(s1_rule, scenario_id="S2")
+        with self.assertRaises(impair.ImpairmentError):
+            impair.validate_nftables_rule(s1_rule, scenario_id="S5")
+
+        # S2 rule in S1 or S5 must fail
+        with self.assertRaises(impair.ImpairmentError):
+            impair.validate_nftables_rule(s2_rule, scenario_id="S1")
+        with self.assertRaises(impair.ImpairmentError):
+            impair.validate_nftables_rule(s2_rule, scenario_id="S5")
+
+        # S5 rule in S1 or S2 must fail
+        with self.assertRaises(impair.ImpairmentError):
+            impair.validate_nftables_rule(s5_rule, scenario_id="S1")
+        with self.assertRaises(impair.ImpairmentError):
+            impair.validate_nftables_rule(s5_rule, scenario_id="S2")
+
+        # S0, S3, S4, S6 must not allow any nftables rules
+        for sc in ("S0", "S3", "S4", "S6"):
+            with self.assertRaises(impair.ImpairmentError):
+                impair.validate_nftables_rule(s1_rule, scenario_id=sc)
+
+    @patch("lab.impair.execute_netns_cmd")
+    def test_apply_nftables_rules_rejects_malformed_before_command_execution(self, mock_cmd):
+        """apply_nftables_rules must validate rules and abort BEFORE calling execute_netns_cmd."""
+        malformed_rule = 'oifname "eth0" ip6 daddr 2001:db8:2::10 tcp flags syn / syn,ack drop'
+        with self.assertRaises(impair.ImpairmentError):
+            impair.apply_nftables_rules([malformed_rule], dry_run=False)
+
+        # Strictly verify no netns commands were executed
+        mock_cmd.assert_not_called()
+
 
 class TestNetemManagement(unittest.TestCase):
     """Test tc netem command generation and baseline delay preservation."""

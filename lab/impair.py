@@ -26,6 +26,8 @@ import yaml
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 DEFAULT_SCENARIOS_PATH = SCRIPT_DIR / "scenarios.yaml"
 STATE_FILE = SCRIPT_DIR / ".impair_state.json"
@@ -59,15 +61,125 @@ BASELINE_A_ADDR = "10.0.2.10"
 BASELINE_AAAA_ADDR = "2001:db8:2::10"
 DNS_SERVER_IP = "10.0.1.1"
 
+from lab.concurrency import acquire_lab_lock, LabLockError, DEFAULT_LAB_LOCK_FILE
+LAB_LOCK_FILE = DEFAULT_LAB_LOCK_FILE
+
 
 class ImpairmentError(Exception):
     """Base exception for impairment controller failures."""
     pass
 
 
-class LockAcquisitionError(ImpairmentError):
-    """Raised when .verify_dns.lock cannot be acquired."""
+class LockAcquisitionError(LabLockError, ImpairmentError):
+    """Raised when lab or DNS lock cannot be acquired."""
     pass
+
+
+ALLOWED_NFT_INTERFACES = {"ps028-rt-sv6", "ps028-rt-sv4"}
+ALLOWED_SERVER_IPS = {"2001:db8:2::10", "10.0.2.10"}
+
+
+def validate_nftables_rule(rule: str, scenario_id: Optional[str] = None) -> str:
+    """
+    Validate that an nftables rule conforms strictly to allowed PS-028 impairment structures.
+    Allowed structures:
+      - S1: oifname "<iface>" ip6 daddr <server_ip> tcp flags syn / syn,ack drop
+      - S2: oifname "<iface>" ip6 daddr <server_ip> tcp flags syn / syn,ack reject with tcp reset
+      - S5: oifname "<iface>" ip6 daddr <server_ip> tcp flags syn / syn,ack numgen random mod <mod> < <pct> drop
+    Rejects malformed, unsupported, or dangerous configurations.
+    """
+    if not isinstance(rule, str):
+        raise ImpairmentError(f"nftables rule must be a string, got {type(rule).__name__}")
+
+    rule_clean = rule.strip()
+    if not rule_clean:
+        raise ImpairmentError("nftables rule cannot be empty")
+
+    # Anti-injection: reject semicolons, newlines, and control characters
+    if any(c in rule_clean for c in (";", "\n", "\r")):
+        raise ImpairmentError(f"nftables rule contains illegal control characters: '{rule_clean}'")
+
+    # Disallow global/subsystem commands and dangerous directives
+    lowered = rule_clean.lower()
+    for forbidden in ("flush", "table ", "chain ", "delete ", "include ", "add table"):
+        if forbidden in lowered:
+            raise ImpairmentError(f"nftables rule contains forbidden keyword '{forbidden.strip()}': '{rule_clean}'")
+
+    # Match interface clause
+    if_match = re.search(r'\boifname\s+"?([^"\s]+)"?', rule_clean)
+    if not if_match:
+        raise ImpairmentError(f"nftables rule missing required 'oifname' clause: '{rule_clean}'")
+    iface = if_match.group(1)
+    if iface not in ALLOWED_NFT_INTERFACES:
+        raise ImpairmentError(
+            f"nftables rule specifies unauthorized interface '{iface}'. "
+            f"Allowed project interfaces: {sorted(ALLOWED_NFT_INTERFACES)}"
+        )
+
+    # Match destination address clause
+    daddr_match = re.search(r'\b(?:ip6|ip)\s+daddr\s+([a-fA-F0-9:.]+)', rule_clean)
+    if not daddr_match:
+        raise ImpairmentError(f"nftables rule missing required 'daddr' clause: '{rule_clean}'")
+    daddr = daddr_match.group(1)
+    try:
+        ipaddress.ip_address(daddr)
+    except ValueError:
+        raise ImpairmentError(f"nftables rule has invalid destination IP address '{daddr}': '{rule_clean}'")
+    if daddr not in ALLOWED_SERVER_IPS:
+        raise ImpairmentError(
+            f"nftables rule specifies unauthorized destination IP '{daddr}'. "
+            f"Must target project server endpoint {sorted(ALLOWED_SERVER_IPS)}"
+        )
+
+    # Match TCP flags
+    if "tcp flags" not in rule_clean or "syn" not in rule_clean:
+        raise ImpairmentError(f"nftables rule must match TCP SYN flags ('tcp flags syn / syn,ack'): '{rule_clean}'")
+
+    # Determine rule action structure
+    is_s1_drop = bool(re.search(r'\bdrop\b', rule_clean) and "numgen" not in rule_clean and "reject" not in rule_clean)
+    is_s2_rst = bool(re.search(r'\breject\s+with\s+tcp\s+reset\b', rule_clean))
+    is_s5_loss = bool("numgen random mod" in rule_clean and re.search(r'\bdrop\b', rule_clean))
+
+    if is_s5_loss:
+        # Validate numgen parameters
+        numgen_match = re.search(r'\bnumgen\s+random\s+mod\s+(\d+)\s*<\s*(\d+)', rule_clean)
+        if not numgen_match:
+            raise ImpairmentError(f"Malformed numgen loss expression in rule: '{rule_clean}'")
+        mod_val = int(numgen_match.group(1))
+        thresh_val = int(numgen_match.group(2))
+        if mod_val <= 0 or not (0 < thresh_val < mod_val):
+            raise ImpairmentError(
+                f"Invalid numgen loss parameters (mod {mod_val} < {thresh_val}). "
+                f"Threshold must be strictly between 0 and modulus: '{rule_clean}'"
+            )
+
+    matched_structures = []
+    if is_s1_drop:
+        matched_structures.append("S1")
+    if is_s2_rst:
+        matched_structures.append("S2")
+    if is_s5_loss:
+        matched_structures.append("S5")
+
+    if not matched_structures:
+        raise ImpairmentError(
+            f"nftables rule does not match any allowed S1, S2, or S5 structure: '{rule_clean}'"
+        )
+
+    if scenario_id:
+        sc_clean = scenario_id.upper()
+        if sc_clean in ("S1", "S2", "S5"):
+            if sc_clean not in matched_structures:
+                raise ImpairmentError(
+                    f"nftables rule action structure mismatch for scenario {sc_clean}: "
+                    f"rule has structure {matched_structures}, expected {sc_clean}"
+                )
+        else:
+            raise ImpairmentError(
+                f"Scenario {sc_clean} does not permit nftables rules; found: '{rule_clean}'"
+            )
+
+    return rule_clean
 
 
 def log_info(msg: str) -> None:
@@ -261,10 +373,15 @@ def validate_scenario_definition(sc_id: str, sc: Dict[str, Any]) -> None:
         if type(val) is not int or type(val) is bool or val < 0:
             raise ImpairmentError(f"Scenario {sc_id} dns.{k} must be non-negative integer, got {val}")
 
+    nft_rules = sc.get("nftables", [])
     if sc["type"] == "nftables":
-        nft_rules = sc.get("nftables", [])
         if not isinstance(nft_rules, list) or len(nft_rules) == 0:
             raise ImpairmentError(f"Scenario {sc_id} of type nftables must contain non-empty 'nftables' rule list")
+        for r in nft_rules:
+            validate_nftables_rule(r, scenario_id=sc_id)
+    else:
+        if nft_rules:
+            raise ImpairmentError(f"Scenario {sc_id} of type '{sc['type']}' must not specify nftables rules")
 
 
 # ==============================================================================
@@ -474,11 +591,17 @@ def restore_dns_baseline(
 # nftables Impairment Management (Project Table Invariance)
 # ==============================================================================
 
-def apply_nftables_rules(rules: List[str], dry_run: bool = False) -> None:
+def apply_nftables_rules(rules: List[str], dry_run: bool = False, scenario_id: Optional[str] = None) -> None:
     """
     Apply nftables rules within dedicated project-owned table 'inet ps028_impair'.
-    STRICT SAFETY: Never flushes entire ruleset and never modifies unrelated tables.
+    STRICT SAFETY: Validates rule structures before execution, never flushes entire ruleset,
+    and never modifies unrelated tables.
     """
+    if not isinstance(rules, list):
+        raise ImpairmentError(f"nftables rules must be a list, got {type(rules).__name__}")
+    for r in rules:
+        validate_nftables_rule(r, scenario_id=scenario_id)
+
     require_root(dry_run=dry_run)
     clear_nftables_rules(dry_run=dry_run)
 
@@ -601,67 +724,77 @@ def clear_state(dry_run: bool = False) -> None:
 # Controller Operations: apply, clear, self-test-baseline
 # ==============================================================================
 
-def apply_scenario(scenario_id: str, scenarios_path: Path = DEFAULT_SCENARIOS_PATH, dry_run: bool = False) -> None:
+def apply_scenario(
+    scenario_id: str,
+    scenarios_path: Path = DEFAULT_SCENARIOS_PATH,
+    dry_run: bool = False,
+    lock_file: Optional[Path] = None,
+    lock_timeout: float = 5.0
+) -> None:
     """
-    Apply a designated scenario (S0 - S6).
+    Apply a designated scenario (S0 - S6) under exclusive lab lock.
     Cleans any existing impairment first, applies configuration atomically,
     and rolls back cleanly on any unexpected failure.
     """
-    scenarios_data = load_scenarios_config(scenarios_path)
-    scenarios = scenarios_data["scenarios"]
+    target_lock = lock_file or LAB_LOCK_FILE
+    with acquire_lab_lock(timeout=lock_timeout, lock_path=target_lock):
+        scenarios_data = load_scenarios_config(scenarios_path)
+        scenarios = scenarios_data["scenarios"]
 
-    scenario_key = scenario_id.upper()
-    if scenario_key not in scenarios:
-        raise ImpairmentError(f"Scenario '{scenario_id}' not recognized. Available scenarios: {sorted(scenarios.keys())}")
+        scenario_key = scenario_id.upper()
+        if scenario_key not in scenarios:
+            raise ImpairmentError(f"Scenario '{scenario_id}' not recognized. Available scenarios: {sorted(scenarios.keys())}")
 
-    scenario = scenarios[scenario_key]
-    log_info(f"Applying Scenario {scenario_key}: {scenario['name']} — {scenario['description']}")
+        scenario = scenarios[scenario_key]
+        log_info(f"Applying Scenario {scenario_key}: {scenario['name']} — {scenario['description']}")
 
-    # Clean existing impairment state first
-    clear_impairments(dry_run=dry_run)
+        # Clean existing impairment state first
+        clear_impairments(dry_run=dry_run, lock_file=target_lock, lock_timeout=lock_timeout)
 
-    try:
-        # 1. Apply netem delays
-        delays = scenario.get("network", {}).get("delays", BASELINE_DELAYS)
-        apply_netem_delays(delays, dry_run=dry_run)
-
-        # 2. Apply nftables rules
-        nft_rules = scenario.get("nftables", [])
-        if nft_rules:
-            apply_nftables_rules(nft_rules, dry_run=dry_run)
-
-        # 3. Apply DNS delays if required (S6)
-        dns_cfg = scenario.get("dns", {})
-        a_delay = dns_cfg.get("A_delay_ms", 0)
-        aaaa_delay = dns_cfg.get("AAAA_delay_ms", 0)
-        if a_delay > 0 or aaaa_delay > 0:
-            apply_dns_delays(a_delay_ms=a_delay, aaaa_delay_ms=aaaa_delay, dry_run=dry_run)
-
-        save_state(scenario_key, {"name": scenario["name"], "type": scenario["type"]}, dry_run=dry_run)
-        log_ok(f"Scenario {scenario_key} successfully applied.")
-    except Exception as e:
-        log_error(f"Failed to apply scenario {scenario_key}: {e}. Rolling back to baseline...")
         try:
-            clear_impairments(dry_run=dry_run)
-        except Exception as rb_err:
-            log_error(f"Rollback encountered error: {rb_err}")
-        raise
+            # 1. Apply netem delays
+            delays = scenario.get("network", {}).get("delays", BASELINE_DELAYS)
+            apply_netem_delays(delays, dry_run=dry_run)
+
+            # 2. Apply nftables rules
+            nft_rules = scenario.get("nftables", [])
+            if nft_rules:
+                apply_nftables_rules(nft_rules, dry_run=dry_run, scenario_id=scenario_key)
+
+            # 3. Apply DNS delays if required (S6)
+            dns_cfg = scenario.get("dns", {})
+            a_delay = dns_cfg.get("A_delay_ms", 0)
+            aaaa_delay = dns_cfg.get("AAAA_delay_ms", 0)
+            if a_delay > 0 or aaaa_delay > 0:
+                apply_dns_delays(a_delay_ms=a_delay, aaaa_delay_ms=aaaa_delay, dry_run=dry_run)
+
+            save_state(scenario_key, {"name": scenario["name"], "type": scenario["type"]}, dry_run=dry_run)
+            log_ok(f"Scenario {scenario_key} successfully applied.")
+        except Exception as e:
+            log_error(f"Failed to apply scenario {scenario_key}: {e}. Rolling back to baseline...")
+            try:
+                clear_impairments(dry_run=dry_run, lock_file=target_lock, lock_timeout=lock_timeout)
+            except Exception as rb_err:
+                log_error(f"Rollback encountered error: {rb_err}")
+            raise
 
 
-def clear_impairments(dry_run: bool = False) -> None:
+def clear_impairments(dry_run: bool = False, lock_file: Optional[Path] = None, lock_timeout: float = 5.0) -> None:
     """
-    Restore system to healthy baseline (S0):
+    Restore system to healthy baseline (S0) under exclusive lab lock:
     - Delete project-owned nftables table
     - Restore 10ms baseline netem delays on all server interfaces
     - Restore DNS delays to 0ms and reload DNS server
     - Remove scenario state file
     """
-    log_info("Clearing impairments and restoring clean baseline...")
-    clear_nftables_rules(dry_run=dry_run)
-    restore_baseline_delays(dry_run=dry_run)
-    restore_dns_baseline(dry_run=dry_run)
-    clear_state(dry_run=dry_run)
-    log_ok("System restored to baseline.")
+    target_lock = lock_file or LAB_LOCK_FILE
+    with acquire_lab_lock(timeout=lock_timeout, lock_path=target_lock):
+        log_info("Clearing impairments and restoring clean baseline...")
+        clear_nftables_rules(dry_run=dry_run)
+        restore_baseline_delays(dry_run=dry_run)
+        restore_dns_baseline(dry_run=dry_run)
+        clear_state(dry_run=dry_run)
+        log_ok("System restored to baseline.")
 
 
 def self_test_baseline(dry_run: bool = False) -> bool:
@@ -881,6 +1014,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("list", parents=[sub_common], help="List all available scenarios and descriptions")
 
+    pref_p = subparsers.add_parser("preflight", parents=[sub_common], help="Run non-destructive dependency preflight check")
+    pref_p.add_argument("--json", action="store_true", default=False, help="Output structured preflight results in JSON format")
+
     test_p = subparsers.add_parser("test-scenarios", parents=[sub_common], help="Run repeatable self-test harness for S0-S6 (Work Package A5)")
     test_p.add_argument("--scenario", type=str, default=None, help="Single scenario to test (S0, S1, S2, S3, S4, S5, S6)")
     test_p.add_argument("--scenarios", type=str, default=None, help="Comma-separated list of scenarios to test")
@@ -915,6 +1051,14 @@ def main() -> int:
         elif args.command == "list":
             list_scenarios(scenarios_path=args.scenarios_file)
             return 0
+        elif args.command == "preflight":
+            import lab.preflight as preflight
+            rep = preflight.run_preflight()
+            if getattr(args, "json", False):
+                print(json.dumps(rep, indent=2))
+            else:
+                return preflight.main()
+            return 0 if rep["status"] == "PASS" else 1
         elif args.command in ("test-scenarios", "self-test-scenarios"):
             probes = getattr(args, "probes", 50)
             if not isinstance(probes, int) or isinstance(probes, bool) or probes <= 0:

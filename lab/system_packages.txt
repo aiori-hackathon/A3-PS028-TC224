@@ -1,3 +1,30 @@
-# PS-028 Controlled DNS Server System Package Manifest (Ubuntu 24.04 LTS)
-python3-dnspython=2.6.1-1ubuntu1
+# PS-028 Happy Eyeballs Measurement Lab: System Package Manifest (Ubuntu 24.04 LTS)
+# Comprehensive dependency specification audited across all lab scripts and tools.
+
+# --- Networking & Core Utilities ---
+iproute2=6.1.0-1ubuntu6.4
+iputils-ping=3:20240117-1ubuntu0.1
+procps=2:4.0.4-4ubuntu3.3
+curl=8.5.0-2ubuntu10.16
+bc=1.07.1-3ubuntu4
+gawk=1:5.2.1-2ubuntu0.1
+diffutils=1:3.10-1ubuntu0.1
+ethtool=1:6.7-1build1
+
+# --- DNS Services & Tools ---
 bind9-dnsutils=1:9.18.39-0ubuntu0.24.04.8
+python3-dnspython=2.6.1-1ubuntu1
+
+# --- Firewall & Impairment Control ---
+nftables=1.0.9-1ubuntu0.1
+
+# --- Web Server / Measurement Endpoint ---
+nginx=1.24.0-2ubuntu7.19
+
+# --- Python Runtime & Libraries ---
+python3=3.12.3-0ubuntu2.1
+python3-yaml=6.0.1-2build2
+
+# --- Network Traffic & Packet Capture Tools ---
+tcpdump=4.99.4-3ubuntu4.24.04.1
+tshark=4.2.2-1.1build3

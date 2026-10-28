@@ -12,8 +12,10 @@ import ipaddress
 import json
 import os
 from pathlib import Path
+import re
 import signal
 import sys
+import threading
 import time
 
 # Strict dependency check
@@ -99,6 +101,35 @@ def validate_config_dict(data):
     return data
 
 
+def is_supported_hostname(qname_str: str, zone: str) -> bool:
+    """
+    Validates whether the requested domain name is supported.
+    Allowed hostnames:
+      - The apex zone (e.g. 'he.test.')
+      - Valid trial hostnames: 'trial-<id>.<zone>' (e.g. 'trial-1.he.test.', 'trial-02.he.test.')
+        where <id> is a non-empty alphanumeric/hyphen/underscore identifier.
+    Returns True if valid, False otherwise (triggers NXDOMAIN).
+    """
+    qname = qname_str.lower().strip()
+    zone_norm = zone.lower().strip()
+    if not qname.endswith("."):
+        qname += "."
+    if not zone_norm.endswith("."):
+        zone_norm += "."
+
+    if qname == zone_norm:
+        return True
+
+    suffix = "." + zone_norm
+    if qname.endswith(suffix):
+        sublabel = qname[:-len(suffix)]
+        # Must be a single label (no additional dots) and match trial-<id>
+        if "." not in sublabel and re.fullmatch(r"trial-[a-zA-Z0-9_-]+", sublabel):
+            return True
+
+    return False
+
+
 class DNSProtocol(asyncio.DatagramProtocol):
     def __init__(self, server):
         self.server = server
@@ -166,6 +197,7 @@ class ControlledDNSServer:
     def build_response(self, request_msg):
         """
         Builds DNS response based on current active rules.
+        Preserves the requested hostname in answers and logs.
         Returns: (response_wire_bytes, qname_str, qtype_str, rcode_str, delay_s)
         """
         if not request_msg.question:
@@ -174,9 +206,11 @@ class ControlledDNSServer:
             return resp.to_wire(), "none", "none", "FORMERR", 0.0
 
         q = request_msg.question[0]
-        qname_str = q.name.to_text().lower()
-        if not qname_str.endswith("."):
-            qname_str += "."
+        # Preserve original requested hostname (with trailing dot)
+        req_qname = q.name.to_text()
+        if not req_qname.endswith("."):
+            req_qname += "."
+        qname_lower = req_qname.lower()
         qtype_str = dns.rdatatype.to_text(q.rdtype)
 
         resp = dns.message.make_response(request_msg)
@@ -190,14 +224,14 @@ class ControlledDNSServer:
 
         delay_s = 0.0
 
-        if qname_str == zone:
+        if is_supported_hostname(qname_lower, zone):
             if qtype_str in rules:
                 rule = rules[qtype_str]
                 delay_s = rule["delay_ms"] / 1000.0
                 rcode = dns.rcode.from_text(rule["rcode"])
                 resp.set_rcode(rcode)
                 if rcode == dns.rcode.NOERROR:
-                    rr = dns.rrset.from_text(qname_str, default_ttl, "IN", qtype_str, rule["address"])
+                    rr = dns.rrset.from_text(req_qname, default_ttl, "IN", qtype_str, rule["address"])
                     resp.answer.append(rr)
             else:
                 # Unsupported record type on existing zone -> NODATA
@@ -211,7 +245,7 @@ class ControlledDNSServer:
             resp.set_rcode(rcode)
 
         rcode_str = dns.rcode.to_text(resp.rcode())
-        return resp.to_wire(), qname_str, qtype_str, rcode_str, delay_s
+        return resp.to_wire(), req_qname, qtype_str, rcode_str, delay_s
 
     async def handle_udp_query(self, data, addr, transport):
         t0 = time.time()
@@ -319,12 +353,14 @@ class ControlledDNSServer:
 
         loop = asyncio.get_running_loop()
 
-        # Register SIGHUP handler
-        loop.add_signal_handler(signal.SIGHUP, self.handle_sighup)
-
-        # Register termination signal handlers
-        for sig in (signal.SIGTERM, signal.SIGINT):
-            loop.add_signal_handler(sig, lambda: asyncio.create_task(self.stop()))
+        # Register signal handlers if in main thread
+        if threading.current_thread() is threading.main_thread():
+            try:
+                loop.add_signal_handler(signal.SIGHUP, self.handle_sighup)
+                for sig in (signal.SIGTERM, signal.SIGINT):
+                    loop.add_signal_handler(sig, lambda: asyncio.create_task(self.stop()))
+            except (ValueError, RuntimeError):
+                pass
 
         # Start UDP listener
         try:
@@ -376,9 +412,6 @@ class ControlledDNSServer:
         if self.log_fp and not self.log_fp.closed:
             self.log_fp.close()
 
-        loop = asyncio.get_running_loop()
-        loop.stop()
-
 
 def main():
     parser = argparse.ArgumentParser(description="PS-028 Controlled DNS Server")
@@ -400,8 +433,12 @@ def main():
 
     try:
         asyncio.run(server.start())
-    except (KeyboardInterrupt, SystemExit):
+    except (KeyboardInterrupt, SystemExit, asyncio.CancelledError):
         pass
+    except RuntimeError as e:
+        if "Event loop stopped" not in str(e):
+            sys.stderr.write(f"FATAL: DNS server terminated unexpectedly: {e}\n")
+            sys.exit(1)
     except Exception as e:
         sys.stderr.write(f"FATAL: DNS server terminated unexpectedly: {e}\n")
         sys.exit(1)
