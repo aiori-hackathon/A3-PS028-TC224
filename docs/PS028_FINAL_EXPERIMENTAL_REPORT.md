@@ -17,9 +17,9 @@ The measurement matrix comprised **280 planned cells** covering 7 scenarios (S0�
 - **280 attempts** achieved `VALID_LIVE` status with verified PCAP captures, valid cryptographic checksums, positive packet counts, zero packet drops, and HTTP 200 responses.
 - **2 historical attempts** recorded `CLEANUP_FAILURE` during initial preflight checks; both were safely retried under new, unique trial identifiers during campaign resume, and their historical records are preserved in full.
 
-Overall connection classification under the canonical PS-028 packet-based rule yielded **154 `DIRECT_IPV6`** connections (55.00%) and **126 `IPV6_TO_IPV4_FALLBACK`** connections (45.00%). Both browsers exhibited 100% IPv6 preference under healthy baseline conditions (S0) and successfully fell back to IPv4 under IPv6 SYN blackholing (S1) and IPv6 TCP RST rejection (S2). However, under delayed DNS AAAA resolution (S6), both Chrome and Firefox waited ~500ms for delayed AAAA responses rather than triggering an IPv4 fallback after the RFC 8305 recommended 50ms Resolution Delay, subsequently connecting directly over IPv6. In Scenario S5 (50% SYN loss), 33 trials connected over IPv6 (including 5 trials with post-navigation ancillary or speculative IPv4 traffic) and 7 trials fell back to IPv4.
+Overall connection classification under the canonical PS-028 packet-based rule yielded **154 `DIRECT_IPV6`** connections (55.00%) and **126 `IPV6_TO_IPV4_FALLBACK`** connections (45.00%). Both browsers exhibited 100% IPv6 preference under healthy baseline conditions (S0) and successfully fell back to IPv4 under IPv6 SYN blackholing (S1) and IPv6 TCP RST rejection (S2). However, under delayed DNS AAAA resolution (S6), both Chrome and Firefox waited ~500ms for delayed AAAA responses rather than triggering an IPv4 fallback after the RFC 8305 recommended 50ms Resolution Delay (Section 3), subsequently connecting directly over IPv6. In Scenario S5 (50% SYN loss), 33 trials connected over IPv6 (including 5 trials with post-navigation ancillary or speculative IPv4 traffic) and 7 trials fell back to IPv4.
 
-All 280 valid trial PCAPs and result records were independently audited and verified against the finalized manifest. The testbed baseline state was validated clean, and the entire lab test suite of **396 tests** passes without errors.
+All 280 valid trial PCAPs and result records were independently audited and verified against the finalized manifest. The testbed baseline state was validated clean, and the entire lab test suite of **400 tests** passes without errors.
 
 ---
 
@@ -75,7 +75,7 @@ RFC 8305 defines the operational state machine for initiating dual-stack transpo
 Key timing parameters specified in RFC 8305 include:
 - **Connection Attempt Delay (CAD) Timer (Section 5):** The delay between initiating a connection attempt to the preferred address family (IPv6) and initiating a fallback attempt to the secondary family (IPv4). RFC 8305 mandates that CAD **MUST NOT** be smaller than 10ms, **SHOULD NOT** be smaller than 100ms, defines a recommended default of **250ms**, and specifies a maximum of **2000ms**.
 - **Immediate Fallback on Connection Failure (Section 5):** If the primary connection attempt fails immediately due to an active network rejection (such as an ICMP Port Unreachable or TCP RST), the client **SHOULD** immediately initiate a connection attempt to the next address family without awaiting the CAD timer expiration.
-- **Resolution Delay (Section 4):** When asynchronous DNS responses arrive with the IPv4 (A) response arriving before the IPv6 (AAAA) response, the client **SHOULD** wait for a recommended delay of **50ms** before initiating an IPv4 connection, giving the preferred AAAA response an opportunity to arrive.
+- **Resolution Delay (Section 3):** When asynchronous DNS responses arrive with the IPv4 (A) response arriving before the IPv6 (AAAA) response, the client **SHOULD** wait for a recommended delay of **50ms** before initiating an IPv4 connection, giving the preferred AAAA response an opportunity to arrive.
 
 ---
 
@@ -154,20 +154,66 @@ To ensure experimental independence and prevent cross-trial state contamination:
 2. **Ephemeral Profiles:** Every trial allocates a freshly generated, isolated temporary profile directory (`--user-data-dir` for Chrome; `--profile` for Firefox). Profile paths are completely unlinked and removed immediately following trial execution.
 3. **Cache Elimination:** Hardened command-line flags disable background networking, component updates, domain reliability, crash reporting, session restore, predictive prefetching, and disk caching.
 
-### Measurement Instrumentation
-Each trial collects evidence across three independent observation planes:
-1. **Packet Capture (`capture.pcap`):** `tcpdump` runs directly inside `ps028-cl` on interface `ps028-cl-rt`, capturing all inbound and outbound Ethernet frames without packet truncations (`-s 0`).
-2. **Chromium NetLog (`netlog.json`):** Chrome writes socket pool, connect job, and HTTP transaction events via `--log-net-log`.
-3. **Firefox Internal Telemetry (`browser_telemetry.log`):** Firefox internal socket transport and HTTP transactions are captured using environment flags:
-   ```bash
-   MOZ_LOG="sync,timestamp,nsHttp:5,nsSocketTransport:5"
-   ```
+### Laboratory Operating System, Kernel & Measurement Environment
+
+The live campaign was executed in a dedicated, reproducible Linux environment on host `JARVIS`. The exact hardware, operating system, kernel, browser runtimes, and networking packages are documented below:
+
+| Component | Specification / Version | Role in Measurement Pipeline |
+| :--- | :--- | :--- |
+| **Operating System** | `Ubuntu 24.04.5 LTS (Noble Numbat)` | Measurement host environment |
+| **Linux Kernel** | `6.18.54.1-microsoft-standard-WSL2` (#1 SMP PREEMPT_DYNAMIC x86_64) | Network namespace, veth, netem, and nftables execution engine |
+| **Host Architecture** | `x86_64` (Intel/AMD 64-bit) | Standard binary architecture |
+| **Python Runtime** | `Python 3.12.3` | Testbed harness, DNS server, analysis engine, and campaign orchestrator |
+| **Google Chrome** | `156.0.8078.73` (`/usr/bin/google-chrome`) | Dual-stack Chromium browser runtime |
+| **Mozilla Firefox** | `159.0` (`/home/indrani/opt/firefox-measurement/firefox`) | Dual-stack Gecko browser runtime (standalone binary) |
+| **Nginx HTTP Server** | `nginx/1.24.0 (Ubuntu)` | Dual-stack HTTP measurement endpoint in `ps028-sv` |
+| **Packet Capture Engine** | `tcpdump 4.99.4`, `libpcap 1.10.4` (TPACKET_V3) | Live packet capture on `ps028-cl-rt` in `ps028-cl` |
+| **Traffic Dissector** | `Wireshark / TShark 4.2.2` (Git v4.2.2 packaged as 4.2.2-1.1build3) | Offline PCAP extraction, DNS latency parsing, HTTP flow correlation |
+| **Firewall / Filtering** | `nftables v1.0.9 (Old Doc Yak #3)` | Scenario impairment engine (SYN drop, TCP RST) in `ps028-rt` |
+| **Traffic Control** | `iproute2` (`tc netem`) `iproute2-ss240116` | S0–S5 link delay and RTT shaping on veth endpoints |
+
+### Exact Browser Execution Flags and Telemetry Environment
+
+#### Google Chrome Execution Flags
+Executed in headless mode with rigorous state isolation and performance telemetry:
+```bash
+/usr/bin/google-chrome \
+  --headless=new \
+  --dump-dom \
+  --no-first-run \
+  --no-default-browser-check \
+  --disable-background-networking \
+  --disable-component-update \
+  --disable-domain-reliability \
+  --disable-client-side-phishing-detection \
+  --disable-sync \
+  --disable-breakpad \
+  --metrics-recording-only \
+  --disable-features=OptimizationHints,MediaRouter \
+  --disk-cache-size=1 \
+  --media-cache-size=1 \
+  --user-data-dir={ephemeral_profile_dir} \
+  --log-net-log={trial_dir}/netlog.json \
+  http://{hostname}/
+```
+
+#### Mozilla Firefox Execution Flags & Environment
+Executed in headless mode with internal socket and HTTP telemetry:
+```bash
+MOZ_LOG="sync,timestamp,nsHttp:5,nsSocketTransport:5" \
+MOZ_LOG_FILE="{trial_dir}/browser_telemetry.log" \
+/home/indrani/opt/firefox-measurement/firefox \
+  --headless \
+  -no-remote \
+  -profile {ephemeral_profile_dir} \
+  http://{hostname}/
+```
 
 ---
 
 ## 7. Detailed Scenario Definitions S0–S6 and Intended Impairments
 
-The canonical scenario configuration is maintained in [`lab/scenarios.yaml`](file:///home/indrani/projects/he-webtester/lab/scenarios.yaml).
+The canonical scenario configuration is maintained in [`lab/scenarios.yaml`](../lab/scenarios.yaml).
 
 | ID | Canonical Name | Target Family | Mechanism | Configured Impairment |
 | :--- | :--- | :--- | :--- | :--- |
@@ -183,11 +229,11 @@ The canonical scenario configuration is maintained in [`lab/scenarios.yaml`](fil
 
 ## 8. Experimental Methodology
 
-The campaign runner ([`lab/run_campaign.py`](file:///home/indrani/projects/he-webtester/lab/run_campaign.py)) coordinates strictly sequential trial scheduling:
+The campaign runner ([`lab/run_campaign.py`](../lab/run_campaign.py)) coordinates strictly sequential trial scheduling:
 
 1. **Sequential Matrix Traversal:** The matrix loops across 20 repetitions, iterating through scenarios (S0–S6) and alternating between Google Chrome and Mozilla Firefox. Concurrent trials are strictly prevented by a system-wide lock file (`/tmp/.ps028_lab.lock`).
 2. **Unique Trial Identifiers:** Each attempt generates a unique trial ID (`trial-<timestamp>-<hash>`) mapping to a dedicated directory under `trials/<trial_id>/`. Evidence is never overwritten.
-3. **Fail-Stop Verification:** Prior to applying any scenario impairment, the preflight baseline check verifies that the testbed is healthy. Immediately after trial execution, impairments are restored to baseline and [`impair.self_test_baseline()`](file:///home/indrani/projects/he-webtester/lab/impair.py) executes. If any cleanup step fails or baseline verification deviates, the campaign immediately halts (`FAIL-STOP`) to prevent contaminated measurements.
+3. **Fail-Stop Verification:** Prior to applying any scenario impairment, the preflight baseline check verifies that the testbed is healthy. Immediately after trial execution, impairments are restored to baseline and [`impair.self_test_baseline()`](../lab/impair.py) executes. If any cleanup step fails or baseline verification deviates, the campaign immediately halts (`FAIL-STOP`) to prevent contaminated measurements.
 4. **Atomic Manifest Persistence:** Progress is written to `campaign_manifest.json` atomically via temporary file rename under directory lock (`.campaign.lock`).
 
 ---
@@ -217,7 +263,14 @@ Planned Matrix Slots: 280
 
 ## 10. Results by Scenario and Browser
 
-Statistical metrics were computed across all 280 valid live trials using the PS-028 statistical analysis engine ([`lab/analyze.py`](file:///home/indrani/projects/he-webtester/lab/analyze.py)). All confidence intervals (CI) represent 95% intervals computed via deterministic bootstrap resampling ($N = 10{,}000$, seed = 42) for continuous metrics and Wilson score intervals for binomial proportions.
+Statistical metrics were computed across all 280 valid live trials using the PS-028 statistical analysis engine ([`lab/analyze.py`](../lab/analyze.py)). All confidence intervals (CI) represent 95% intervals computed according to standard statistical methodologies:
+
+- **Median Confidence Intervals (Percentile Bootstrap):** Computed via deterministic percentile bootstrap resampling with $B = 1{,}000$ resamples and pseudo-random seed = 42 for all continuous metrics (Connection Setup Time, CAD, DNS Latency, and Browser Duration).
+- **Mean Confidence Intervals (Student-t Distribution):** Computed parametrically as $\bar{x} \pm t_{0.975, n-1} \cdot \frac{s}{\sqrt{n}}$ using the exact critical value $t_{0.975, 19} = 2.0930$ from the Student-t distribution for cohort size $n = 20$.
+- **Binomial Proportion Intervals (Wilson Score):** Computed via the Wilson score interval with continuity correction for HTTP 200 success rates and address family win proportions.
+
+> [!NOTE]
+> **Reconciliation of Bootstrap Resample Discrepancy:** Early exploratory documentation and narrative notes mentioned $N = 10{,}000$ resamples. The canonical implementation in `lab/analyze.py` executes $B = 1{,}000$ bootstrap resamples with seed 42. For small live cohorts ($N = 20$), $B = 1{,}000$ provides complete numerical stability for the 2.5th and 97.5th percentiles while maintaining rapid, deterministic offline evaluation. This report and the codebase have been reconciled to document $B = 1{,}000$ consistently.
 
 ### Comprehensive Summary Table
 
@@ -283,13 +336,13 @@ In scenarios S0–S5, DNS responses for both `A` and `AAAA` records were deliver
 - Chrome observed median A latency of **2.60ms** and AAAA latency of **2.04ms**.
 
 ### S6 DNS Asynchrony Analysis
-Scenario S6 evaluated RFC 8305 Section 4 ("Resolution Delay"). The DNS server delivered `A` responses immediately (0ms delay) while delaying `AAAA` responses by 500ms.
+Scenario S6 evaluated RFC 8305 Section 3 ("Resolution Delay"). The DNS server delivered `A` responses immediately (0ms delay) while delaying `AAAA` responses by 500ms.
 
 ```
 DNS Query / Connection Timeline in Scenario S6 (Chrome & Firefox):
 t = 0.000s: Browser sends concurrent A and AAAA queries
 t = 0.002s: Immediate A response arrives (10.0.2.10)
-            [RFC 8305 §4 Recommended 50ms Resolution Delay Window Expires at t = 0.052s]
+            [RFC 8305 §3 Recommended 50ms Resolution Delay Window Expires at t = 0.052s]
             (Browser does NOT initiate IPv4 connection)
 t = 0.505s: Delayed AAAA response arrives (2001:db8:2::10)
 t = 0.507s: Browser sends IPv6 TCP SYN
@@ -297,7 +350,7 @@ t = 0.528s: IPv6 SYN-ACK arrives -> 3WHS complete -> DIRECT_IPV6 connection esta
 ```
 
 - **Observed Metrics:** PCAP packet timestamps confirmed that A queries were answered in $0.83\text{ms}$ (Firefox) and $4.83\text{ms}$ (Chrome), while AAAA queries were answered in $502.56\text{ms}$ (Firefox) and $505.20\text{ms}$ (Chrome).
-- **Behavioral Finding:** Neither Chrome nor Firefox adhered to the RFC 8305 recommended 50ms Resolution Delay. Rather than initiating an IPv4 connection attempt when the 50ms window elapsed, both browsers waited the full ~500ms for the AAAA response to arrive, subsequently initiating an IPv6 connection.
+- **Behavioral Finding:** Neither Chrome nor Firefox adhered to the RFC 8305 recommended 50ms Resolution Delay (Section 3). Rather than initiating an IPv4 connection attempt when the 50ms window elapsed, both browsers waited the full ~500ms for the AAAA response to arrive, subsequently initiating an IPv6 connection.
 
 ---
 
@@ -328,7 +381,7 @@ The measurement harness enforces complete laboratory isolation:
    - `ps028_impair` nftables tables in `ps028-rt` were deleted.
    - tc netem qdiscs on all four server-facing links were restored to the baseline 10ms delay.
    - `dns_config.json` was restored to 0ms delays.
-2. **Post-Trial Self-Test:** [`impair.self_test_baseline()`](file:///home/indrani/projects/he-webtester/lab/impair.py) executed after every attempt, verifying that no active scenarios remained in `.impair_state.json`, DNS configuration was clean, no backup files existed, and the DNS daemon was healthy.
+2. **Post-Trial Self-Test:** [`impair.self_test_baseline()`](../lab/impair.py) executed after every attempt, verifying that no active scenarios remained in `.impair_state.json`, DNS configuration was clean, no backup files existed, and the DNS daemon was healthy.
 3. **Process and Concurrency Safety:** Ephemeral browser profiles and stale background processes were terminated using target-PID signaling. Campaign execution remained protected by manifest-level (`.campaign.lock`) and lab-level (`/tmp/.ps028_lab.lock`) concurrency locks.
 
 ---
@@ -383,7 +436,7 @@ t = 0.579s: Server returns "HTTP/1.1 404 Not Found" over IPv4 (Frame 168)
 
 - **Chrome Analysis:** The main document navigation (`GET /`) was initiated and completed entirely over IPv6. After the main page rendered, Chrome issued an ancillary request for `/favicon.ico`. For this ancillary request, Chrome's internal socket pool initiated a connection over IPv4. The 3-way handshake succeeded, which previously triggered the packet-based fallback heuristic because both families had connected.
 - **Firefox Analysis:** The main document navigation completed entirely over IPv6. Approximately 210ms after receiving the HTTP 200 response on IPv6, Firefox initiated a speculative background preconnect socket over IPv4. The IPv4 TCP handshake succeeded, but **zero HTTP requests** were transmitted over it.
-- **Root Cause & Technical Correction:** In [`lab/run_trial.py`](file:///home/indrani/projects/he-webtester/lab/run_trial.py#L1856), `classify_fallback` previously checked if both IPv6 and IPv4 connections were established without verifying whether IPv6 won the primary navigation (`winning_family == "IPv6"`). The classifier was updated to ensure that when IPv6 establishes and wins the HTTP navigation, the trial is classified as `DIRECT_IPV6` with `fallback_occurred: False`.
+- **Root Cause & Technical Correction:** Rather than relying on an unrelated first HTTP response or unverified connection flags, the packet dissection engine ([`lab/run_trial.py`](../lab/run_trial.py)) extracts TCP stream identifiers (`tcp.stream`) alongside HTTP request method (`http.request.method`) and URI (`http.request.uri`). The classifier correlates the main `GET /` document navigation request with its corresponding TCP stream and address family. When the main navigation flow completes over IPv6 with HTTP 200, ancillary requests (such as post-navigation `/favicon.ico` over IPv4) or speculative preconnect sockets are explicitly recognized and do not displace the primary IPv6 classification.
 - **Audit & Evidence Preservation:** The original PCAP captures, SHA-256 hashes, CAD measurements (300.96ms to 407.22ms), and browser logs were preserved without modification. The derived classification fields in `result.json` and `campaign_manifest.json` were corrected to `DIRECT_IPV6`, restoring complete analytical consistency between browser telemetry and network observation across all 280 trials.
 
 ---
@@ -395,7 +448,7 @@ In the campaign results, `response_body_bytes` is invariant by browser:
 - **Mozilla Firefox:** Exactly **72 bytes** in 140/140 trials.
 
 ### Metric Limitation Analysis
-In [`lab/run_trial.py`](file:///home/indrani/projects/he-webtester/lab/run_trial.py#L2837), `response_body_bytes` is computed as:
+In [`lab/run_trial.py`](../lab/run_trial.py), `response_body_bytes` is computed as:
 ```python
 "response_body_bytes": len(browser_result.get("stdout", ""))
 ```
@@ -422,13 +475,13 @@ The two failed attempts are classified as exclusions in statistical analysis:
 - Both attempts failed during initial environment setup and preflight verification before `tcpdump` or browser processes were launched.
 - Neither attempt generated valid packet capture data or HTTP responses.
 - Both attempts violated the fail-stop baseline verification invariant.
-- Per PS-028 analysis rules ([`lab/analyze.py`](file:///home/indrani/projects/he-webtester/lab/analyze.py)), failed attempts cannot be treated as valid measurement samples. They are preserved in `campaign_manifest.json` as an immutable audit trail.
+- Per PS-028 analysis rules ([`lab/analyze.py`](../lab/analyze.py)), failed attempts cannot be treated as valid measurement samples. They are preserved in `campaign_manifest.json` as an immutable audit trail.
 
 ---
 
 ## 20. Scenario Mismatch Notices from the Campaign Manifest
 
-The campaign manifest permanently records two documented mismatches between early narrative documentation and the canonical implementation in [`lab/scenarios.yaml`](file:///home/indrani/projects/he-webtester/lab/scenarios.yaml):
+The campaign manifest permanently records two documented mismatches between early narrative documentation and the canonical implementation in [`lab/scenarios.yaml`](../lab/scenarios.yaml):
 
 ### Exact Manifest Notices
 
@@ -471,13 +524,13 @@ The campaign manifest permanently records two documented mismatches between earl
 
 ## 22. Reproducibility Instructions
 
-### Environment Prerequisites
+### Linux Laboratory Execution Prerequisites
 - Linux kernel 5.15+ with network namespaces, veth pairs, `nftables`, and `iproute2` (tc netem).
 - Python 3.10+ standard library.
 - Google Chrome and Mozilla Firefox installed.
 - Wireshark / `tshark` and `tcpdump`.
 
-### Verification Steps
+### Linux Verification Steps
 
 1. **Verify Baseline State:**
    ```bash
@@ -485,7 +538,7 @@ The campaign manifest permanently records two documented mismatches between earl
    sudo python3 lab/impair.py self-test-baseline
    ```
 
-2. **Execute Full Test Suite:**
+2. **Execute Full Test Suite (400 tests):**
    ```bash
    python3 -m unittest discover -s lab
    ```
@@ -502,6 +555,28 @@ The campaign manifest permanently records two documented mismatches between earl
      --output-csv lab/campaigns/ps028-a10-live-20261030-01/analysis_summary.csv
    ```
 
+### Windows Offline Analysis Workflow
+
+The statistical analysis engine ([`lab/analyze.py`](../lab/analyze.py)) has zero external pip dependencies and executes cleanly on Windows using standard Python 3.8+ (Command Prompt, PowerShell, or Git Bash):
+
+1. **Extract Evidence Bundle:**
+   Download and unzip [`ps028_portable_data_bundle.zip`](../lab/campaigns/ps028-a10-live-20261030-01/ps028_portable_data_bundle.zip) (or the complete evidence archive `ps028_complete_evidence_bundle.tar.gz`).
+2. **Execute Statistical Analysis:**
+   ```powershell
+   # In PowerShell / Command Prompt:
+   python lab\analyze.py --campaign-dir lab\campaigns\ps028-a10-live-20261030-01
+   ```
+3. **Export Formatted JSON and CSV Outputs:**
+   ```powershell
+   python lab\analyze.py --campaign-dir lab\campaigns\ps028-a10-live-20261030-01 `
+     --output-json lab\campaigns\ps028-a10-live-20261030-01\analysis_summary.json `
+     --output-csv lab\campaigns\ps028-a10-live-20261030-01\analysis_summary.csv
+   ```
+4. **Custom Bootstrap Resampling (Optional):**
+   ```powershell
+   python lab\analyze.py --campaign-dir lab\campaigns\ps028-a10-live-20261030-01 --resamples 1000 --seed 42
+   ```
+
 ---
 
 ## 23. Conclusion
@@ -511,5 +586,5 @@ The PS-028 live measurement campaign (`ps028-a10-live-20261030-01`) successfully
 1. **IPv6 Preference:** Both browsers exhibit 100% IPv6 preference under normal dual-stack conditions, incurring zero dual-stack connection penalty when IPv6 paths are healthy.
 2. **CAD Timer Implementation:** Google Chrome implements an exceptionally consistent CAD timer centered at **~300ms**, whereas Mozilla Firefox implements a slightly more relaxed CAD timer averaging **~408–441ms**.
 3. **Active Rejection (TCP RST):** Chrome demonstrates immediate fallback (< 1ms CAD) upon receiving a TCP RST, fully satisfying RFC 8305 recommendations. Firefox introduces an observable delay (~160ms) before initiating fallback.
-4. **Delayed DNS Resolution:** Neither browser initiated an IPv4 fallback after the recommended 50ms Resolution Delay when AAAA records were delayed by 500ms; both waited for the late AAAA response and connected directly over IPv6.
+4. **Delayed DNS Resolution:** Neither browser initiated an IPv4 fallback after the RFC 8305 Section 3 recommended 50ms Resolution Delay when AAAA records were delayed by 500ms; both waited for the late AAAA response and connected directly over IPv6.
 5. **Measurement Integrity:** The testbed architecture demonstrated robust isolation, zero packet capture loss, atomic manifest tracking, and complete preservation of historical evidence.

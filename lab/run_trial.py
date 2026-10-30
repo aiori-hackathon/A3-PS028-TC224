@@ -1641,6 +1641,13 @@ def dissect_pcap(pcap_path: Path, target_hostname: str) -> Dict[str, Any]:
         "connection_setup_time_ms": None,
         "http_status_code": None,
         "http_response_family": None,
+        "main_http_flow": {
+            "stream_id": None,
+            "family": None,
+            "status_code": None,
+            "request": None,
+            "correlated": False,
+        },
     }
 
     tshark = shutil.which("tshark")
@@ -1652,6 +1659,7 @@ def dissect_pcap(pcap_path: Path, target_hostname: str) -> Dict[str, Any]:
                 m = re.search(rb"HTTP/1\.[01]\s+(\d{3})", raw_data)
                 if m:
                     result["http_status_code"] = int(m.group(1))
+                    result["main_http_flow"]["status_code"] = result["http_status_code"]
             except Exception:
                 pass
         return result
@@ -1664,7 +1672,10 @@ def dissect_pcap(pcap_path: Path, target_hostname: str) -> Dict[str, Any]:
         "tcp.flags",
         "tcp.srcport", "tcp.dstport",
         "dns.qry.name", "dns.qry.type", "dns.flags.response", "dns.a", "dns.aaaa",
-        "http.response.code"
+        "http.response.code",
+        "tcp.stream",
+        "http.request.method",
+        "http.request.uri"
     ]
     cmd = [tshark, "-r", str(pcap_path), "-T", "fields"]
     for f in fields:
@@ -1677,6 +1688,9 @@ def dissect_pcap(pcap_path: Path, target_hostname: str) -> Dict[str, Any]:
         return result
 
     hostname_clean = target_hostname.lower().rstrip(".")
+    streams: Dict[str, Dict[str, Any]] = {}
+    fallback_http_code: Optional[int] = None
+    fallback_http_family: Optional[str] = None
 
     for line in lines:
         parts = line.split("\t")
@@ -1685,12 +1699,57 @@ def dissect_pcap(pcap_path: Path, target_hostname: str) -> Dict[str, Any]:
 
         (t_epoch_str, ip_src, ip_dst, ip6_src, ip6_dst, tcp_flags_str,
          tcp_sport_str, tcp_dport_str, dns_qname, dns_qtype, dns_resp_flag,
-         dns_a, dns_aaaa, http_code) = parts[:14]
+         dns_a, dns_aaaa, http_code, tcp_stream, http_method, http_uri) = parts[:17]
 
         try:
             t_epoch = float(t_epoch_str) if t_epoch_str else None
         except ValueError:
             t_epoch = None
+
+        # Determine packet address family with respect to server endpoints
+        pkt_family = None
+        if ip6_dst == SERVER_IPV6 or ip6_src == SERVER_IPV6:
+            pkt_family = "IPv6"
+        elif ip_dst == SERVER_IPV4 or ip_src == SERVER_IPV4:
+            pkt_family = "IPv4"
+
+        # Stream-level tracking for HTTP flow correlation
+        if tcp_stream:
+            if tcp_stream not in streams:
+                streams[tcp_stream] = {
+                    "family": pkt_family,
+                    "main_get": False,
+                    "response_code": None,
+                    "first_request": None,
+                    "first_time": t_epoch,
+                }
+            if pkt_family and not streams[tcp_stream]["family"]:
+                streams[tcp_stream]["family"] = pkt_family
+
+            if http_method:
+                m_str = http_method.strip().upper()
+                u_str = (http_uri or "").strip()
+                if not streams[tcp_stream]["first_request"]:
+                    streams[tcp_stream]["first_request"] = (m_str, u_str)
+                # Correlate main GET navigation request vs ancillary requests (/favicon.ico, etc.)
+                if m_str == "GET" and (u_str in ("/", "/index.html") or (u_str.startswith("/") and not u_str.startswith("/favicon"))):
+                    streams[tcp_stream]["main_get"] = True
+
+            if http_code:
+                try:
+                    code_val = int(http_code.split(",")[0].strip())
+                    if streams[tcp_stream]["response_code"] is None:
+                        streams[tcp_stream]["response_code"] = code_val
+                except ValueError:
+                    pass
+
+        # Record first HTTP response as fallback
+        if http_code and fallback_http_code is None and pkt_family:
+            try:
+                fallback_http_code = int(http_code.split(",")[0].strip())
+                fallback_http_family = pkt_family
+            except ValueError:
+                pass
 
         # 1. DNS parsing
         if dns_qname:
@@ -1741,13 +1800,6 @@ def dissect_pcap(pcap_path: Path, target_hostname: str) -> Dict[str, Any]:
 
                 if http_code:
                     result["ipv6"]["http_observed"] = True
-                    try:
-                        code_val = int(http_code.split(",")[0].strip())
-                        if result["http_status_code"] is None:
-                            result["http_status_code"] = code_val
-                            result["http_response_family"] = "IPv6"
-                    except ValueError:
-                        pass
 
             # IPv4 traffic
             if ip_dst == SERVER_IPV4 or ip_src == SERVER_IPV4:
@@ -1764,13 +1816,39 @@ def dissect_pcap(pcap_path: Path, target_hostname: str) -> Dict[str, Any]:
 
                 if http_code:
                     result["ipv4"]["http_observed"] = True
-                    try:
-                        code_val = int(http_code.split(",")[0].strip())
-                        if result["http_status_code"] is None:
-                            result["http_status_code"] = code_val
-                            result["http_response_family"] = "IPv4"
-                    except ValueError:
-                        pass
+
+    # Correlate main GET / request and its TCP flow to determine winning HTTP response and family
+    main_stream_id = None
+    for sid, sinfo in streams.items():
+        if sinfo["main_get"] and sinfo["response_code"] is not None:
+            main_stream_id = sid
+            break
+    if main_stream_id is None:
+        for sid, sinfo in streams.items():
+            if sinfo["main_get"]:
+                main_stream_id = sid
+                break
+
+    if main_stream_id is not None:
+        result["http_status_code"] = streams[main_stream_id]["response_code"]
+        result["http_response_family"] = streams[main_stream_id]["family"]
+        result["main_http_flow"] = {
+            "stream_id": main_stream_id,
+            "family": streams[main_stream_id]["family"],
+            "status_code": streams[main_stream_id]["response_code"],
+            "request": streams[main_stream_id]["first_request"],
+            "correlated": True,
+        }
+    elif fallback_http_code is not None or fallback_http_family is not None:
+        result["http_status_code"] = fallback_http_code
+        result["http_response_family"] = fallback_http_family
+        result["main_http_flow"] = {
+            "stream_id": None,
+            "family": fallback_http_family,
+            "status_code": fallback_http_code,
+            "request": None,
+            "correlated": False,
+        }
 
     # Binary fallback inspection for HTTP response status code in raw PCAP data
     if result["http_status_code"] is None and pcap_path.is_file():
@@ -1779,6 +1857,8 @@ def dissect_pcap(pcap_path: Path, target_hostname: str) -> Dict[str, Any]:
             match = re.search(rb"HTTP/1\.[01]\s+(\d{3})", raw_data)
             if match:
                 result["http_status_code"] = int(match.group(1))
+                if result["main_http_flow"]["status_code"] is None:
+                    result["main_http_flow"]["status_code"] = result["http_status_code"]
         except Exception:
             pass
 
@@ -1853,15 +1933,19 @@ def classify_fallback(
     classification = "INCONCLUSIVE"
     reason = "Insufficient evidence to classify connection behavior"
 
+    main_flow = dissection.get("main_http_flow") or {}
+    main_flow_fam = main_flow.get("family")
+
     if ipv6_attempt and ipv4_attempt and ipv4_conn_ok:
         cad = dissection.get("connection_attempt_delay_ms")
         cad_desc = f" (Connection Attempt Delay: {cad}ms)" if cad is not None else ""
         loss_note = f" (Note: {capture_loss_message})" if capture_loss and capture_loss_message else ""
-        if winning_family == "IPv6" and ipv6_conn_ok:
+        if (winning_family == "IPv6" or main_flow_fam == "IPv6") and ipv6_conn_ok:
             fallback_occurred = False
             classification = "DIRECT_IPV6"
             reason = (
                 f"Direct IPv6 connection established and won HTTP navigation{cad_desc}. "
+                f"Main GET / request correlated to IPv6 TCP flow. "
                 f"Post-navigation ancillary request or speculative IPv4 connection attempt "
                 f"was observed but did not displace IPv6.{loss_note}"
             )
@@ -1872,6 +1956,15 @@ def classify_fallback(
                 f"Observed initial IPv6 connection attempt, followed by IPv4 attempt "
                 f"and successful IPv4 connection{cad_desc}.{loss_note}"
             )
+    elif ipv6_conn_ok and ipv4_attempt and not ipv4_conn_ok:
+        cad = dissection.get("connection_attempt_delay_ms")
+        cad_desc = f" (Connection Attempt Delay: {cad}ms)" if cad is not None else ""
+        fallback_occurred = False
+        classification = "DIRECT_IPV6"
+        reason = (
+            f"Direct IPv6 connection established and won HTTP navigation{cad_desc}. "
+            f"Secondary IPv4 connection attempt did not establish."
+        )
     elif ipv6_conn_ok and not ipv4_attempt:
         if capture_loss:
             # Per PS-028: Incomplete capture due to dropped packets cannot conclusively confirm no IPv4 attempt
@@ -2973,6 +3066,8 @@ def run_trial(
                 http_outcome["winning_ip"] = (
                     SERVER_IPV6 if dissection["http_response_family"] == "IPv6" else SERVER_IPV4
                 )
+            if dissection.get("main_http_flow"):
+                http_outcome["main_http_flow"] = dissection["main_http_flow"]
         elif http_outcome.get("status_code") is not None:
             # Corroborated by reliable browser-side HTTP status collection
             b_code = http_outcome["status_code"]
