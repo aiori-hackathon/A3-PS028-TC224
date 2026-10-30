@@ -105,8 +105,10 @@ def verify_process_identity(pid: int, expected_service: str) -> Tuple[bool, Opti
     """
     try:
         os.kill(pid, 0)
-    except (ProcessLookupError, OSError):
+    except ProcessLookupError:
         return False, "stale_pid"
+    except OSError:
+        pass
 
     try:
         cmdline_path = Path(f"/proc/{pid}/cmdline")
@@ -506,18 +508,21 @@ def teardown_lab(
                     can_delete_namespaces = False
 
         # Stage 2: Stop Lab-Managed Services
-        impair.log_info("Teardown Stage 2: Stopping verified lab-managed services...")
-        dns_ok, dns_err = stop_process_by_pid_file(
-            DNS_PID_FILE, "Controlled DNS Server", dry_run=dry_run, verifier=process_verifier
-        )
-        if not dns_ok:
-            failures.append(f"stop_dns:{dns_err}")
+        if topo_status != "ABSENT":
+            impair.log_info("Teardown Stage 2: Stopping verified lab-managed services...")
+            dns_pid_path = SCRIPT_DIR / "dns.pid"
+            nginx_pid_path = SCRIPT_DIR / "nginx.pid"
+            dns_ok, dns_err = stop_process_by_pid_file(
+                dns_pid_path, "Controlled DNS Server", dry_run=dry_run, verifier=process_verifier
+            )
+            if not dns_ok:
+                failures.append(f"stop_dns:{dns_err}")
 
-        nginx_ok, nginx_err = stop_process_by_pid_file(
-            NGINX_PID_FILE, "Nginx Measurement Endpoint", dry_run=dry_run, verifier=process_verifier
-        )
-        if not nginx_ok:
-            failures.append(f"stop_nginx:{nginx_err}")
+            nginx_ok, nginx_err = stop_process_by_pid_file(
+                nginx_pid_path, "Nginx Measurement Endpoint", dry_run=dry_run, verifier=process_verifier
+            )
+            if not nginx_ok:
+                failures.append(f"stop_nginx:{nginx_err}")
 
         # Stage 3: Clean Owned Resolver Configuration
         impair.log_info("Teardown Stage 3: Cleaning owned client resolver configuration...")

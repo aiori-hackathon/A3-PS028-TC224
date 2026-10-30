@@ -17,6 +17,8 @@ git status -sb
 
 The main tools are:
 
+- `lab/analyze.py`: statistical analysis CLI and RFC 8305 assessment engine (A9).
+- `lab/run_campaign.py`: sequential campaign orchestrator and resume engine (A8).
 - `lab/run_trial.py`: integrated browser-measurement runner (A7).
 - `lab/impair.py`: scenario controller and S0–S6 self-test harness.
 - `lab/scenarios.yaml`: canonical scenario definitions.
@@ -151,7 +153,69 @@ For each trial that is included in a report, preserve:
 
 Do not commit generated PCAPs, runtime logs, PID files, lock files, or trial evidence unless the team explicitly decides to publish a curated evidence subset. Keep source-code changes and potentially large local measurement artifacts separate.
 
-## 7. Useful commands
+## 7. Statistical analysis and RFC 8305 assessment (A9)
+
+Use `lab/analyze.py` to aggregate and analyze existing measurement evidence strictly offline without executing trials, invoking browsers, or modifying network namespaces or routing.
+
+### CLI interface
+
+```bash
+# Analyze auto-discovered local evidence (lab/trials/ and lab/campaigns/)
+python3 lab/analyze.py
+
+# Analyze a specific campaign directory or manifest
+python3 lab/analyze.py --campaign-dir lab/campaigns/<campaign_id>
+python3 lab/analyze.py --manifest lab/campaigns/<campaign_id>/campaign_manifest.json
+
+# Analyze dedicated trials directory
+python3 lab/analyze.py --trials-dir lab/trials
+
+# Output reproducible CSV or JSON to stdout
+python3 lab/analyze.py --csv
+python3 lab/analyze.py --json
+
+# Save structured summary artifacts
+python3 lab/analyze.py -o lab/results/
+```
+
+When `--output-dir` (`-o`) is provided, `analyze.py` exports four reproducible artifact files:
+- `summary.json`: Complete grouped metrics, dataset metadata, exclusions, and RFC 8305 checks.
+- `summary.csv`: Tabular cohort metrics grouped by browser and scenario.
+- `exclusions.csv`: Audit log of excluded attempts, corrupted files, and incomplete slots.
+- `rfc8305_assessment.csv`: Standards conformance evaluation table with evidence justification.
+
+### Statistical methodology and metric definitions
+
+1. **Cohort Grouping**: All metrics are grouped deterministically by browser and scenario (`S0`–`S6`).
+2. **Sample Counts**: Distinct counts are reported for `total_trials`, `valid_live_count`, `simulation_count`, `incomplete_count`, and `invalid_or_failed_count`.
+3. **HTTP Success Rate**: Calculated as $\frac{\text{success\_count}}{\text{valid\_live\_count}}$ alongside a 95% Wilson score confidence interval:
+   $$\text{Wilson CI} = \frac{\hat{p} + \frac{z^2}{2n} \pm z\sqrt{\frac{\hat{p}(1-\hat{p})}{n} + \frac{z^2}{4n^2}}}{1 + \frac{z^2}{n}}$$
+   Guaranteed bounded in $[0.0, 1.0]$ across small samples.
+4. **Winning Address Families**: Distribution of winning paths (`IPv6`, `IPv4`, or `None`) with Wilson score 95% confidence intervals.
+5. **Connection Setup Times**: Setup latency of winning connection (SYN to SYN-ACK) reporting non-null count ($N$), median, 95th percentile (p95), interquartile range (IQR = $Q3 - Q1$), and 95% bootstrap confidence interval.
+6. **Fallback Delays (Connection Attempt Delay)**: Elapsed time between initial IPv6 SYN and secondary IPv4 SYN. Reported with median, p95, IQR, and bootstrap confidence interval.
+7. **DNS Latencies**: Per-record-type resolution latencies for A and AAAA records and total query-to-response resolution span.
+8. **Handling of Missing Values**: Missing or unobserved metrics (e.g. fallback delay in direct IPv6 connections, or unreceived DNS responses) remain `null` in JSON and empty strings `""` in CSV. They are **never replaced with zero**.
+
+### Evidence validation, segregation, and exclusions
+
+The analyzer enforces strict A7/A8 validity rules:
+- **Valid Live**: Genuine live trials with verified baseline restoration (`scenario_restored=true`, `baseline_verified=true`, no cleanup errors), valid PCAP, non-zero packet count (`packet_count > 0`), and conclusive classification.
+- **Simulation**: Offline dry-run trials (`is_simulation=true`) are segregated from live statistics by default. Use `--include-simulations` only when explicitly studying simulated data.
+- **Incomplete / Malformed**: Missing result files, corrupted JSON, or pending unexecuted campaign slots are recorded in `exclusions.csv` with their exact cause.
+- **Measurement Failures**: Trials with zero-packet captures (such as `trial-20261028083344-ccc4810f`) or unresolved classifications are excluded from live calculations and preserved in the audit log.
+
+### RFC 8305 standards conformance assessment
+
+The analyzer evaluates Happy Eyeballs v2 requirements strictly from observable network evidence, distinguishing **`OBSERVED_CONFORMANCE`**, **`OBSERVED_DEVIATION`**, and **`INDETERMINATE`** results without inferring general browser conformance from individual trials. The assessment explicitly separates mandatory requirements (MUST/MUST NOT) from recommended parameters (SHOULD/SHOULD NOT) via `mandatory_status` and `recommended_status`:
+- **RFC 8305 §3 (IPv6 Preference)**: Verifies whether initial connection attempts prefer IPv6 on dual-stack baseline (S0). In tested live trials, IPv6 was attempted first and won (`OBSERVED_CONFORMANCE`).
+- **RFC 8305 §5 (Immediate Reset Fallback & 10 ms Inter-Attempt Floor)**: Evaluates TCP RST rejection (S2). RFC 8305 §5 distinguishes mandatory requirements (*"subsequent connection attempts MUST NOT start within 10 milliseconds of the previous attempt"*) from recommended parameters (minimum CAD timer of 100 ms, maximum CAD of 2 seconds). When an attempt actively fails (TCP RST), Section 5 recommends starting immediately without waiting for the CAD timer to expire, provided the 10 ms mandatory floor is respected. Because the recorded S2 Chrome trial launched its subsequent IPv4 attempt at 2.65 ms (< 10 ms interval between attempt starts), this is classified as an **`OBSERVED_DEVIATION`** specifically for **mandatory-floor violation** (`mandatory_status=OBSERVED_DEVIATION`) scoped to the recorded trial. Delays between 10 ms and 100 ms meet mandatory MUST requirements (`mandatory_status=OBSERVED_CONFORMANCE`) while falling outside recommended parameters (`recommended_status=OBSERVED_DEVIATION`), and are explained as recommended-range deviations without being labeled as MUST violations.
+- **RFC 8305 §5 (CAD SYN Timeout)**: Verifies whether unacknowledged IPv6 SYNs (S1) schedule IPv4 fallback within the 100–2000 ms window (target: 250 ms). In the recorded S1 trial, CAD was 301.19 ms, satisfying both mandatory floor and recommended bounds (`OBSERVED_CONFORMANCE`).
+- **RFC 8305 §5 (High Latency Fallback)**: Verifies whether 600 ms IPv6 latency (S4) allows IPv4 to complete handshake first. In the recorded S4 trial, IPv4 won with CAD 294.87 ms (`OBSERVED_CONFORMANCE`).
+- **RFC 8305 §4 (Resolution Delay)**: Evaluates delayed AAAA behavior (S6). In the recorded Chrome trial (`trial-20261028171417-b2d83f2f`), Chrome waited ~515 ms for late AAAA and connected over IPv6 rather than initiating IPv4 fallback after the RFC 8305 §4 recommended 50 ms Resolution Delay. This is classified as an **`OBSERVED_DEVIATION`** strictly scoped to the recorded trial, without inferring general browser non-conformance.
+- **Unsupported Checks**: Features not testable under isolated single-trial protocol (e.g., cross-session cache statefulness in §7) or out of testbed scope (e.g., QUIC/SCTP in §8) are strictly marked **`INDETERMINATE`**.
+
+## 8. Useful commands
 
 ```bash
 # Review available scenarios and their descriptions
@@ -160,11 +224,20 @@ python3 lab/impair.py list
 # Inspect current scenario-controller status
 sudo python3 lab/impair.py status
 
-# Check controller options
+# Run statistical analysis and RFC 8305 assessment (A9)
+python3 lab/analyze.py
+python3 lab/analyze.py --csv
+python3 lab/analyze.py -o lab/results/
+
+# Check tool options
 python3 lab/impair.py --help
 python3 lab/run_trial.py --help
+python3 lab/run_campaign.py --help
+python3 lab/analyze.py --help
 
 # Run automated tests (simulation/unit tests; not a replacement for live trials)
+python3 lab/test_analyze.py
+python3 lab/test_run_campaign.py
 python3 lab/test_run_trial.py
 python3 -m unittest discover lab
 ```

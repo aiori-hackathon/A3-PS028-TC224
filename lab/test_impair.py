@@ -482,6 +482,11 @@ class TestControllerLifecycle(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp(prefix="ps028_ctrl_test_")
         self.state_file = Path(self.temp_dir) / ".impair_state.json"
+        self.dns_config = Path(self.temp_dir) / "dns_config.json"
+        self.dns_bak_a3 = Path(self.temp_dir) / "dns_config.json.bak"
+        self.dns_bak_a4 = Path(self.temp_dir) / "dns_config.json.impair_bak"
+        self.lock_file = Path(self.temp_dir) / ".lab.lock"
+        shutil.copy2(impair.DNS_CONFIG_FILE, self.dns_config)
 
     def tearDown(self):
         shutil.rmtree(self.temp_dir, ignore_errors=True)
@@ -538,6 +543,60 @@ class TestControllerLifecycle(unittest.TestCase):
             self.assertTrue(mock_del_res.called)
             self.assertTrue(mock_nft_clr.called)
             self.assertFalse(self.state_file.exists())
+
+    @patch("lab.impair.apply_netem_delays")
+    @patch("lab.impair.reload_dns_server")
+    def test_apply_s6_root(self, mock_reload, mock_netem):
+        """Applying S6 as root sets netem delays and applies DNS delays (A=0, AAAA=500)."""
+        with patch.object(impair, "STATE_FILE", self.state_file), \
+             patch.object(impair, "DNS_CONFIG_FILE", self.dns_config), \
+             patch.object(impair, "DNS_BACKUP_A4", self.dns_bak_a4), \
+             patch.object(impair, "DNS_BACKUP_A3", self.dns_bak_a3), \
+             patch("lab.impair.is_root", return_value=True):
+
+            impair.apply_scenario("S6", scenarios_path=SCENARIOS_YAML, dry_run=False)
+
+            mock_netem.assert_called()
+            with open(self.dns_config, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+            self.assertEqual(cfg["rules"]["A"]["delay_ms"], 0)
+            self.assertEqual(cfg["rules"]["AAAA"]["delay_ms"], 500)
+            self.assertTrue(self.dns_bak_a4.exists())
+            self.assertTrue(self.state_file.exists())
+
+    @patch("lab.privileged_helper.run_helper_action")
+    def test_apply_s6_unprivileged_delegates_to_helper(self, mock_helper):
+        """Unprivileged caller applying S6 routes through privileged helper and succeeds."""
+        mock_helper.return_value = {"status": "OK", "scenario_id": "S6"}
+        with patch.object(impair, "STATE_FILE", self.state_file), \
+             patch("lab.impair.is_root", return_value=False):
+
+            impair.apply_scenario("S6", scenarios_path=SCENARIOS_YAML, dry_run=False, lock_file=self.lock_file)
+
+            self.assertEqual(mock_helper.call_count, 2)
+            self.assertEqual(mock_helper.call_args_list[0][0][0], "restore-baseline")
+            self.assertEqual(mock_helper.call_args_list[1][0][0], "apply-scenario")
+            extra = mock_helper.call_args_list[1][1]["extra_args"]
+            self.assertIn("--scenario", extra)
+            self.assertIn("S6", extra)
+            self.assertTrue(self.state_file.exists())
+
+    @patch("lab.privileged_helper.run_helper_action")
+    def test_apply_dns_delays_unprivileged_delegates_to_helper(self, mock_helper):
+        """Unprivileged caller calling apply_dns_delays routes through apply-dns helper action."""
+        mock_helper.return_value = {"status": "OK", "a_delay_ms": 0, "aaaa_delay_ms": 500}
+        with patch("lab.impair.is_root", return_value=False):
+            impair.apply_dns_delays(
+                a_delay_ms=0,
+                aaaa_delay_ms=500,
+                dry_run=False,
+                lock_file=self.lock_file
+            )
+            mock_helper.assert_called_once()
+            args, kwargs = mock_helper.call_args
+            self.assertEqual(args[0], "apply-dns")
+            self.assertIn("--a-delay", kwargs["extra_args"])
+            self.assertIn("--aaaa-delay", kwargs["extra_args"])
 
 
 class TestSelfTestBaseline(unittest.TestCase):

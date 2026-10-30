@@ -12,6 +12,7 @@ Performs comprehensive read-only verification of:
 
 import argparse
 import json
+import os
 from pathlib import Path
 import re
 import shutil
@@ -280,7 +281,56 @@ def check_configuration_files() -> List[Dict[str, Any]]:
     return results
 
 
-def run_preflight() -> Dict[str, Any]:
+def check_sudo_authorization() -> Dict[str, Any]:
+    """
+    Verifies that non-interactive root authorization is available via sudo -n.
+    Returns dict with status PASS/FAIL, detail message, and instructions.
+    """
+    if os.geteuid() == 0:
+        return {
+            "status": "PASS",
+            "authorized": True,
+            "method": "root",
+            "message": "Process is running as root (EUID 0)."
+        }
+    try:
+        proc = subprocess.run(
+            ["sudo", "-n", "true"],
+            capture_output=True,
+            text=True,
+            check=False
+        )
+        if proc.returncode == 0:
+            return {
+                "status": "PASS",
+                "authorized": True,
+                "method": "sudo -n",
+                "message": "Non-interactive sudo authorization verified."
+            }
+        else:
+            err = (proc.stderr or proc.stdout).strip() or "Password required"
+            return {
+                "status": "FAIL",
+                "authorized": False,
+                "method": "sudo -n",
+                "error": err,
+                "message": (
+                    "Non-interactive sudo authorization is unavailable (sudo -n failed). "
+                    "Live PS-028 measurement operations require root privileges for network and capture operations. "
+                    "Please run 'sudo -v' in your terminal before running live trials or campaigns."
+                )
+            }
+    except FileNotFoundError:
+        return {
+            "status": "FAIL",
+            "authorized": False,
+            "method": "sudo -n",
+            "error": "sudo binary not found",
+            "message": "The sudo utility is not available in PATH."
+        }
+
+
+def run_preflight(check_sudo: bool = False) -> Dict[str, Any]:
     binaries = check_binaries()
     packages = check_system_packages()
     python_deps = check_python_dependencies()
@@ -292,35 +342,52 @@ def run_preflight() -> Dict[str, Any]:
     missing_python = [p["module"] for p in python_deps if not p["installed"] or not p["version_match"]]
     invalid_configs = [c["file"] for c in configs if not c["valid"]]
 
+    sudo_auth = None
+    sudo_failed = False
+    if check_sudo:
+        sudo_auth = check_sudo_authorization()
+        if not sudo_auth["authorized"]:
+            sudo_failed = True
+
     all_passed = (
         len(missing_required_binaries) == 0 and
         len(missing_packages) == 0 and
         len(missing_python) == 0 and
-        len(invalid_configs) == 0
+        len(invalid_configs) == 0 and
+        not sudo_failed
     )
 
-    return {
+    failures: Dict[str, Any] = {
+        "missing_required_binaries": missing_required_binaries,
+        "missing_packages": missing_packages,
+        "mismatched_packages": mismatched_packages,
+        "missing_python": missing_python,
+        "invalid_configs": invalid_configs,
+    }
+    if sudo_failed and sudo_auth:
+        failures["sudo_authorization"] = [sudo_auth["message"]]
+
+    res: Dict[str, Any] = {
         "status": "PASS" if all_passed else "FAIL",
         "binaries": binaries,
         "packages": packages,
         "python_dependencies": python_deps,
         "configurations": configs,
-        "failures": {
-            "missing_required_binaries": missing_required_binaries,
-            "missing_packages": missing_packages,
-            "mismatched_packages": mismatched_packages,
-            "missing_python": missing_python,
-            "invalid_configs": invalid_configs,
-        }
+        "failures": failures,
     }
+    if check_sudo and sudo_auth:
+        res["sudo_authorization"] = sudo_auth
+    return res
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="PS-028 Non-Destructive Lab Dependency Preflight")
     parser.add_argument("--json", action="store_true", help="Output results as JSON")
+    parser.add_argument("--check-sudo", "--live", action="store_true", dest="check_sudo",
+                        help="Check non-interactive sudo authorization for live operations")
     args = parser.parse_args()
 
-    report = run_preflight()
+    report = run_preflight(check_sudo=args.check_sudo)
 
     if args.json:
         print(json.dumps(report, indent=2))
@@ -364,6 +431,16 @@ def main() -> int:
             print(f"  \033[1;32m[OK]\033[0m   {c['file']} (valid)")
         else:
             print(f"  \033[1;31m[FAIL]\033[0m {c['file']} -> {c['error']}")
+
+    # 5. Sudo Privileged Authorization (if checked)
+    if "sudo_authorization" in report:
+        print("\n--- Sudo Privileged Authorization ---")
+        sa = report["sudo_authorization"]
+        if sa["authorized"]:
+            print(f"  \033[1;32m[OK]\033[0m   {sa['message']}")
+        else:
+            print(f"  \033[1;31m[FAIL]\033[0m {sa['message']}")
+            print("         Please execute 'sudo -v' in your terminal session to validate sudo credentials.")
 
     print("\n" + "=" * 60)
     if report["status"] == "PASS":
