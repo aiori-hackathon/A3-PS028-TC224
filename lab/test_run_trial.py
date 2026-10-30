@@ -278,6 +278,25 @@ class TestHappyEyeballsFallbackClassification(unittest.TestCase):
         self.assertFalse(res["fallback_occurred"])
         self.assertEqual(res["classification"], "DIRECT_IPV6")
 
+    def test_direct_ipv6_when_both_attempted_but_ipv6_wins_navigation(self):
+        """
+        When both IPv6 and IPv4 connections are established but IPv6 won HTTP navigation
+        (e.g., post-navigation favicon or speculative preconnect over IPv4),
+        classification MUST report DIRECT_IPV6 and fallback_occurred=False.
+        """
+        dissection = {
+            "ipv6": {"syn_count": 1, "connection_established": True, "http_observed": True, "first_syn_time": 10.0},
+            "ipv4": {"syn_count": 1, "connection_established": True, "http_observed": False, "first_syn_time": 10.3},
+            "connection_attempt_delay_ms": 300.0
+        }
+        http_outcome = {"status_code": 200, "success": True, "winning_address_family": "IPv6"}
+
+        res = run_trial.classify_fallback(dissection, http_outcome)
+        self.assertFalse(res["fallback_occurred"])
+        self.assertEqual(res["classification"], "DIRECT_IPV6")
+        self.assertIn("won HTTP navigation", res["reason"])
+        self.assertIn("Connection Attempt Delay: 300.0ms", res["reason"])
+
     def test_do_not_infer_fallback_from_http_200_alone_when_ipv6_not_attempted(self):
         """
         CRITICAL PS-028 REQUIREMENT:
