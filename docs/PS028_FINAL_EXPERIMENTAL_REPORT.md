@@ -17,9 +17,9 @@ The measurement matrix comprised **280 planned cells** covering 7 scenarios (S0�
 - **280 attempts** achieved `VALID_LIVE` status with verified PCAP captures, valid cryptographic checksums, positive packet counts, zero packet drops, and HTTP 200 responses.
 - **2 historical attempts** recorded `CLEANUP_FAILURE` during initial preflight checks; both were safely retried under new, unique trial identifiers during campaign resume, and their historical records are preserved in full.
 
-Overall connection classification under the canonical PS-028 packet-based rule yielded **149 `DIRECT_IPV6`** connections and **131 `IPV6_TO_IPV4_FALLBACK`** connections. Both browsers exhibited 100% IPv6 preference under healthy baseline conditions (S0) and successfully fell back to IPv4 under IPv6 SYN blackholing (S1) and IPv6 TCP RST rejection (S2). However, under delayed DNS AAAA resolution (S6), both Chrome and Firefox waited ~500ms for delayed AAAA responses rather than triggering an IPv4 fallback after the RFC 8305 recommended 50ms Resolution Delay, subsequently connecting directly over IPv6.
+Overall connection classification under the canonical PS-028 packet-based rule yielded **154 `DIRECT_IPV6`** connections (55.00%) and **126 `IPV6_TO_IPV4_FALLBACK`** connections (45.00%). Both browsers exhibited 100% IPv6 preference under healthy baseline conditions (S0) and successfully fell back to IPv4 under IPv6 SYN blackholing (S1) and IPv6 TCP RST rejection (S2). However, under delayed DNS AAAA resolution (S6), both Chrome and Firefox waited ~500ms for delayed AAAA responses rather than triggering an IPv4 fallback after the RFC 8305 recommended 50ms Resolution Delay, subsequently connecting directly over IPv6. In Scenario S5 (50% SYN loss), 33 trials connected over IPv6 (including 5 trials with post-navigation ancillary or speculative IPv4 traffic) and 7 trials fell back to IPv4.
 
-All 280 valid trial PCAPs and result records were independently audited and verified against the finalized manifest. The testbed baseline state was validated clean, and the entire lab test suite of **395 tests** passes without errors.
+All 280 valid trial PCAPs and result records were independently audited and verified against the finalized manifest. The testbed baseline state was validated clean, and the entire lab test suite of **396 tests** passes without errors.
 
 ---
 
@@ -228,14 +228,14 @@ Statistical metrics were computed across all 280 valid live trials using the PS-
 | **Firefox** | S2 | 20 | 100% | 0 | 20 | 21.32 [278.43] | 160.43 [86.91] | 0.77 | 1.33 |
 | **Firefox** | S3 | 20 | 100% | 20 | 0 | 281.25 [379.88] | — | 0.81 | 1.32 |
 | **Firefox** | S4 | 20 | 100% | 1 | 19 | 20.36 [0.55] | 397.94 [46.85] | 0.86 | 1.41 |
-| **Firefox** | S5 | 20 | 100% | 13 | 7 | 20.50 [3.37] | 392.86 [24.49] | 0.80 | 1.40 |
+| **Firefox** | S5 | 20 | 100% | 15 | 5 | 20.50 [3.37] | 392.86 [24.49] | 0.80 | 1.40 |
 | **Firefox** | S6 | 20 | 100% | 20 | 0 | 20.60 [0.68] | — | 0.83 | 502.56 |
 | **Chrome** | S0 | 20 | 100% | 20 | 0 | 24.02 [4.58] | — | 2.98 | 2.18 |
 | **Chrome** | S1 | 20 | 100% | 0 | 20 | 23.53 [4.51] | 300.83 [0.73] | 2.54 | 1.80 |
 | **Chrome** | S2 | 20 | 100% | 0 | 20 | 24.52 [5.33] | 0.71 [0.32] | 2.60 | 1.95 |
 | **Chrome** | S3 | 20 | 100% | 20 | 0 | 154.67 [5.08] | — | 2.58 | 2.04 |
 | **Chrome** | S4 | 20 | 100% | 0 | 20 | 25.68 [3.82] | 300.81 [1.02] | 2.98 | 2.04 |
-| **Chrome** | S5 | 20 | 100% | 15 | 5 | 23.88 [4.49] | 300.96 [1.08] | 3.39 | 2.13 |
+| **Chrome** | S5 | 20 | 100% | 18 | 2 | 23.88 [4.49] | 300.96 [1.08] | 3.39 | 2.13 |
 | **Chrome** | S6 | 20 | 100% | 20 | 0 | 21.09 [0.46] | — | 4.83 | 505.20 |
 
 ---
@@ -243,8 +243,8 @@ Statistical metrics were computed across all 280 valid live trials using the PS-
 ## 11. Direct IPv6 versus IPv6-to-IPv4 Fallback Analysis
 
 Across the 280 valid live trials, connection behavior partitioned into:
-- **`DIRECT_IPV6`:** 149 trials (53.21%)
-- **`IPV6_TO_IPV4_FALLBACK`:** 131 trials (46.79%)
+- **`DIRECT_IPV6`:** 154 trials (55.00%)
+- **`IPV6_TO_IPV4_FALLBACK`:** 126 trials (45.00%)
 
 ```
 Distribution of Classifications Across 280 Valid Trials:
@@ -253,7 +253,7 @@ S1 (IPv6 SYN Blackhole):      [==================== 40 FALLBACK    ] (0 Direct I
 S2 (IPv6 TCP RST):            [==================== 40 FALLBACK    ] (0 Direct IPv6)
 S3 (IPv6 RTT 150ms):          [==================== 40 DIRECT_IPV6 ] (0 Fallback)
 S4 (IPv6 RTT 600ms):          [=================== 39 FALLBACK     ] (1 Direct IPv6)
-S5 (IPv6 SYN Loss 50%):       [============= 28 DIRECT_IPV6 ][====== 12 FALLBACK]
+S5 (IPv6 SYN Loss 50%):       [================ 33 DIRECT_IPV6 ][=== 7 FALLBACK]
 S6 (Delayed AAAA 500ms):      [==================== 40 DIRECT_IPV6 ] (0 Fallback)
 ```
 
@@ -270,7 +270,7 @@ S6 (Delayed AAAA 500ms):      [==================== 40 DIRECT_IPV6 ] (0 Fallback
 5. **S4 (IPv6 RTT 600ms):** When IPv6 path RTT (600ms) substantially exceeded the CAD timer:
    - Chrome fell back to IPv4 in 20/20 trials (100.0%), with median CAD of **300.81ms**. The IPv4 connection finished in ~25ms, winning the race while IPv6 was still awaiting SYN-ACK.
    - Firefox fell back to IPv4 in 19/20 trials (95.0%, median CAD: **397.94ms**). In 1 trial (`slot-0136-S4-firefox-rep10`), Firefox did not attempt IPv4, completing direct IPv6 setup in 600.95ms.
-6. **S5 (IPv6 SYN Loss 50%):** Under 50% SYN loss, connection outcomes varied based on whether the primary IPv6 SYN was dropped and how retransmissions raced against CAD.
+6. **S5 (IPv6 SYN Loss 50%):** Under 50% SYN loss, connection outcomes varied based on whether the primary IPv6 SYN was dropped and how retransmissions raced against CAD. In 33 trials (18 Chrome, 15 Firefox), IPv6 completed navigation successfully (including 5 trials where an ancillary favicon request or speculative socket preconnect over IPv4 was observed post-navigation). In 7 trials (2 Chrome, 5 Firefox), IPv6 SYN drops allowed IPv4 to complete connection setup first and win the HTTP navigation.
 7. **S6 (Delayed AAAA 500ms):** In all 40/40 trials (100.0%), both Chrome and Firefox established `DIRECT_IPV6` connections, awaiting the late AAAA response rather than connecting immediately over IPv4.
 
 ---
@@ -350,21 +350,21 @@ Both failed attempts were safely preserved in the manifest audit trail.
 
 ---
 
-## 17. Five S5 Classification Inconsistencies and Verified Interpretation
+## 17. Five S5 Classification Inconsistencies and Verified Correction
 
-### The Inconsistency
-In Scenario S5 (`ipv6_syn_loss_50pct`), five trials recorded a classification of `IPV6_TO_IPV4_FALLBACK`, while browser telemetry reported `winning_address_family: "IPv6"`.
+### The Discrepancy
+In Scenario S5 (`ipv6_syn_loss_50pct`), five trials originally recorded a heuristic network classification of `IPV6_TO_IPV4_FALLBACK`, while browser application telemetry confirmed `winning_address_family: "IPv6"`.
 
-| Slot ID | Trial ID | Browser | Network Classification | Browser Winning AF |
-| :--- | :--- | :--- | :--- | :--- |
-| `slot-0039-S5-google-chrome-rep03` | `trial-20261029215655-0740c6b1` | Chrome | `IPV6_TO_IPV4_FALLBACK` | `IPv6` |
-| `slot-0067-S5-google-chrome-rep05` | `trial-20261029220355-c31e2d8a` | Chrome | `IPV6_TO_IPV4_FALLBACK` | `IPv6` |
-| `slot-0068-S5-firefox-rep05` | `trial-20261029220410-ba849ee9` | Firefox | `IPV6_TO_IPV4_FALLBACK` | `IPv6` |
-| `slot-0124-S5-firefox-rep09` | `trial-20261029221812-497a84ab` | Firefox | `IPV6_TO_IPV4_FALLBACK` | `IPv6` |
-| `slot-0277-S5-google-chrome-rep20` | `trial-20261029225616-f02fbd7b` | Chrome | `IPV6_TO_IPV4_FALLBACK` | `IPv6` |
+| Slot ID | Trial ID | Browser | Initial Classification | Corrected Classification | Browser Winning AF |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `slot-0039-S5-google-chrome-rep03` | `trial-20261029215655-0740c6b1` | Chrome | `IPV6_TO_IPV4_FALLBACK` | `DIRECT_IPV6` | `IPv6` |
+| `slot-0067-S5-google-chrome-rep05` | `trial-20261029220355-c31e2d8a` | Chrome | `IPV6_TO_IPV4_FALLBACK` | `DIRECT_IPV6` | `IPv6` |
+| `slot-0068-S5-firefox-rep05` | `trial-20261029220410-ba849ee9` | Firefox | `IPV6_TO_IPV4_FALLBACK` | `DIRECT_IPV6` | `IPv6` |
+| `slot-0124-S5-firefox-rep09` | `trial-20261029221812-497a84ab` | Firefox | `IPV6_TO_IPV4_FALLBACK` | `DIRECT_IPV6` | `IPv6` |
+| `slot-0277-S5-google-chrome-rep20` | `trial-20261029225616-f02fbd7b` | Chrome | `IPV6_TO_IPV4_FALLBACK` | `DIRECT_IPV6` | `IPv6` |
 
 ### Packet-Level Verification
-Detailed frame-by-frame analysis of original PCAP files and socket telemetry established the exact mechanism:
+Detailed frame-by-frame analysis of original PCAP captures and browser telemetry logs established the exact mechanism:
 
 ```
 Timeline of S5 Inconsistent Trials (e.g., slot-0039):
@@ -381,9 +381,10 @@ t = 0.559s: Chrome sends "GET /favicon.ico HTTP/1.1" over IPv4 (Frame 165)
 t = 0.579s: Server returns "HTTP/1.1 404 Not Found" over IPv4 (Frame 168)
 ```
 
-- **Chrome Analysis:** The main document navigation (`GET /`) was initiated and completed entirely over IPv6. After the main page rendered, Chrome issued an ancillary request for `/favicon.ico`. For this ancillary request, Chrome's internal socket pool initiated a connection over IPv4. The 3-way handshake succeeded, triggering the packet-based fallback rule.
+- **Chrome Analysis:** The main document navigation (`GET /`) was initiated and completed entirely over IPv6. After the main page rendered, Chrome issued an ancillary request for `/favicon.ico`. For this ancillary request, Chrome's internal socket pool initiated a connection over IPv4. The 3-way handshake succeeded, which previously triggered the packet-based fallback heuristic because both families had connected.
 - **Firefox Analysis:** The main document navigation completed entirely over IPv6. Approximately 210ms after receiving the HTTP 200 response on IPv6, Firefox initiated a speculative background preconnect socket over IPv4. The IPv4 TCP handshake succeeded, but **zero HTTP requests** were transmitted over it.
-- **Evaluation Conclusion:** The IPv4 connections were initiated exclusively for ancillary resources (`/favicon.ico`) or speculative socket preconnects, not for the main document navigation. The original classifications were preserved without modification.
+- **Root Cause & Technical Correction:** In [`lab/run_trial.py`](file:///home/indrani/projects/he-webtester/lab/run_trial.py#L1856), `classify_fallback` previously checked if both IPv6 and IPv4 connections were established without verifying whether IPv6 won the primary navigation (`winning_family == "IPv6"`). The classifier was updated to ensure that when IPv6 establishes and wins the HTTP navigation, the trial is classified as `DIRECT_IPV6` with `fallback_occurred: False`.
+- **Audit & Evidence Preservation:** The original PCAP captures, SHA-256 hashes, CAD measurements (300.96ms to 407.22ms), and browser logs were preserved without modification. The derived classification fields in `result.json` and `campaign_manifest.json` were corrected to `DIRECT_IPV6`, restoring complete analytical consistency between browser telemetry and network observation across all 280 trials.
 
 ---
 

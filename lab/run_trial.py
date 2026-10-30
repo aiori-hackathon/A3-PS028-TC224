@@ -1854,15 +1854,24 @@ def classify_fallback(
     reason = "Insufficient evidence to classify connection behavior"
 
     if ipv6_attempt and ipv4_attempt and ipv4_conn_ok:
-        fallback_occurred = True
-        classification = "IPV6_TO_IPV4_FALLBACK"
         cad = dissection.get("connection_attempt_delay_ms")
         cad_desc = f" (Connection Attempt Delay: {cad}ms)" if cad is not None else ""
         loss_note = f" (Note: {capture_loss_message})" if capture_loss and capture_loss_message else ""
-        reason = (
-            f"Observed initial IPv6 connection attempt, followed by IPv4 attempt "
-            f"and successful IPv4 connection{cad_desc}.{loss_note}"
-        )
+        if winning_family == "IPv6" and ipv6_conn_ok:
+            fallback_occurred = False
+            classification = "DIRECT_IPV6"
+            reason = (
+                f"Direct IPv6 connection established and won HTTP navigation{cad_desc}. "
+                f"Post-navigation ancillary request or speculative IPv4 connection attempt "
+                f"was observed but did not displace IPv6.{loss_note}"
+            )
+        else:
+            fallback_occurred = True
+            classification = "IPV6_TO_IPV4_FALLBACK"
+            reason = (
+                f"Observed initial IPv6 connection attempt, followed by IPv4 attempt "
+                f"and successful IPv4 connection{cad_desc}.{loss_note}"
+            )
     elif ipv6_conn_ok and not ipv4_attempt:
         if capture_loss:
             # Per PS-028: Incomplete capture due to dropped packets cannot conclusively confirm no IPv4 attempt
