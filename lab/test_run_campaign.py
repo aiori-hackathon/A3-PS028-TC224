@@ -572,6 +572,191 @@ class TestSafeResume(unittest.TestCase):
             runner.initialize_manifest()
         self.assertIn("Resume scenario mismatch", str(ctx.exception))
 
+    @patch("lab.impair.self_test_baseline", return_value=True)
+    @patch("lab.run_trial.run_trial")
+    def test_resume_from_halted_on_failure_completes_and_updates_manifest(self, mock_run, mock_base):
+        # Manifest was previously HALTED_ON_FAILURE at slot 1
+        scenarios = ["S0", "S1"]
+        slots = run_campaign.build_matrix_slots(scenarios, ["chrome"], 1)
+
+        # Slot 0 succeeded
+        res0 = _create_mock_trial_result("S0", "trial-succ-0", self.temp_dir, is_simulation=True)
+        att0 = run_campaign.ExecutionAttempt(
+            attempt_number=1,
+            trial_id="trial-succ-0",
+            execution_mode="SIMULATION",
+            is_simulation=True,
+            timestamps={"end_time": "2026-10-30T00:00:01Z"},
+            status="COMPLETED",
+            validity="SIMULATION",
+            evidence_paths=res0["evidence_paths"],
+            capture_metadata=res0["capture_metadata"],
+            http_outcome=res0["http_outcome"],
+            network_observations=res0["network_observations"],
+            cleanup_status=res0["cleanup_status"]
+        )
+        slots[0].add_attempt(att0)
+
+        # Slot 1 failed with CLEANUP_FAILURE on attempt 1
+        att1_fail = run_campaign.ExecutionAttempt(
+            attempt_number=1,
+            trial_id="trial-failed-1",
+            execution_mode="SIMULATION",
+            is_simulation=True,
+            timestamps={"end_time": "2026-10-30T00:00:02Z"},
+            status="FAILED",
+            validity="CLEANUP_FAILURE",
+            evidence_paths={"trial_dir": str(self.temp_dir / "trials" / "trial-failed-1")},
+            capture_metadata={},
+            http_outcome={},
+            network_observations={},
+            cleanup_status={"scenario_restored": False, "baseline_verified": False, "errors": ["Root error"]},
+            error_message="CLEANUP OR BASELINE FAILURE: Root error"
+        )
+        slots[1].add_attempt(att1_fail)
+
+        manifest = run_campaign.CampaignManifest(
+            campaign_id="resume-halted-camp",
+            output_dir=self.temp_dir,
+            scenarios=scenarios,
+            browsers=["chrome"],
+            repetitions=1,
+            is_simulation=True,
+            matrix_slots=slots,
+            status="HALTED_ON_FAILURE",
+            halt_reason="FAIL-STOP: Lab cleanup failed at slot 1"
+        )
+        manifest.save_atomically()
+
+        # Mock run_trial to succeed for slot 1 on resume
+        def mock_run_trial_side_effect(**kwargs):
+            return _create_mock_trial_result("S1", kwargs["trial_id"], self.temp_dir, is_simulation=True)
+        mock_run.side_effect = mock_run_trial_side_effect
+
+        runner = run_campaign.CampaignRunner(
+            scenarios=scenarios,
+            browsers=["chrome"],
+            repetitions=1,
+            output_dir=self.temp_dir,
+            is_simulation=True,
+            resume=True
+        )
+        res = runner.run()
+
+        # Verify campaign completed successfully
+        self.assertEqual(res["status"], "COMPLETED")
+        self.assertIsNotNone(res["completed_at"])
+        self.assertIsNone(res["summary"]["halt_reason"])
+        self.assertEqual(res["summary"]["completed_slots"], 2)
+        self.assertEqual(res["summary"]["failed_attempts"], 1)
+        self.assertEqual(res["summary"]["total_attempts"], 3)
+
+        # Verify historical failure was preserved in slot 1 attempts
+        slot1_attempts = res["matrix_slots"][1]["attempts"]
+        self.assertEqual(len(slot1_attempts), 2)
+        self.assertEqual(slot1_attempts[0]["validity"], "CLEANUP_FAILURE")
+        self.assertEqual(slot1_attempts[0]["error_message"], "CLEANUP OR BASELINE FAILURE: Root error")
+        self.assertEqual(slot1_attempts[1]["validity"], "SIMULATION")
+
+    def test_finalize_campaign_manifest_success_and_preserves_history(self):
+        scenarios = ["S0"]
+        slots = run_campaign.build_matrix_slots(scenarios, ["chrome"], 1)
+        res0 = _create_mock_trial_result("S0", "trial-finalize-test", self.temp_dir, is_simulation=True)
+
+        # Prepend a historical failed attempt
+        att_fail = run_campaign.ExecutionAttempt(
+            attempt_number=1,
+            trial_id="trial-old-fail",
+            execution_mode="SIMULATION",
+            is_simulation=True,
+            timestamps={"end_time": "2026-10-30T00:00:01Z"},
+            status="FAILED",
+            validity="CLEANUP_FAILURE",
+            evidence_paths={},
+            capture_metadata={},
+            http_outcome={},
+            network_observations={},
+            cleanup_status={"scenario_restored": False, "baseline_verified": False, "errors": ["err"]},
+            error_message="CLEANUP OR BASELINE FAILURE: err"
+        )
+        slots[0].add_attempt(att_fail)
+
+        att_succ = run_campaign.ExecutionAttempt(
+            attempt_number=2,
+            trial_id="trial-finalize-test",
+            execution_mode="SIMULATION",
+            is_simulation=True,
+            timestamps={"end_time": "2026-10-30T00:00:10Z"},
+            status="COMPLETED",
+            validity="SIMULATION",
+            evidence_paths=res0["evidence_paths"],
+            capture_metadata=res0["capture_metadata"],
+            http_outcome=res0["http_outcome"],
+            network_observations=res0["network_observations"],
+            cleanup_status=res0["cleanup_status"]
+        )
+        slots[0].add_attempt(att_succ)
+
+        manifest = run_campaign.CampaignManifest(
+            campaign_id="finalize-test-camp",
+            output_dir=self.temp_dir,
+            scenarios=scenarios,
+            browsers=["chrome"],
+            repetitions=1,
+            is_simulation=True,
+            matrix_slots=slots,
+            status="HALTED_ON_FAILURE",
+            halt_reason="FAIL-STOP: previous halt"
+        )
+        manifest.save_atomically()
+
+        # Finalize using utility
+        fin_manifest = run_campaign.finalize_campaign_manifest(self.temp_dir / run_campaign.MANIFEST_FILENAME)
+        self.assertEqual(fin_manifest.status, "COMPLETED")
+        self.assertEqual(fin_manifest.completed_at, "2026-10-30T00:00:10Z")
+        self.assertIsNone(fin_manifest.halt_reason)
+
+        # Verify historical failure is intact
+        self.assertEqual(len(fin_manifest.matrix_slots[0].attempts), 2)
+        self.assertEqual(fin_manifest.matrix_slots[0].attempts[0].validity, "CLEANUP_FAILURE")
+
+    def test_finalize_campaign_manifest_fails_on_incomplete_slot(self):
+        scenarios = ["S0", "S1"]
+        slots = run_campaign.build_matrix_slots(scenarios, ["chrome"], 1)
+        res0 = _create_mock_trial_result("S0", "trial-fin-0", self.temp_dir, is_simulation=True)
+        att0 = run_campaign.ExecutionAttempt(
+            attempt_number=1,
+            trial_id="trial-fin-0",
+            execution_mode="SIMULATION",
+            is_simulation=True,
+            timestamps={"end_time": "2026-10-30T00:00:01Z"},
+            status="COMPLETED",
+            validity="SIMULATION",
+            evidence_paths=res0["evidence_paths"],
+            capture_metadata=res0["capture_metadata"],
+            http_outcome=res0["http_outcome"],
+            network_observations=res0["network_observations"],
+            cleanup_status=res0["cleanup_status"]
+        )
+        slots[0].add_attempt(att0)
+        # Slot 1 is PENDING without attempts
+
+        manifest = run_campaign.CampaignManifest(
+            campaign_id="finalize-incomplete-camp",
+            output_dir=self.temp_dir,
+            scenarios=scenarios,
+            browsers=["chrome"],
+            repetitions=1,
+            is_simulation=True,
+            matrix_slots=slots,
+            status="IN_PROGRESS"
+        )
+        manifest.save_atomically()
+
+        with self.assertRaises(run_campaign.CampaignResumeError) as ctx:
+            run_campaign.finalize_campaign_manifest(self.temp_dir / run_campaign.MANIFEST_FILENAME)
+        self.assertIn("not all 2 slots have verified completed evidence", str(ctx.exception))
+
 
 class TestFailStopSafety(unittest.TestCase):
     """

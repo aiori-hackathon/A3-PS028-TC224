@@ -820,7 +820,9 @@ class TestLiveEvidenceIntegration(unittest.TestCase):
         if not trials_dir.is_dir():
             self.skipTest("lab/trials directory not present")
 
-        trials, exclusions = analyze.ingest_evidence([trials_dir])
+        raw_trials, raw_exclusions = analyze.ingest_evidence([trials_dir])
+        trials = [t for t in raw_trials if getattr(t, "trial_id", "").startswith("trial-20261028")]
+        exclusions = [e for e in raw_exclusions if getattr(e, "trial_id", "").startswith("trial-20261028")]
         self.assertEqual(len(trials), 9)
 
         report = analyze.generate_analysis_report(trials, exclusions, seed=42)

@@ -623,6 +623,23 @@ def reconcile_manifest_for_resume(
             # Evidence was not verified: mark slot for retry without deleting history
             slot.status = "PENDING"
 
+    if verified_completed == len(manifest.matrix_slots) and len(manifest.matrix_slots) > 0:
+        manifest.status = "COMPLETED"
+        manifest.halt_reason = None
+        if not manifest.completed_at:
+            latest_end = None
+            for slot in reversed(manifest.matrix_slots):
+                for att in reversed(slot.attempts):
+                    if att.status == "COMPLETED" and att.timestamps.get("end_time"):
+                        latest_end = att.timestamps["end_time"]
+                        break
+                if latest_end:
+                    break
+            manifest.completed_at = latest_end or datetime.datetime.now(datetime.timezone.utc).isoformat()
+    else:
+        manifest.status = "IN_PROGRESS"
+        manifest.halt_reason = None
+
     manifest.save_atomically()
     return verified_completed
 
@@ -961,16 +978,90 @@ class CampaignRunner:
                     manifest.save_atomically()
 
                 # Finalize campaign status
-                if not interrupted and manifest.status != "HALTED_ON_FAILURE":
+                if not interrupted:
                     all_done = all(s.is_completed() for s in manifest.matrix_slots)
-                    manifest.status = "COMPLETED" if all_done else "INCOMPLETE"
-                    manifest.completed_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
+                    if all_done:
+                        manifest.status = "COMPLETED"
+                        manifest.halt_reason = None
+                        if not manifest.completed_at:
+                            latest_end = None
+                            for slot in reversed(manifest.matrix_slots):
+                                for att in reversed(slot.attempts):
+                                    if att.status == "COMPLETED" and att.timestamps.get("end_time"):
+                                        latest_end = att.timestamps["end_time"]
+                                        break
+                                if latest_end:
+                                    break
+                            manifest.completed_at = latest_end or datetime.datetime.now(datetime.timezone.utc).isoformat()
+                    else:
+                        if manifest.status != "HALTED_ON_FAILURE":
+                            manifest.status = "INCOMPLETE"
                     manifest.save_atomically()
 
                 return manifest.to_dict()
             finally:
                 signal.signal(signal.SIGINT, old_sigint)
                 signal.signal(signal.SIGTERM, old_sigterm)
+
+
+# ==============================================================================
+# Safe Finalization Utility
+# ==============================================================================
+
+def finalize_campaign_manifest(manifest_path: Path) -> CampaignManifest:
+    """
+    Safely finalizes an interrupted or completed campaign manifest without re-running trials:
+    - Validates that every matrix slot has verified completion evidence per A7 rules.
+    - Transitions manifest.status to "COMPLETED".
+    - Sets completed_at from the latest attempt end timestamp (or current UTC time).
+    - Clears active halt_reason while strictly preserving all historical failed attempts.
+    - Atomically updates campaign_manifest.json under exclusive lock.
+    """
+    manifest_path = Path(manifest_path).resolve()
+    lock_path = manifest_path.parent / LOCK_FILENAME
+    with acquire_manifest_lock(lock_path):
+        manifest = CampaignManifest.load(manifest_path)
+        if not manifest.matrix_slots:
+            raise CampaignResumeError(f"Manifest at {manifest_path} contains no matrix slots")
+
+        all_done = True
+        for slot in manifest.matrix_slots:
+            if slot.status != "COMPLETED":
+                all_done = False
+                break
+            valid_attempt = None
+            for att in reversed(slot.attempts):
+                if att.status == "COMPLETED" and att.validity in ("VALID_LIVE", "SIMULATION"):
+                    valid_attempt = att
+                    break
+            if not valid_attempt:
+                all_done = False
+                break
+            res_path = Path(valid_attempt.evidence_paths.get("result_json", ""))
+            is_valid, _, _ = validate_attempt_evidence(res_path, slot.scenario_id, manifest.is_simulation)
+            if not is_valid:
+                all_done = False
+                break
+
+        if not all_done:
+            raise CampaignResumeError(
+                f"Cannot finalize campaign: not all {len(manifest.matrix_slots)} slots have verified completed evidence."
+            )
+
+        manifest.status = "COMPLETED"
+        manifest.halt_reason = None
+        if not manifest.completed_at:
+            latest_end = None
+            for slot in reversed(manifest.matrix_slots):
+                for att in reversed(slot.attempts):
+                    if att.status == "COMPLETED" and att.timestamps.get("end_time"):
+                        latest_end = att.timestamps["end_time"]
+                        break
+                if latest_end:
+                    break
+            manifest.completed_at = latest_end or datetime.datetime.now(datetime.timezone.utc).isoformat()
+        manifest.save_atomically()
+        return manifest
 
 
 # ==============================================================================
@@ -1036,6 +1127,17 @@ def parse_args(args: Optional[List[str]] = None) -> argparse.Namespace:
         help="Stop campaign immediately on measurement failures in addition to cleanup failures"
     )
     parser.add_argument(
+        "--manifest", "-m",
+        type=Path,
+        default=None,
+        help="Direct path to campaign_manifest.json to finalize or inspect"
+    )
+    parser.add_argument(
+        "--finalize",
+        action="store_true",
+        help="Safely finalize a campaign manifest if all matrix slots are verified complete, without re-executing trials"
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         help="Output campaign manifest summary as raw JSON to stdout"
@@ -1045,6 +1147,36 @@ def parse_args(args: Optional[List[str]] = None) -> argparse.Namespace:
 
 def main(argv: Optional[List[str]] = None) -> int:
     args = parse_args(argv)
+
+    if args.finalize:
+        manifest_path = args.manifest
+        if not manifest_path and args.output_dir:
+            manifest_path = args.output_dir / MANIFEST_FILENAME
+        elif not manifest_path and args.campaign_id:
+            manifest_path = DEFAULT_CAMPAIGNS_DIR / args.campaign_id / MANIFEST_FILENAME
+        if not manifest_path or not manifest_path.is_file():
+            print(f"\033[1;31m[ERROR]\033[0m Manifest path not found: {manifest_path}", file=sys.stderr)
+            return 1
+        try:
+            manifest = finalize_campaign_manifest(manifest_path)
+            res = manifest.to_dict()
+            if args.json:
+                print(json.dumps(res, indent=2))
+            else:
+                summary = res.get("summary", {})
+                print("\033[1;32m[OK]\033[0m Campaign finalized successfully: status COMPLETED")
+                print("=" * 65)
+                print(f"Campaign ID:       {res['campaign_id']}")
+                print(f"Status:            \033[1;32m{res['status']}\033[0m")
+                print(f"Completed At:      {res['completed_at']}")
+                print(f"Slots Total:       {summary['total_slots']} (completed={summary['completed_slots']}, pending={summary['pending_slots']}, failed={summary['failed_slots']})")
+                print(f"Attempts:          {summary['total_attempts']} (valid_live={summary['valid_live_attempts']}, failed={summary['failed_attempts']})")
+                print(f"Manifest Path:     {manifest_path}")
+                print("=" * 65)
+            return 0
+        except Exception as e:
+            print(f"\033[1;31m[FINALIZATION ERROR]\033[0m {e}", file=sys.stderr)
+            return 1
 
     scenarios = [s.strip().upper() for s in args.scenarios.split(",") if s.strip()]
     browsers = [b.strip() for b in args.browsers.split(",")] if args.browsers else None

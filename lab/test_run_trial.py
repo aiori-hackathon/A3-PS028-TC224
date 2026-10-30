@@ -22,6 +22,7 @@ import os
 from pathlib import Path
 import shutil
 import signal
+import stat
 import struct
 import subprocess
 import tempfile
@@ -89,6 +90,71 @@ class TestBrowserRuntimeDiscoveryAndPreflight(unittest.TestCase):
         mock_run.side_effect = subprocess.TimeoutExpired(cmd=["browser", "--version"], timeout=3.0)
         ver = run_trial._query_browser_version("/usr/bin/browser")
         self.assertIn("unknown", ver)
+
+    @patch("lab.run_trial.is_snap_browser")
+    @patch("shutil.which")
+    @patch("lab.run_trial._query_browser_version")
+    def test_find_browser_runtime_skips_snap_in_favor_of_non_snap(self, mock_ver, mock_which, mock_is_snap):
+        """Verifies auto-discovery skips Snap browsers and selects non-Snap alternative."""
+        def which_side_effect(cmd):
+            if cmd == "google-chrome":
+                return "/snap/bin/google-chrome"
+            if cmd == "chromium":
+                return "/usr/bin/chromium"
+            return None
+        mock_which.side_effect = which_side_effect
+        mock_is_snap.side_effect = lambda p: str(p).startswith("/snap/")
+        mock_ver.return_value = "Chromium 124.0.0.0"
+
+        bname, bpath, bver = run_trial.find_browser_runtime()
+        self.assertEqual(bname, "chromium")
+        self.assertEqual(bpath, "/usr/bin/chromium")
+
+    @patch("lab.run_trial.is_snap_browser")
+    @patch("shutil.which")
+    @patch("lab.run_trial._query_browser_version")
+    def test_find_browser_runtime_preferred_chromium_falls_back_to_non_snap_chrome(self, mock_ver, mock_which, mock_is_snap):
+        """When preferred chromium is Snap, falls back to non-Snap google-chrome."""
+        def which_side_effect(cmd):
+            if cmd in ("chromium", "chromium-browser"):
+                return "/snap/bin/chromium"
+            if cmd == "google-chrome":
+                return "/usr/bin/google-chrome"
+            return None
+        mock_which.side_effect = which_side_effect
+        mock_is_snap.side_effect = lambda p: str(p).startswith("/snap/")
+        mock_ver.return_value = "Google Chrome 124.0.0.0"
+
+        bname, bpath, bver = run_trial.find_browser_runtime(preferred="chromium")
+        self.assertEqual(bname, "chromium")
+        self.assertEqual(bpath, "/usr/bin/google-chrome")
+
+    @patch("lab.run_trial.is_snap_browser")
+    @patch("shutil.which")
+    def test_find_browser_runtime_rejects_explicit_snap_path(self, mock_which, mock_is_snap):
+        """Explicit path to Snap binary raises BrowserPreflightError reporting the blocker."""
+        mock_which.return_value = "/snap/bin/chromium"
+        mock_is_snap.return_value = True
+
+        with self.assertRaises(run_trial.BrowserPreflightError) as ctx:
+            run_trial.find_browser_runtime(preferred="/snap/bin/chromium")
+        err = str(ctx.exception)
+        self.assertIn("Snap package", err)
+        self.assertIn("snap-confine", err)
+        self.assertIn("google-chrome", err)
+
+    @patch("lab.run_trial.is_snap_browser")
+    @patch("shutil.which")
+    def test_find_browser_runtime_rejects_snap_when_no_non_snap_available(self, mock_which, mock_is_snap):
+        """When requested browser is Snap and no non-Snap alternative exists, raises BrowserPreflightError."""
+        mock_which.side_effect = lambda cmd: "/snap/bin/firefox" if cmd == "firefox" else None
+        mock_is_snap.return_value = True
+
+        with self.assertRaises(run_trial.BrowserPreflightError) as ctx:
+            run_trial.find_browser_runtime(preferred="firefox")
+        err = str(ctx.exception)
+        self.assertIn("firefox", err)
+        self.assertIn("Snap package", err)
 
 
 class TestLabReadinessValidation(unittest.TestCase):
@@ -362,8 +428,9 @@ class TestCaptureLifecycleAndHTTPStatusRegression(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
+    @patch("os.geteuid", return_value=0)
     @patch("subprocess.Popen")
-    def test_start_packet_capture_includes_immediate_mode_and_readiness(self, mock_popen):
+    def test_start_packet_capture_includes_immediate_mode_and_readiness(self, mock_popen, mock_euid):
         """Verifies start_packet_capture uses immediate mode, packet buffering, and validates readiness."""
         mock_proc = MagicMock()
         mock_proc.poll.return_value = None
@@ -399,9 +466,10 @@ class TestCaptureLifecycleAndHTTPStatusRegression(unittest.TestCase):
         # Clean up file handle
         proc._ps028_log_fp.close()
 
+    @patch("os.geteuid", return_value=0)
     @patch("subprocess.Popen")
     @patch("lab.run_trial.stop_packet_capture")
-    def test_start_packet_capture_fails_and_cleans_up_on_readiness_timeout(self, mock_stop, mock_popen):
+    def test_start_packet_capture_fails_and_cleans_up_on_readiness_timeout(self, mock_stop, mock_popen, mock_euid):
         """
         Requirement 2:
         Verifies start_packet_capture raises TrialExecutionError and stops process
@@ -427,8 +495,9 @@ class TestCaptureLifecycleAndHTTPStatusRegression(unittest.TestCase):
         self.assertIn("timed out waiting for readiness", str(ctx.exception))
         mock_stop.assert_called_once_with(mock_proc, timeout=1.0)
 
+    @patch("os.geteuid", return_value=0)
     @patch("subprocess.Popen")
-    def test_start_packet_capture_fails_when_tcpdump_terminates_prematurely(self, mock_popen):
+    def test_start_packet_capture_fails_when_tcpdump_terminates_prematurely(self, mock_popen, mock_euid):
         """
         Requirement 2:
         Verifies start_packet_capture raises TrialExecutionError and closes log
@@ -1429,6 +1498,993 @@ class TestDNSObservationParsingRegression(unittest.TestCase):
         self.assertEqual(resp_a["qtype"], "A")
         self.assertEqual(resp_a["address"], "10.0.2.10")
         self.assertAlmostEqual(resp_a["timestamp"], 1793205291.355056, places=4)
+
+
+class TestTcpdumpDropStatisticsAndCaptureLoss(unittest.TestCase):
+    """Tests for tcpdump drop statistics parsing and capture loss classification."""
+
+    def test_parse_tcpdump_drop_statistics_with_kernel_drops(self):
+        log_text = (
+            "tcpdump: listening on any, link-type LINUX_SLL2 (Linux cooked v2), snapshot length 262144 bytes\n"
+            "166 packets captured\n"
+            "168 packets received by filter\n"
+            "2 packets dropped by kernel\n"
+        )
+        stats = run_trial.parse_tcpdump_drop_statistics(log_text)
+        self.assertEqual(stats["packets_captured"], 166)
+        self.assertEqual(stats["packets_received_by_filter"], 168)
+        self.assertEqual(stats["packets_dropped_by_kernel"], 2)
+        self.assertEqual(stats["packets_dropped_by_interface"], 0)
+        self.assertEqual(stats["total_packets_dropped"], 2)
+        self.assertTrue(stats["capture_loss"])
+        self.assertIn("Capture loss detected", stats["capture_loss_message"])
+        self.assertIn("2 dropped by kernel", stats["capture_loss_message"])
+
+    def test_parse_tcpdump_drop_statistics_zero_drops(self):
+        log_text = (
+            "tcpdump: listening on any, link-type LINUX_SLL2\n"
+            "100 packets captured\n"
+            "100 packets received by filter\n"
+            "0 packets dropped by kernel\n"
+        )
+        stats = run_trial.parse_tcpdump_drop_statistics(log_text)
+        self.assertEqual(stats["packets_captured"], 100)
+        self.assertEqual(stats["packets_received_by_filter"], 100)
+        self.assertEqual(stats["packets_dropped_by_kernel"], 0)
+        self.assertEqual(stats["total_packets_dropped"], 0)
+        self.assertFalse(stats["capture_loss"])
+        self.assertIsNone(stats["capture_loss_message"])
+
+    def test_parse_tcpdump_drop_statistics_interface_drops(self):
+        log_text = (
+            "50 packets captured\n"
+            "55 packets received by filter\n"
+            "0 packets dropped by kernel\n"
+            "5 packets dropped by interface\n"
+        )
+        stats = run_trial.parse_tcpdump_drop_statistics(log_text)
+        self.assertEqual(stats["packets_dropped_by_interface"], 5)
+        self.assertEqual(stats["total_packets_dropped"], 5)
+        self.assertTrue(stats["capture_loss"])
+
+    def test_classify_fallback_marks_inconclusive_when_capture_loss_is_true(self):
+        """
+        PS-028 Invariant:
+        When capture loss is detected (dropped packets), absence of an IPv4 attempt
+        must NOT produce a conclusive DIRECT_IPV6 classification. It must be INCONCLUSIVE.
+        """
+        dissection = {
+            "ipv6": {
+                "syn_count": 1,
+                "first_syn_time": 1000.0,
+                "syn_ack_received": True,
+                "syn_ack_time": 1000.03,
+                "rst_received": False,
+                "connection_established": True,
+                "http_observed": True,
+            },
+            "ipv4": {
+                "syn_count": 0,
+                "first_syn_time": None,
+                "syn_ack_received": False,
+                "syn_ack_time": None,
+                "rst_received": False,
+                "connection_established": False,
+                "http_observed": False,
+            },
+            "connection_attempt_delay_ms": None,
+            "connection_setup_time_ms": 30.0,
+            "http_status_code": 200,
+            "http_response_family": "IPv6",
+        }
+        http_outcome = {"success": True, "winning_address_family": "IPv6"}
+
+        # Case A: With capture loss -> INCONCLUSIVE
+        res_loss = run_trial.classify_fallback(
+            dissection=dissection,
+            http_outcome=http_outcome,
+            pcap_valid=True,
+            capture_loss=True,
+            capture_loss_message="2 packet(s) dropped by kernel"
+        )
+        self.assertEqual(res_loss["classification"], "INCONCLUSIVE")
+        self.assertFalse(res_loss["fallback_occurred"])
+        self.assertIn("Capture loss detected", res_loss["reason"])
+
+        # Case B: Without capture loss -> DIRECT_IPV6
+        res_clean = run_trial.classify_fallback(
+            dissection=dissection,
+            http_outcome=http_outcome,
+            pcap_valid=True,
+            capture_loss=False
+        )
+        self.assertEqual(res_clean["classification"], "DIRECT_IPV6")
+        self.assertFalse(res_clean["fallback_occurred"])
+
+
+class TestChromiumNetLogExtraction(unittest.TestCase):
+    """Tests for extracting HTTP status and connection telemetry from Chromium NetLog."""
+
+    def setUp(self):
+        self.temp_dir = Path(tempfile.mkdtemp(prefix="ps028_netlog_test_"))
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_parse_chromium_netlog_extracts_http_200_and_ipv6(self):
+        netlog_path = self.temp_dir / "netlog.json"
+        netlog_data = {
+            "constants": {
+                "logEventTypes": {
+                    "URL_REQUEST_START_JOB": 1,
+                    "TCP_CONNECT": 2,
+                    "HTTP_TRANSACTION_READ_RESPONSE_HEADERS": 3
+                }
+            },
+            "events": [
+                {
+                    "source": {"id": 101},
+                    "type": 1,
+                    "params": {"url": "http://trial-xyz.he.test/"}
+                },
+                {
+                    "source": {"id": 102},
+                    "type": 2,
+                    "params": {"remote_address": "[2001:db8:2::10]:80"}
+                },
+                {
+                    "source": {"id": 101},
+                    "type": 3,
+                    "params": {
+                        "headers": [
+                            "HTTP/1.1 200 OK",
+                            "Content-Type: text/html",
+                            "Server: nginx"
+                        ]
+                    }
+                }
+            ]
+        }
+        netlog_path.write_text(json.dumps(netlog_data), encoding="utf-8")
+
+        res = run_trial.parse_chromium_netlog(netlog_path, target_url="http://trial-xyz.he.test/")
+        self.assertEqual(res["status_code"], 200)
+        self.assertEqual(res["winning_family"], "IPv6")
+        self.assertEqual(res["remote_address"], "[2001:db8:2::10]:80")
+
+    def test_parse_chromium_netlog_extracts_http_404_response(self):
+        netlog_path = self.temp_dir / "netlog.json"
+        netlog_data = {
+            "constants": {
+                "logEventTypes": {
+                    "URL_REQUEST_START_JOB": 1,
+                    "TCP_CONNECT": 2,
+                    "HTTP_TRANSACTION_READ_RESPONSE_HEADERS": 3
+                }
+            },
+            "events": [
+                {
+                    "source": {"id": 201},
+                    "type": 1,
+                    "params": {"url": "http://trial-xyz.he.test/favicon.ico"}
+                },
+                {
+                    "source": {"id": 202},
+                    "type": 2,
+                    "params": {"remote_address": "10.0.2.10:80"}
+                },
+                {
+                    "source": {"id": 201},
+                    "type": 3,
+                    "params": {
+                        "headers": [
+                            "HTTP/1.1 404 Not Found",
+                            "Content-Type: text/html"
+                        ]
+                    }
+                }
+            ]
+        }
+        netlog_path.write_text(json.dumps(netlog_data), encoding="utf-8")
+
+        res = run_trial.parse_chromium_netlog(netlog_path, target_url="http://trial-xyz.he.test/favicon.ico")
+        self.assertEqual(res["status_code"], 404)
+        self.assertEqual(res["winning_family"], "IPv4")
+
+    def test_parse_chromium_netlog_handles_missing_file_gracefully(self):
+        missing_path = self.temp_dir / "nonexistent.json"
+        res = run_trial.parse_chromium_netlog(missing_path)
+        self.assertIsNone(res["status_code"])
+        self.assertIsNone(res["winning_family"])
+
+
+class TestBrowserLaunchEnvironmentAndPreflight(unittest.TestCase):
+    """
+    Focused tests for Chrome unprivileged launch environment,
+    effective UID/GID privilege dropping, path writability verification,
+    capture readiness confirmation, and preflight failure reporting.
+    """
+
+    def setUp(self):
+        self.temp_dir = Path(tempfile.mkdtemp(prefix="ps028_launch_test_"))
+        self.lock_file = self.temp_dir / ".test.lock"
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_get_browser_uid_gid_never_returns_root(self):
+        """get_browser_uid_gid must return an unprivileged UID/GID and never root (UID 0)."""
+        uid, gid = run_trial.get_browser_uid_gid()
+        self.assertNotEqual(uid, 0, "Browser UID must never be 0 (root)")
+        self.assertNotEqual(gid, 0, "Browser GID must never be 0 (root)")
+
+    @patch.dict(os.environ, {"SUDO_UID": "1001", "SUDO_GID": "1001"}, clear=False)
+    @patch("os.getuid", return_value=0)
+    @patch("os.geteuid", return_value=0)
+    def test_get_browser_uid_gid_preserves_sudo_invoking_identity(self, mock_euid, mock_uid):
+        """When running under sudo (UID 0), get_browser_uid_gid extracts the invoking user's UID/GID."""
+        uid, gid = run_trial.get_browser_uid_gid()
+        self.assertEqual(uid, 1001)
+        self.assertEqual(gid, 1001)
+
+    def test_get_browser_env_sets_unprivileged_identity_and_xdg_paths(self):
+        """
+        get_browser_env must set HOME to user home, consistent USER/LOGNAME,
+        and XDG_CONFIG_HOME, XDG_CACHE_HOME, XDG_DATA_HOME without /root leaks.
+        """
+        env = run_trial.get_browser_env(target_uid=1000, target_gid=1000)
+        self.assertEqual(env["USER"], "indrani")
+        self.assertEqual(env["LOGNAME"], "indrani")
+        self.assertEqual(env["HOME"], "/home/indrani")
+        self.assertEqual(env["XDG_CONFIG_HOME"], "/home/indrani/.config")
+        self.assertEqual(env["XDG_CACHE_HOME"], "/home/indrani/.cache")
+        self.assertEqual(env["XDG_DATA_HOME"], "/home/indrani/.local/share")
+
+        # Crucial PS-028 requirement: No inappropriate /root paths in browser environment
+        for k, v in env.items():
+            self.assertNotIn("/root", v, f"Environment variable {k}={v} must not contain /root")
+
+    def test_get_browser_env_refuses_root_uid(self):
+        """get_browser_env must refuse target_uid=0 and raise BrowserPreflightError."""
+        with self.assertRaises(run_trial.BrowserPreflightError) as ctx:
+            run_trial.get_browser_env(target_uid=0, target_gid=0)
+        self.assertIn("root user", str(ctx.exception).lower())
+
+    def test_get_browser_env_xdg_runtime_dir_included_only_if_owned_by_user(self):
+        """XDG_RUNTIME_DIR is included only if a valid directory exists and is owned by target_uid."""
+        mock_user_dir = self.temp_dir / "user_1000"
+        mock_user_dir.mkdir(mode=0o700)
+        mock_st_user = MagicMock()
+        mock_st_user.st_uid = 1000
+        mock_st_user.st_mode = stat.S_IFDIR | 0o700
+
+        with patch.object(Path, "stat", return_value=mock_st_user):
+            env_with_valid = run_trial.get_browser_env(
+                target_uid=1000,
+                target_gid=1000,
+                base_env={"XDG_RUNTIME_DIR": str(mock_user_dir)}
+            )
+            self.assertEqual(env_with_valid.get("XDG_RUNTIME_DIR"), str(mock_user_dir))
+
+        mock_st_root = MagicMock()
+        mock_st_root.st_uid = 0
+        mock_st_root.st_mode = stat.S_IFDIR | 0o700
+
+        with patch.object(Path, "stat", return_value=mock_st_root):
+            env_with_root_runtime = run_trial.get_browser_env(
+                target_uid=1000,
+                target_gid=1000,
+                base_env={"XDG_RUNTIME_DIR": "/run/user/0"}
+            )
+            self.assertNotIn("XDG_RUNTIME_DIR", env_with_root_runtime)
+
+    def test_get_browser_env_rejects_inappropriate_root_paths_in_base_env(self):
+        """get_browser_env rejects leaked root paths and cleans environment."""
+        tainted_base = {
+            "HOME": "/root",
+            "USER": "root",
+            "LOGNAME": "root",
+            "XDG_CONFIG_HOME": "/root/.config",
+            "CUSTOM_PATH": "/root/something"
+        }
+        env = run_trial.get_browser_env(target_uid=1000, target_gid=1000, base_env=tainted_base)
+        self.assertEqual(env["HOME"], "/home/indrani")
+        self.assertEqual(env["USER"], "indrani")
+        for k, v in env.items():
+            self.assertNotIn("/root", v)
+
+    def test_verify_browser_paths_writable_success(self):
+        """verify_browser_paths_writable succeeds when profile and crashpad dirs are writable."""
+        profile = self.temp_dir / "profile"
+        mock_env = {
+            "HOME": str(self.temp_dir),
+            "XDG_CONFIG_HOME": str(self.temp_dir / ".config"),
+            "XDG_DATA_HOME": str(self.temp_dir / ".local" / "share")
+        }
+        paths = run_trial.verify_browser_paths_writable(
+            profile_dir=profile,
+            target_uid=os.getuid(),
+            target_gid=os.getgid(),
+            browser_name="google-chrome",
+            env=mock_env
+        )
+        self.assertTrue(paths["profile_dir"].is_dir())
+        self.assertTrue(paths["crashpad_dir"].is_dir())
+
+    def test_verify_browser_paths_writable_fails_on_unwritable_profile(self):
+        """verify_browser_paths_writable raises BrowserPreflightError when profile is not writable."""
+        unwritable_parent = self.temp_dir / "ro_dir"
+        unwritable_parent.mkdir()
+        unwritable_parent.chmod(0o500)
+        profile = unwritable_parent / "subprofile"
+
+        try:
+            with self.assertRaises(run_trial.BrowserPreflightError) as ctx:
+                run_trial.verify_browser_paths_writable(
+                    profile_dir=profile,
+                    target_uid=os.getuid(),
+                    target_gid=os.getgid()
+                )
+            self.assertIn("profile directory", str(ctx.exception).lower())
+        finally:
+            unwritable_parent.chmod(0o700)
+
+    @patch("subprocess.run")
+    def test_run_browser_executes_with_unprivileged_command_and_clean_env(self, mock_run):
+        """
+        run_browser drops privileges via setpriv or sudo -u, passes env -i with unprivileged variables,
+        and contains no /root paths.
+        """
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.stdout = "<html><body>Clean DOM</body></html>"
+        mock_proc.stderr = ""
+        mock_run.return_value = mock_proc
+
+        profile = self.temp_dir / "chrome_profile"
+        profile.mkdir()
+
+        res = run_trial.run_browser(
+            browser_name="google-chrome",
+            browser_path="/usr/bin/google-chrome",
+            target_url="http://trial-env-test.he.test/",
+            profile_dir=profile
+        )
+
+        mock_run.assert_called_once()
+        cmd = mock_run.call_args[0][0]
+        cmd_str = " ".join(cmd)
+
+        self.assertTrue(
+            "--reuid=1000" in cmd_str or "sudo -u" in cmd_str,
+            f"Command must drop privileges to unprivileged UID: {cmd_str}"
+        )
+        self.assertIn("env", cmd)
+        self.assertIn("-i", cmd)
+        self.assertIn("HOME=/home/indrani", cmd_str)
+        self.assertIn("USER=indrani", cmd_str)
+        self.assertIn("XDG_CONFIG_HOME=/home/indrani/.config", cmd_str)
+        self.assertNotIn("/root", cmd_str)
+        self.assertEqual(res["exit_code"], 0)
+
+    @patch("subprocess.run")
+    def test_run_browser_raises_preflight_on_startup_crash(self, mock_run):
+        """
+        When Chrome crashes on startup (exit code -5 or permission denied / crashpad error),
+        run_browser raises BrowserPreflightError rather than returning network failure.
+        """
+        mock_proc = MagicMock()
+        mock_proc.returncode = -5
+        mock_proc.stdout = ""
+        mock_proc.stderr = (
+            "mkdir: cannot create directory ‘/root’: Permission denied\n"
+            "chrome_crashpad_handler: --database is required\n"
+        )
+        mock_run.return_value = mock_proc
+
+        profile = self.temp_dir / "crash_profile"
+        profile.mkdir()
+
+        with self.assertRaises(run_trial.BrowserPreflightError) as ctx:
+            run_trial.run_browser(
+                browser_name="google-chrome",
+                browser_path="/usr/bin/google-chrome",
+                target_url="http://trial-crash.he.test/",
+                profile_dir=profile
+            )
+        self.assertTrue(
+            "signal 5" in str(ctx.exception) or "launch environment error" in str(ctx.exception)
+        )
+
+    def test_confirm_capture_ready_detects_listening(self):
+        """confirm_capture_ready returns True when 'listening on' is logged."""
+        log_file = self.temp_dir / "tcpdump.log"
+        log_file.write_text("tcpdump: listening on any, link-type LINUX_SLL2 (Linux cooked v2), snapshot length 262144 bytes\n")
+        handle = {"parent_pid": os.getpid()}
+
+        ready = run_trial.confirm_capture_ready(handle, log_file, timeout=1.0)
+        self.assertTrue(ready)
+
+    def test_confirm_capture_ready_raises_when_not_listening(self):
+        """confirm_capture_ready raises TrialExecutionError when 'listening on' is missing."""
+        log_file = self.temp_dir / "tcpdump.log"
+        log_file.write_text("tcpdump: syntax error\n")
+        handle = {"parent_pid": os.getpid()}
+
+        with patch("lab.run_trial._is_pid_alive", return_value=True):
+            with self.assertRaises(run_trial.TrialExecutionError) as ctx:
+                run_trial.confirm_capture_ready(handle, log_file, timeout=0.1)
+            self.assertIn("not confirmed", str(ctx.exception).lower())
+
+    @patch("lab.run_trial.validate_lab_readiness")
+    @patch("lab.run_trial.verify_browser_paths_writable")
+    @patch("lab.impair.clear_impairments")
+    @patch("lab.impair.self_test_baseline", return_value=True)
+    def test_run_trial_browser_preflight_failure_aborts_without_network_result(
+        self, mock_base, mock_clear, mock_verify, mock_ready
+    ):
+        """
+        Task 5:
+        A browser preflight failure is reported as a launch failure rather than a network result.
+        Must raise BrowserPreflightError, must NOT generate zero-packet network result,
+        and must guarantee profile cleanup and lock release.
+        """
+        mock_ready.return_value = {
+            "status": "PASS",
+            "checks": {"browser": {"name": "google-chrome", "path": "/usr/bin/google-chrome", "valid": True}}
+        }
+        mock_verify.side_effect = run_trial.BrowserPreflightError(
+            "Crashpad database path '/home/indrani/.config/google-chrome/Crash Reports' is not writable"
+        )
+
+        trial_dir = self.temp_dir / "preflight_fail_trial"
+        trial_dir.mkdir(parents=True, exist_ok=True)
+
+        with self.assertRaises(run_trial.BrowserPreflightError) as ctx:
+            run_trial.run_trial(
+                scenario_id="S0",
+                browser_pref="google-chrome",
+                is_simulation=False,
+                skip_baseline_check=True,
+                lock_file=self.lock_file,
+                output_dir=trial_dir
+            )
+
+        self.assertIn("is not writable", str(ctx.exception))
+        result_json = trial_dir / "result.json"
+        self.assertFalse(result_json.exists(), "Preflight failure must not produce a result.json with network results")
+        self.assertFalse(concurrency.is_lock_held_by_current_thread(self.lock_file))
+
+
+class TestCaptureFilterBufferAndDropAccountingRegression(unittest.TestCase):
+    """
+    Regression Test Suite for Task 1, 2, 3, 4, 5:
+    - Narrow capture filter preserving required evidence (DNS 10.0.1.1:53, TCP 80 10.0.2.10 and 2001:db8:2::10).
+    - Capture buffer configuration (-B 8192) and client interface selection (ps028-cl-rt).
+    - Browser background activity suppression flags without DNS/network bypassing.
+    - Explicit kernel-drop and interface-drop accounting.
+    - Loss-aware classification preventing conclusive claims on packet drops.
+    - NetLog evidence preservation surviving profile cleanup.
+    """
+
+    def setUp(self):
+        self.temp_dir = Path(tempfile.mkdtemp(prefix="ps028_filter_test_"))
+        self.lock_file = self.temp_dir / ".lab.lock"
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_default_bpf_filter_syntax_and_targets(self):
+        """BPF filter compiles with tcpdump and strictly targets required lab endpoints."""
+        bpf = run_trial.DEFAULT_BPF_FILTER
+        self.assertIn("10.0.1.1", bpf)
+        self.assertIn("port 53", bpf)
+        self.assertIn("10.0.2.10", bpf)
+        self.assertIn("2001:db8:2::10", bpf)
+        self.assertIn("tcp port 80", bpf)
+
+        # Validate with tcpdump -d (libpcap BPF compiler)
+        res = subprocess.run(
+            ["tcpdump", "-d", bpf],
+            capture_output=True,
+            text=True
+        )
+        self.assertEqual(res.returncode, 0, f"BPF filter failed to compile: {res.stderr}")
+        self.assertIn("ret", res.stdout)
+
+    @patch("subprocess.Popen")
+    @patch("os.geteuid", return_value=0)
+    def test_start_packet_capture_includes_buffer_interface_and_filter(self, mock_euid, mock_popen):
+        """Verifies start_packet_capture passes -i ps028-cl-rt, -B 8192, and narrow BPF filter."""
+        mock_proc = MagicMock()
+        mock_proc.poll.return_value = None
+        mock_proc.pid = 22222
+
+        pcap_path = self.temp_dir / "capture.pcap"
+        log_file = self.temp_dir / "tcpdump.log"
+
+        def _popen_side(*args, **kwargs):
+            log_file.write_text("tcpdump: listening on ps028-cl-rt, link-type EN10MB\n", encoding="utf-8")
+            return mock_proc
+
+        mock_popen.side_effect = _popen_side
+
+        proc = run_trial.start_packet_capture(
+            output_pcap=pcap_path,
+            log_file=log_file,
+            netns="ps028-cl",
+            is_simulation=False
+        )
+        self.assertIsNotNone(proc)
+        cmd_called = mock_popen.call_args[0][0]
+
+        self.assertIn("-i", cmd_called)
+        self.assertIn("ps028-cl-rt", cmd_called)
+        self.assertIn("-B", cmd_called)
+        self.assertIn("8192", cmd_called)
+        self.assertIn("--immediate-mode", cmd_called)
+        self.assertIn("-U", cmd_called)
+        self.assertIn(run_trial.DEFAULT_BPF_FILTER, cmd_called)
+        proc._ps028_log_fp.close()
+
+    @patch("lab.privileged_helper.run_helper_action")
+    @patch("os.geteuid", return_value=1000)
+    def test_start_packet_capture_unprivileged_passes_filter_and_buffer(self, mock_euid, mock_helper):
+        """When unprivileged, start_packet_capture passes --filter and --buffer-size-kb to helper."""
+        pcap_path = self.temp_dir / "capture.pcap"
+        log_file = self.temp_dir / "tcpdump.log"
+        mock_helper.return_value = {
+            "status": "OK",
+            "parent_pid": 33333,
+            "tcpdump_pid": 33334,
+            "pcap_path": str(pcap_path),
+            "log_path": str(log_file),
+            "interface": "ps028-cl-rt",
+            "filter": run_trial.DEFAULT_BPF_FILTER,
+            "buffer_size_kb": 8192
+        }
+
+        proc = run_trial.start_packet_capture(
+            output_pcap=pcap_path,
+            log_file=log_file,
+            netns="ps028-cl",
+            is_simulation=False
+        )
+        self.assertEqual(proc.pid, 33333)
+        mock_helper.assert_called_once()
+        extra_args = mock_helper.call_args[1].get("extra_args")
+        self.assertIn("--interface", extra_args)
+        self.assertIn("ps028-cl-rt", extra_args)
+        self.assertIn("--filter", extra_args)
+        self.assertIn(run_trial.DEFAULT_BPF_FILTER, extra_args)
+        self.assertIn("--buffer-size-kb", extra_args)
+        self.assertIn("8192", extra_args)
+
+    @patch("subprocess.run")
+    def test_run_browser_disables_background_traffic_without_bypassing_network(self, mock_run):
+        """
+        run_browser configures flags that disable irrelevant background requests
+        while strictly preserving genuine DNS/network path (no host-resolver rules or curl).
+        """
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.stdout = "<html>OK</html>"
+        mock_proc.stderr = ""
+        mock_run.return_value = mock_proc
+
+        profile = self.temp_dir / "prof"
+        profile.mkdir()
+
+        res = run_trial.run_browser(
+            browser_name="google-chrome",
+            browser_path="/usr/bin/google-chrome",
+            target_url="http://trial-test.he.test/",
+            profile_dir=profile
+        )
+
+        cmd = mock_run.call_args[0][0]
+        cmd_str = " ".join(cmd)
+
+        # Background suppression flags
+        self.assertIn("--disable-component-update", cmd_str)
+        self.assertIn("--disable-domain-reliability", cmd_str)
+        self.assertIn("--disable-client-side-phishing-detection", cmd_str)
+        self.assertIn("--safebrowsing-disable-auto-update", cmd_str)
+        self.assertIn("--disable-features=OptimizationHints,Translate", cmd_str)
+        self.assertIn("--disable-breakpad", cmd_str)
+        self.assertIn("--disable-background-timer-throttling", cmd_str)
+
+        # Invariants: No resolver bypass, no curl
+        self.assertNotIn("--host-resolver-rules", cmd_str)
+        self.assertNotIn("curl", cmd_str)
+        self.assertEqual(cmd[-1], "http://trial-test.he.test/")
+
+    def test_parse_tcpdump_drop_statistics_exact_trial_kernel_drops(self):
+        """
+        Verifies drop accounting on the exact output observed in trial-20261029185347-28c5e7cb:
+        124 captured, 138 received by filter, 14 dropped by kernel.
+        """
+        log_text = (
+            "tcpdump: data link type LINUX_SLL2\n"
+            "tcpdump: listening on any, link-type LINUX_SLL2 (Linux cooked v2), snapshot length 262144 bytes\n"
+            "124 packets captured\n"
+            "138 packets received by filter\n"
+            "14 packets dropped by kernel\n"
+        )
+        stats = run_trial.parse_tcpdump_drop_statistics(log_text)
+        self.assertEqual(stats["packets_captured"], 124)
+        self.assertEqual(stats["packets_received_by_filter"], 138)
+        self.assertEqual(stats["packets_dropped_by_kernel"], 14)
+        self.assertEqual(stats["packets_dropped_by_interface"], 0)
+        self.assertEqual(stats["total_packets_dropped"], 14)
+        self.assertTrue(stats["capture_loss"])
+        self.assertIn("14 packet(s) lost", stats["capture_loss_message"])
+        self.assertIn("14 dropped by kernel", stats["capture_loss_message"])
+
+    def test_parse_tcpdump_drop_statistics_discrepancy_accounting(self):
+        """When captured < received without explicit drop line, capture loss is detected."""
+        log_text = (
+            "40 packets captured\n"
+            "50 packets received by filter\n"
+        )
+        stats = run_trial.parse_tcpdump_drop_statistics(log_text)
+        self.assertEqual(stats["packets_captured"], 40)
+        self.assertEqual(stats["packets_received_by_filter"], 50)
+        self.assertEqual(stats["total_packets_dropped"], 10)
+        self.assertTrue(stats["capture_loss"])
+
+    def test_classify_fallback_prevents_conclusive_direct_ipv4_on_loss(self):
+        """Capture loss prevents conclusive DIRECT_IPV4 claims when IPv6 attempts are unobserved."""
+        dissection = {
+            "ipv6": {"syn_count": 0, "first_syn_time": None, "syn_ack_received": False, "syn_ack_time": None, "rst_received": False, "connection_established": False, "http_observed": False},
+            "ipv4": {"syn_count": 1, "first_syn_time": 100.0, "syn_ack_received": True, "syn_ack_time": 100.02, "rst_received": False, "connection_established": True, "http_observed": True},
+            "connection_attempt_delay_ms": None,
+            "connection_setup_time_ms": 20.0,
+            "http_status_code": 200,
+            "http_response_family": "IPv4"
+        }
+        res = run_trial.classify_fallback(
+            dissection=dissection,
+            http_outcome={"success": True, "winning_address_family": "IPv4"},
+            pcap_valid=True,
+            capture_loss=True,
+            capture_loss_message="14 dropped by kernel"
+        )
+        self.assertEqual(res["classification"], "INCONCLUSIVE")
+        self.assertIn("Capture loss detected", res["reason"])
+
+    @patch("lab.run_trial.validate_lab_readiness")
+    @patch("lab.run_trial.verify_browser_paths_writable")
+    @patch("lab.impair.apply_scenario")
+    @patch("lab.impair.clear_impairments")
+    @patch("lab.impair.self_test_baseline", return_value=True)
+    @patch("lab.run_trial.start_packet_capture")
+    @patch("lab.run_trial.stop_packet_capture", return_value=True)
+    @patch("lab.run_trial.run_browser")
+    @patch("lab.run_trial.validate_pcap_file")
+    def test_netlog_preserved_in_trial_dir_survives_profile_cleanup(
+        self, mock_val_pcap, mock_browser, mock_stop_cap, mock_start_cap,
+        mock_baseline, mock_clear, mock_apply, mock_verify, mock_readiness
+    ):
+        """
+        Task 5:
+        Ensures NetLog is copied to trial_dir / 'netlog.json' and survives profile directory cleanup.
+        evidence_paths['browser_netlog'] must point to the persistent file in trial_dir.
+        """
+        mock_readiness.return_value = {
+            "status": "PASS",
+            "checks": {"browser": {"name": "google-chrome", "path": "/usr/bin/google-chrome", "valid": True}}
+        }
+        mock_val_pcap.return_value = (True, "aabbcc", 1024, 15, "Valid PCAP")
+
+        trial_dir = self.temp_dir / "trial_netlog_preservation"
+        trial_dir.mkdir(parents=True, exist_ok=True)
+
+        def _mock_run_browser(*args, **kwargs):
+            pdir = kwargs.get("profile_dir")
+            netlog = pdir / "netlog.json"
+            netlog.write_text('{"constants": {}, "events": [{"type": 1}]}', encoding="utf-8")
+            return {
+                "name": "google-chrome",
+                "executable": "/usr/bin/google-chrome",
+                "exit_code": 0,
+                "timed_out": False,
+                "duration_ms": 500.0,
+                "stdout": "OK",
+                "stderr": "",
+                "http_status": 200,
+                "success": True,
+                "winning_family": "IPv6",
+                "netlog_path": str(netlog)
+            }
+
+        mock_browser.side_effect = _mock_run_browser
+
+        res = run_trial.run_trial(
+            scenario_id="S0",
+            browser_pref="google-chrome",
+            is_simulation=False,
+            skip_baseline_check=True,
+            lock_file=self.lock_file,
+            output_dir=trial_dir
+        )
+
+        persistent_netlog = trial_dir / "netlog.json"
+        self.assertTrue(persistent_netlog.is_file(), "NetLog evidence must exist in trial directory")
+        self.assertEqual(res["evidence_paths"]["browser_netlog"], str(persistent_netlog))
+        self.assertTrue(res["browser"]["profile_cleaned"])
+
+
+class TestFirefoxSupportRegression(unittest.TestCase):
+    """
+    Focused regression and compliance tests for standalone Firefox runner:
+    1. Runtime discovery & non-Snap qualification.
+    2. Command construction (Firefox flags vs Chrome flag exclusion).
+    3. Execution environment (clean environment, unprivileged UID, MOZ_LOG, no /root).
+    4. Telemetry parsing & status/winning-family instrumentation.
+    5. Evidence preservation, profile cleanup, and lock safety.
+    """
+
+    def setUp(self):
+        self.temp_dir = Path(tempfile.mkdtemp(prefix="ps028_firefox_test_"))
+        self.lock_file = self.temp_dir / ".lab.lock"
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_firefox_discovery_with_explicit_standalone_path(self):
+        """Verifies explicit standalone Firefox path is discovered and qualified."""
+        with patch("lab.run_trial._query_browser_version", return_value="Mozilla Firefox 159.0"):
+            bname, bpath, bver = run_trial.find_browser_runtime(
+                preferred="/home/indrani/opt/firefox-measurement/firefox"
+            )
+            self.assertEqual(bname, "firefox")
+            self.assertEqual(bpath, "/home/indrani/opt/firefox-measurement/firefox")
+            self.assertEqual(bver, "Mozilla Firefox 159.0")
+
+    def test_firefox_standalone_is_not_detected_as_snap(self):
+        """Standalone Firefox binary must not be classified as a Snap-backed package."""
+        self.assertFalse(run_trial.is_snap_browser("/home/indrani/opt/firefox-measurement/firefox"))
+
+    def test_firefox_snap_binary_is_detected_as_snap(self):
+        """Standard Ubuntu Snap binary at /snap/bin/firefox must be identified as Snap."""
+        self.assertTrue(run_trial.is_snap_browser("/snap/bin/firefox"))
+
+    def test_firefox_command_construction_and_flags(self):
+        """
+        Firefox command must include headless, profile, no-remote, new-instance,
+        and strictly omit Chrome-only flags.
+        """
+        profile_dir = self.temp_dir / "profile"
+        profile_dir.mkdir(parents=True, exist_ok=True)
+        captured_cmd = []
+
+        def mock_subprocess_run(cmd, **kwargs):
+            nonlocal captured_cmd
+            if isinstance(cmd, list) and not any(c == "pkill" for c in cmd):
+                captured_cmd = list(cmd)
+                log_file = profile_dir / "moz_telemetry.log"
+                log_file.write_text("nsHttpTransaction [HTTP/1.1 200 OK]\n", encoding="utf-8")
+            res = MagicMock()
+            res.returncode = 0
+            res.stdout = "OK"
+            res.stderr = ""
+            return res
+
+        with patch("subprocess.run", side_effect=mock_subprocess_run), \
+             patch("lab.run_trial.get_browser_uid_gid", return_value=(1000, 1000)):
+            run_trial.run_browser(
+                browser_name="firefox",
+                browser_path="/home/indrani/opt/firefox-measurement/firefox",
+                target_url="http://trial-test.he.test/",
+                profile_dir=profile_dir,
+                timeout=5.0,
+                is_simulation=False
+            )
+
+        cmd_str = " ".join(captured_cmd)
+        self.assertIn("--headless", captured_cmd)
+        self.assertIn("--profile", captured_cmd)
+        self.assertIn(str(profile_dir.resolve()), captured_cmd)
+        self.assertIn("--no-remote", captured_cmd)
+        self.assertIn("--new-instance", captured_cmd)
+        self.assertEqual(captured_cmd[-1], "http://trial-test.he.test/")
+
+        # Strictly omit Chrome-only flags
+        self.assertNotIn("--dump-dom", cmd_str)
+        self.assertNotIn("--user-data-dir", cmd_str)
+        self.assertNotIn("--no-sandbox", cmd_str)
+        self.assertNotIn("--disable-gpu", cmd_str)
+        self.assertNotIn("--log-net-log", cmd_str)
+        self.assertNotIn("--disable-background-networking", cmd_str)
+        self.assertNotIn("--safebrowsing-disable-auto-update", cmd_str)
+        self.assertNotIn("launch-snap-browser", cmd_str)
+
+    def test_firefox_execution_environment(self):
+        """
+        Browser environment must define MOZ_LOG, MOZ_LOG_FILE, valid XDG dirs,
+        and not leak root directories.
+        """
+        profile_dir = self.temp_dir / "profile"
+        profile_dir.mkdir(parents=True, exist_ok=True)
+        captured_cmd = []
+        captured_env = {}
+
+        def mock_subprocess_run(cmd, **kwargs):
+            nonlocal captured_cmd, captured_env
+            if isinstance(cmd, list) and not any(c == "pkill" for c in cmd):
+                captured_cmd = list(cmd)
+                captured_env = dict(kwargs.get("env") or {})
+                log_file = profile_dir / "moz_telemetry.log"
+                log_file.write_text("nsHttpTransaction [HTTP/1.1 200 OK]\n", encoding="utf-8")
+            res = MagicMock()
+            res.returncode = 0
+            res.stdout = ""
+            res.stderr = ""
+            return res
+
+        with patch("subprocess.run", side_effect=mock_subprocess_run), \
+             patch("lab.run_trial.get_browser_uid_gid", return_value=(1000, 1000)):
+            run_trial.run_browser(
+                browser_name="firefox",
+                browser_path="/home/indrani/opt/firefox-measurement/firefox",
+                target_url="http://trial-test.he.test/",
+                profile_dir=profile_dir,
+                timeout=5.0,
+                is_simulation=False
+            )
+
+        env_args = [arg for arg in captured_cmd if "=" in arg]
+        env_dict = dict(arg.split("=", 1) for arg in env_args if not arg.startswith("--"))
+        env_dict.update(captured_env)
+
+        self.assertIn("MOZ_LOG", env_dict)
+        self.assertIn("nsHttp:5", env_dict["MOZ_LOG"])
+        self.assertIn("nsSocketTransport:5", env_dict["MOZ_LOG"])
+        self.assertIn("MOZ_LOG_FILE", env_dict)
+        self.assertTrue(env_dict["MOZ_LOG_FILE"].endswith("moz_telemetry.log"))
+        self.assertNotIn("/root", env_dict.get("HOME", ""))
+        self.assertNotIn("/root", env_dict.get("XDG_CONFIG_HOME", ""))
+
+        # Check user.js generated in profile
+        user_js = profile_dir / "user.js"
+        self.assertTrue(user_js.is_file(), "user.js must be created in profile_dir")
+        content = user_js.read_text(encoding="utf-8")
+        self.assertIn("app.update.auto", content)
+        self.assertIn("network.dns.disablePrefetch", content)
+
+    def test_parse_firefox_telemetry_ipv6_success(self):
+        """Telemetry log with IPv6 connection records HTTP 200 and IPv6 winning family."""
+        log_dir = self.temp_dir / "moz_logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = log_dir / "moz_telemetry.log.main.1234"
+        log_file.write_text(
+            "2026-10-29 20:00:00.000000 UTC - [Parent 1234: Socket Thread]: D/nsSocketTransport trying address: 2001:db8:2::10\n"
+            "2026-10-29 20:00:00.015000 UTC - [Parent 1234: Main Thread]: V/nsHttp ConnectionEntry::RecordIPFamilyPreference af=10\n"
+            "2026-10-29 20:00:00.020000 UTC - [Parent 1234: Main Thread]: V/nsHttp nsHttpTransaction 0x7f1 [HTTP/1.1 200 OK]\n",
+            encoding="utf-8"
+        )
+        parsed = run_trial.parse_firefox_telemetry(log_dir, target_url="http://trial-123.he.test/")
+        self.assertEqual(parsed["status_code"], 200)
+        self.assertEqual(parsed["winning_family"], "IPv6")
+        self.assertEqual(parsed["remote_address"], "2001:db8:2::10")
+
+    def test_parse_firefox_telemetry_ipv4_fallback(self):
+        """Telemetry log with IPv4 fallback records HTTP 200 and IPv4 winning family."""
+        log_dir = self.temp_dir / "moz_logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = log_dir / "moz_telemetry.log"
+        log_file.write_text(
+            "2026-10-29 20:00:00.000000 UTC - D/nsSocketTransport trying address: 2001:db8:2::10\n"
+            "2026-10-29 20:00:00.250000 UTC - D/nsSocketTransport trying address: 10.0.2.10\n"
+            "2026-10-29 20:00:00.270000 UTC - V/nsHttp ConnectionEntry::RecordIPFamilyPreference af=2\n"
+            "2026-10-29 20:00:00.280000 UTC - V/nsHttp nsHttpResponseHead [HTTP/1.1 200 OK]\n",
+            encoding="utf-8"
+        )
+        parsed = run_trial.parse_firefox_telemetry(log_file, target_url="http://trial-123.he.test/")
+        self.assertEqual(parsed["status_code"], 200)
+        self.assertEqual(parsed["winning_family"], "IPv4")
+        self.assertEqual(parsed["remote_address"], "10.0.2.10")
+
+    def test_parse_firefox_telemetry_http_error(self):
+        """Telemetry log with 404 or 500 status code is accurately parsed."""
+        log_file = self.temp_dir / "error.log"
+        log_file.write_text(
+            "V/nsHttp nsHttpTransaction 0x123 [HTTP/1.1 404 handled]\n",
+            encoding="utf-8"
+        )
+        parsed = run_trial.parse_firefox_telemetry(log_file)
+        # Check that regex captures 404
+        log_file.write_text(
+            "V/nsHttp nsHttpTransaction 0x123 [HTTP/1.1 404 Not Found]\n",
+            encoding="utf-8"
+        )
+        parsed = run_trial.parse_firefox_telemetry(log_file)
+        self.assertEqual(parsed["status_code"], 404)
+
+    def test_parse_firefox_telemetry_empty_or_corrupt(self):
+        """Empty or non-existent telemetry logs return None status and None family."""
+        missing = self.temp_dir / "nonexistent.log"
+        parsed = run_trial.parse_firefox_telemetry(missing)
+        self.assertIsNone(parsed["status_code"])
+        self.assertIsNone(parsed["winning_family"])
+
+    @patch("lab.run_trial.validate_lab_readiness")
+    @patch("lab.run_trial.verify_browser_paths_writable")
+    @patch("lab.impair.apply_scenario")
+    @patch("lab.impair.clear_impairments")
+    @patch("lab.impair.self_test_baseline", return_value=True)
+    @patch("lab.run_trial.start_packet_capture")
+    @patch("lab.run_trial.stop_packet_capture", return_value=True)
+    @patch("lab.run_trial.run_browser")
+    @patch("lab.run_trial.validate_pcap_file")
+    def test_firefox_evidence_preservation_and_profile_cleanup(
+        self, mock_val_pcap, mock_browser, mock_stop_cap, mock_start_cap,
+        mock_baseline, mock_clear, mock_apply, mock_verify, mock_readiness
+    ):
+        """
+        Telemetry log is copied to trial_dir / 'browser_telemetry.log'
+        and profile directory is cleaned up.
+        """
+        mock_readiness.return_value = {
+            "status": "PASS",
+            "checks": {"browser": {"name": "firefox", "path": "/home/indrani/opt/firefox-measurement/firefox", "valid": True}}
+        }
+        mock_val_pcap.return_value = (True, "aabbcc", 1024, 15, "Valid PCAP")
+
+        trial_dir = self.temp_dir / "trial_firefox_preservation"
+        trial_dir.mkdir(parents=True, exist_ok=True)
+
+        def _mock_run_browser(*args, **kwargs):
+            pdir = kwargs.get("profile_dir")
+            telem = pdir / "moz_telemetry.log"
+            telem.write_text("nsHttpTransaction [HTTP/1.1 200 OK]\n", encoding="utf-8")
+            return {
+                "name": "firefox",
+                "executable": "/home/indrani/opt/firefox-measurement/firefox",
+                "exit_code": 0,
+                "timed_out": False,
+                "duration_ms": 1200.0,
+                "stdout": "",
+                "stderr": "",
+                "http_status": 200,
+                "success": True,
+                "winning_family": "IPv6",
+                "telemetry_path": str(telem)
+            }
+
+        mock_browser.side_effect = _mock_run_browser
+
+        res = run_trial.run_trial(
+            scenario_id="S0",
+            browser_pref="/home/indrani/opt/firefox-measurement/firefox",
+            is_simulation=False,
+            skip_baseline_check=True,
+            lock_file=self.lock_file,
+            output_dir=trial_dir
+        )
+
+        persistent_telemetry = trial_dir / "browser_telemetry.log"
+        self.assertTrue(persistent_telemetry.is_file(), "Telemetry evidence must exist in trial directory")
+        self.assertEqual(res["evidence_paths"]["browser_telemetry"], str(persistent_telemetry))
+        self.assertTrue(res["browser"]["profile_cleaned"])
+        self.assertTrue(res["cleanup_status"]["lock_released"])
+
+    def test_firefox_launch_failure_reported_as_preflight_error(self):
+        """Failed browser discovery or preflight is reported as preflight failure, not network result."""
+        with patch("lab.run_trial.validate_lab_readiness") as mock_readiness:
+            mock_readiness.return_value = {
+                "status": "FAIL",
+                "errors": ["Browser runtime '/nonexistent/firefox' does not exist or is not executable"],
+                "checks": {"browser": {"valid": False}}
+            }
+            with self.assertRaises(run_trial.BrowserPreflightError):
+                run_trial.run_trial(
+                    scenario_id="S0",
+                    browser_pref="/nonexistent/firefox",
+                    is_simulation=False,
+                    lock_file=self.lock_file
+                )
 
 
 if __name__ == "__main__":
