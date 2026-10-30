@@ -61,6 +61,7 @@ BASELINE_A_ADDR = "10.0.2.10"
 BASELINE_AAAA_ADDR = "2001:db8:2::10"
 DNS_SERVER_IP = "10.0.1.1"
 
+import lab.concurrency as concurrency
 from lab.concurrency import acquire_lab_lock, LabLockError, DEFAULT_LAB_LOCK_FILE
 LAB_LOCK_FILE = DEFAULT_LAB_LOCK_FILE
 
@@ -503,9 +504,28 @@ def apply_dns_delays(
     bak_a4_path = backup_file_a4 or DNS_BACKUP_A4
     lock_path = lock_file or LOCK_FILE
 
-    require_root(dry_run=dry_run)
     if dry_run:
         log_info(f"[DRY-RUN] Would acquire DNS lock, save backup, and set delays A={a_delay_ms}ms, AAAA={aaaa_delay_ms}ms")
+        return
+
+    if not is_root():
+        import lab.privileged_helper as priv_helper
+        extra = [
+            "--a-delay", str(a_delay_ms),
+            "--aaaa-delay", str(aaaa_delay_ms)
+        ]
+        if config_file:
+            extra.extend(["--config-file", str(config_file)])
+        if backup_file_a3:
+            extra.extend(["--backup-file-a3", str(backup_file_a3)])
+        if backup_file_a4:
+            extra.extend(["--backup-file-a4", str(backup_file_a4)])
+        priv_helper.run_helper_action(
+            "apply-dns",
+            extra_args=extra,
+            caller_holds_lock=concurrency.is_lock_held_by_current_thread(lock_path),
+            lock_file=lock_path
+        )
         return
 
     with acquire_dns_lock(lock_path=lock_path):
@@ -556,7 +576,18 @@ def restore_dns_baseline(
         return
 
     if not is_root():
-        log_warn("Restoring DNS baseline requires root; skipping live restore.")
+        import lab.privileged_helper as priv_helper
+        extra = []
+        if config_file:
+            extra.extend(["--config-file", str(config_file)])
+        if backup_file_a4:
+            extra.extend(["--backup-file-a4", str(backup_file_a4)])
+        priv_helper.run_helper_action(
+            "restore-dns",
+            extra_args=extra if extra else None,
+            caller_holds_lock=concurrency.is_lock_held_by_current_thread(lock_path),
+            lock_file=lock_path
+        )
         return
 
     with acquire_dns_lock(lock_path=lock_path):
@@ -579,11 +610,14 @@ def restore_dns_baseline(
                 if cfg["rules"]["A"]["delay_ms"] != 0 or cfg["rules"]["AAAA"]["delay_ms"] != 0:
                     cfg["rules"]["A"]["delay_ms"] = 0
                     cfg["rules"]["AAAA"]["delay_ms"] = 0
-                    save_dns_config_atomically(cfg, path=cfg_path, dry_run=dry_run)
-                    reload_dns_server(dry_run=dry_run)
+                    save_dns_config_atomically(cfg, path=cfg_path, dry_run=False)
+                    reload_dns_server(dry_run=False)
                     log_ok("Restored DNS baseline rules: A=0ms, AAAA=0ms.")
             except Exception as e:
                 log_error(f"Error resetting DNS config: {e}")
+                raise ImpairmentError(f"Failed to reset DNS config: {e}")
+        else:
+            raise ImpairmentError(f"DNS configuration file {cfg_path} not found")
         bak_a4_path.unlink(missing_ok=True)
 
 
@@ -752,21 +786,37 @@ def apply_scenario(
         clear_impairments(dry_run=dry_run, lock_file=target_lock, lock_timeout=lock_timeout)
 
         try:
-            # 1. Apply netem delays
-            delays = scenario.get("network", {}).get("delays", BASELINE_DELAYS)
-            apply_netem_delays(delays, dry_run=dry_run)
-
-            # 2. Apply nftables rules
-            nft_rules = scenario.get("nftables", [])
-            if nft_rules:
-                apply_nftables_rules(nft_rules, dry_run=dry_run, scenario_id=scenario_key)
-
-            # 3. Apply DNS delays if required (S6)
             dns_cfg = scenario.get("dns", {})
             a_delay = dns_cfg.get("A_delay_ms", 0)
             aaaa_delay = dns_cfg.get("AAAA_delay_ms", 0)
-            if a_delay > 0 or aaaa_delay > 0:
-                apply_dns_delays(a_delay_ms=a_delay, aaaa_delay_ms=aaaa_delay, dry_run=dry_run)
+
+            if dry_run:
+                # 1. Apply netem delays
+                delays = scenario.get("network", {}).get("delays", BASELINE_DELAYS)
+                apply_netem_delays(delays, dry_run=True)
+                # 2. Apply nftables rules
+                nft_rules = scenario.get("nftables", [])
+                if nft_rules:
+                    apply_nftables_rules(nft_rules, dry_run=True, scenario_id=scenario_key)
+                # 3. Apply DNS delays if required (S6)
+                if a_delay > 0 or aaaa_delay > 0:
+                    apply_dns_delays(a_delay_ms=a_delay, aaaa_delay_ms=aaaa_delay, dry_run=True)
+            elif is_root():
+                delays = scenario.get("network", {}).get("delays", BASELINE_DELAYS)
+                apply_netem_delays(delays, dry_run=False)
+                nft_rules = scenario.get("nftables", [])
+                if nft_rules:
+                    apply_nftables_rules(nft_rules, dry_run=False, scenario_id=scenario_key)
+                if a_delay > 0 or aaaa_delay > 0:
+                    apply_dns_delays(a_delay_ms=a_delay, aaaa_delay_ms=aaaa_delay, dry_run=False)
+            else:
+                import lab.privileged_helper as priv_helper
+                priv_helper.run_helper_action(
+                    "apply-scenario",
+                    extra_args=["--scenario", scenario_key, "--scenarios-path", str(scenarios_path)],
+                    caller_holds_lock=True,
+                    lock_file=target_lock
+                )
 
             save_state(scenario_key, {"name": scenario["name"], "type": scenario["type"]}, dry_run=dry_run)
             log_ok(f"Scenario {scenario_key} successfully applied.")
@@ -790,10 +840,25 @@ def clear_impairments(dry_run: bool = False, lock_file: Optional[Path] = None, l
     target_lock = lock_file or LAB_LOCK_FILE
     with acquire_lab_lock(timeout=lock_timeout, lock_path=target_lock):
         log_info("Clearing impairments and restoring clean baseline...")
-        clear_nftables_rules(dry_run=dry_run)
-        restore_baseline_delays(dry_run=dry_run)
-        restore_dns_baseline(dry_run=dry_run)
-        clear_state(dry_run=dry_run)
+        if dry_run:
+            clear_nftables_rules(dry_run=True)
+            restore_baseline_delays(dry_run=True)
+            restore_dns_baseline(dry_run=True)
+            clear_state(dry_run=True)
+        elif is_root():
+            clear_nftables_rules(dry_run=False)
+            restore_baseline_delays(dry_run=False)
+            restore_dns_baseline(dry_run=False)
+            clear_state(dry_run=False)
+        else:
+            import lab.privileged_helper as priv_helper
+            priv_helper.run_helper_action(
+                "restore-baseline",
+                caller_holds_lock=True,
+                lock_file=target_lock
+            )
+            clear_state(dry_run=False)
+
         log_ok("System restored to baseline.")
 
 
@@ -860,9 +925,35 @@ def self_test_baseline(dry_run: bool = False) -> bool:
             all_passed = False
 
     # 5. Privileged Checks (Netns tc, nftables, and live connectivity)
+    if dry_run:
+        return all_passed
+
     if not is_root():
-        log_warn("Skipping live netns checks (tc qdisc, nftables, ping) because root privileges are absent.")
-        log_info("To execute full live verification, run: sudo python3 lab/impair.py self-test-baseline")
+        # Truthful live verification: must perform full live netns checks via privileged helper!
+        try:
+            import lab.privileged_helper as priv_helper
+            res = priv_helper.run_helper_action(
+                "verify-baseline",
+                caller_holds_lock=concurrency.is_lock_active(LAB_LOCK_FILE),
+                lock_file=LAB_LOCK_FILE
+            )
+            if not res.get("all_passed", False):
+                all_passed = False
+                for err in res.get("errors", []):
+                    log_error(f"Baseline Check FAILED: {err}")
+            else:
+                log_ok("Check 5 PASSED: Impairment nftables table does not exist.")
+                log_ok("Check 6 PASSED: All 4 server interfaces have verified 10ms netem delay.")
+                log_ok("Check 7 PASSED: IPv4 & IPv6 live pings succeeded.")
+                log_ok("Check 8 PASSED: DNS A & AAAA queries verified.")
+        except Exception as exc:
+            log_error(f"Baseline Check FAILED: Live baseline verification error: {exc}")
+            all_passed = False
+
+        if all_passed:
+            log_ok("ALL BASELINE SELF-TEST CHECKS PASSED.")
+        else:
+            log_error("ONE OR MORE BASELINE SELF-TEST CHECKS FAILED.")
         return all_passed
 
     # 5a. Check nftables table absence in router namespace
