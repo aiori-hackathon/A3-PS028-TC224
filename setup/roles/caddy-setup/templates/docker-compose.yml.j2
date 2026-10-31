@@ -1,0 +1,37 @@
+services:
+  he-caddy:
+    container_name: he-caddy
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: 'caddy run --config /etc/caddy/Caddyfile'
+    network_mode: host
+    volumes:
+      - '{{ happy_eyeballs.base_path }}/caddy/Caddyfile:/etc/caddy/Caddyfile:ro'
+      - '{{ happy_eyeballs.base_path }}/caddy/data:/data/caddy'
+      - '{{ happy_eyeballs.base_path }}/www-root:{{ happy_eyeballs.base_path }}/www-root:ro'
+
+      - "/etc/letsencrypt/live/{{ happy_eyeballs_domains.v1_ipv6_only }}/fullchain.pem:/etc/letsencrypt/live/{{ happy_eyeballs_domains.v1_ipv6_only }}/fullchain.pem:ro"
+      - "/etc/letsencrypt/live/{{ happy_eyeballs_domains.v1_ipv6_only }}/privkey.pem:/etc/letsencrypt/live/{{ happy_eyeballs_domains.v1_ipv6_only }}/privkey.pem:ro"
+
+      - "/etc/letsencrypt/live/{{ happy_eyeballs_domains.v1 | first | replace('*.', '') }}/fullchain.pem:/etc/letsencrypt/live/{{ happy_eyeballs_domains.v1 | first | replace('*.', '') }}/fullchain.pem:ro"
+      - "/etc/letsencrypt/live/{{ happy_eyeballs_domains.v1 | first | replace('*.', '') }}/privkey.pem:/etc/letsencrypt/live/{{ happy_eyeballs_domains.v1 | first | replace('*.', '') }}/privkey.pem:ro"
+
+      - "/etc/letsencrypt/live/{{ happy_eyeballs_domains.v2 | replace('*.', '') }}/fullchain.pem:/etc/letsencrypt/live/{{ happy_eyeballs_domains.v2 | replace('*.', '') }}/fullchain.pem:ro"
+      - "/etc/letsencrypt/live/{{ happy_eyeballs_domains.v2 | replace('*.', '') }}/privkey.pem:/etc/letsencrypt/live/{{ happy_eyeballs_domains.v2 | replace('*.', '') }}/privkey.pem:ro"
+
+      - "/etc/letsencrypt/live/{{ happy_eyeballs_domains.v3_quic | replace('*.', '') }}/fullchain.pem:/etc/letsencrypt/live/{{ happy_eyeballs_domains.v3_quic | replace('*.', '') }}/fullchain.pem:ro"
+      - "/etc/letsencrypt/live/{{ happy_eyeballs_domains.v3_quic | replace('*.', '') }}/privkey.pem:/etc/letsencrypt/live/{{ happy_eyeballs_domains.v3_quic | replace('*.', '') }}/privkey.pem:ro"
+
+      - "/etc/letsencrypt/live/{{ happy_eyeballs_domains.http3.http3 | replace('*.', '') }}/fullchain.pem:/etc/letsencrypt/live/{{ happy_eyeballs_domains.http3.http3 | replace('*.', '') }}/fullchain.pem:ro"
+      - "/etc/letsencrypt/live/{{ happy_eyeballs_domains.http3.http3 | replace('*.', '') }}/privkey.pem:/etc/letsencrypt/live/{{ happy_eyeballs_domains.http3.http3 | replace('*.', '') }}/privkey.pem:ro"
+
+      - "/etc/letsencrypt/live/{{ happy_eyeballs_domains.http3.http3_https | replace('*.', '') }}/fullchain.pem:/etc/letsencrypt/live/{{ happy_eyeballs_domains.http3.http3_https | replace('*.', '') }}/fullchain.pem:ro"
+      - "/etc/letsencrypt/live/{{ happy_eyeballs_domains.http3.http3_https | replace('*.', '') }}/privkey.pem:/etc/letsencrypt/live/{{ happy_eyeballs_domains.http3.http3_https | replace('*.', '') }}/privkey.pem:ro"
+
+      - "/etc/letsencrypt/live/{{ happy_eyeballs_domains.http3.http3_altsvc | replace('*.', '') }}/fullchain.pem:/etc/letsencrypt/live/{{ happy_eyeballs_domains.http3.http3_altsvc | replace('*.', '') }}/fullchain.pem:ro"
+      - "/etc/letsencrypt/live/{{ happy_eyeballs_domains.http3.http3_altsvc | replace('*.', '') }}/privkey.pem:/etc/letsencrypt/live/{{ happy_eyeballs_domains.http3.http3_altsvc | replace('*.', '') }}/privkey.pem:ro"
+
+      - "/etc/letsencrypt/live/{{ happy_eyeballs_domains.http3.http3_https_altsvc | replace('*.', '') }}/fullchain.pem:/etc/letsencrypt/live/{{ happy_eyeballs_domains.http3.http3_https_altsvc | replace('*.', '') }}/fullchain.pem:ro"
+      - "/etc/letsencrypt/live/{{ happy_eyeballs_domains.http3.http3_https_altsvc | replace('*.', '') }}/privkey.pem:/etc/letsencrypt/live/{{ happy_eyeballs_domains.http3.http3_https_altsvc | replace('*.', '') }}/privkey.pem:ro"

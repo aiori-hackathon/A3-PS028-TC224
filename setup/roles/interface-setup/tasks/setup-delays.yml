@@ -1,0 +1,42 @@
+- name: Delete existing root handle
+  ansible.builtin.shell:
+    cmd: 'tc qdisc del dev {{ happy_eyeballs.webserver.interface }} root'
+  failed_when: false
+
+- name: Add root handle
+  ansible.builtin.shell:
+    cmd: 'tc qdisc add dev {{ happy_eyeballs.webserver.interface }} root handle 1: htb'
+
+- name: Add delay classes
+  ansible.builtin.shell:
+    cmd: 'tc class add dev {{ happy_eyeballs.webserver.interface }} parent 1: classid 1:{{ item.flowid }} htb rate 1gbit'
+  when: item.delay > 0
+  with_items: '{{ happy_eyeballs.webserver.delays }}'
+
+- name: Add delay qdiscs
+  ansible.builtin.shell:
+    cmd: 'tc qdisc add dev {{ happy_eyeballs.webserver.interface }} parent 1:{{ item.flowid }} netem delay {{ item.delay }}ms'
+  when: item.delay > 0
+  with_items: '{{ happy_eyeballs.webserver.delays }}'
+
+- name: Map addresses to TCP delay qdiscs
+  ansible.builtin.shell:
+    cmd: 'tc filter add dev {{ happy_eyeballs.webserver.interface }} protocol ipv6 parent 1: prio 1 u32 match ip6 src {{ item.ipv6 }}/128 match ip6 protocol 6 0xff flowid 1:{{ item.flowid }}'
+  when: item.delay > 0
+  with_items: '{{ happy_eyeballs.webserver.delays }}'
+
+- name: Map addresses to UDP delay qdiscs
+  ansible.builtin.shell:
+    cmd: 'tc filter add dev {{ happy_eyeballs.webserver.interface }} protocol ipv6 parent 1: prio 1 u32 match ip6 src {{ item.ipv6 }}/128 match ip6 protocol 17 0xff flowid 1:{{ item.flowid }}'
+  when: item.delay > 0
+  with_items: '{{ happy_eyeballs.webserver.delays }}'
+
+- name: Map addresses to ICMPv6 delay qdiscs
+  ansible.builtin.shell:
+    cmd: 'tc filter add dev {{ happy_eyeballs.webserver.interface }} protocol ipv6 parent 1: prio 1 u32 match ip6 src {{ item.ipv6 }}/128 match ip6 protocol 58 0xff flowid 1:{{ item.flowid }}'
+  when: item.delay > 0
+  with_items: '{{ happy_eyeballs.webserver.delays }}'
+
+# tc qdisc add dev eth0 root handle 1: prio
+# tc qdisc add dev eth0 parent 1:1 handle 10: netem delay 100ms
+# tc filter add dev eth0 protocol ipv6 parent 1: prio 1 handle 1 fw flowid 1:1

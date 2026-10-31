@@ -1,0 +1,56 @@
+- name: Create webtester build directory
+  ansible.builtin.file:
+    path: '{{ happy_eyeballs.base_path }}/webtester'
+    owner: root
+    group: root
+    mode: '0755'
+    state: 'directory'
+
+- name: Clean old build artifacts
+  ansible.builtin.file:
+    path: '{{ happy_eyeballs.base_path }}/webtester/dist'
+    state: absent
+
+- name: Copy webtester site source directory
+  ansible.posix.synchronize:
+    src: 'webtester/'
+    dest: '{{ happy_eyeballs.base_path }}/webtester/'
+    owner: false
+    group: false
+    rsync_opts:
+      - '--exclude=.DS_Store'
+      - '--exclude=dist'
+      - '--exclude=node_modules'
+      - '--exclude=.astro'
+      - '--chown={{ happy_eyeballs.user.name }}:{{ happy_eyeballs.user.name }}'
+
+- name: Build webtester
+  ansible.builtin.shell:
+    cmd: >
+      docker run --rm 
+      -v {{ happy_eyeballs.base_path }}/webtester:/app 
+      -w /app 
+      node:24 
+      sh -c "npm install && npm run build"
+    chdir: '{{ happy_eyeballs.base_path }}/webtester'
+
+- name: Clean old www-root directory
+  ansible.builtin.file:
+    path: '{{ happy_eyeballs.base_path }}/www-root'
+    state: absent
+
+- name: Copy dist folder to www-root directory
+  ansible.builtin.shell:
+    cmd: 'cp -rp {{ happy_eyeballs.base_path }}/webtester/dist/. {{ happy_eyeballs.base_path }}/www-root/'
+  notify: restart he-caddy
+
+- name: Copy webtester static files
+  ansible.builtin.template:
+    src: 'static/{{ item }}.j2'
+    dest: '{{ happy_eyeballs.base_path }}/www-root/{{ item }}'
+    owner: '{{ happy_eyeballs.user.name }}'
+    group: '{{ happy_eyeballs.user.name }}'
+    mode: '0644'
+  with_items:
+    - 'delays.json'
+    - 'he-test-domain'

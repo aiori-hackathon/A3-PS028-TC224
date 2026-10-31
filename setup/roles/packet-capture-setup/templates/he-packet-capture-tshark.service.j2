@@ -1,0 +1,11 @@
+[Unit]
+Description=Happy Eyeballs Packet Capture TShark
+After=he-packet-capture-service.service
+BindsTo=he-packet-capture-service.service
+
+[Service]
+Type=simple
+ExecStart=/bin/sh -c '/usr/bin/dumpcap -q -i {{ happy_eyeballs.webserver.interface }} -f "dst port 443" -w - | /usr/bin/tshark -l -n -r - -Y "tls.handshake.extensions_server_name or (tcp.flags.syn == 1 and tcp.flags.ack == 0)" -T ek -e frame.time_epoch -e ip.src -e ipv6.src -e tcp.srcport -e udp.srcport -e frame.protocols -e tls.handshake.extensions_server_name > {{ happy_eyeballs.packet_capture.tshark.pipe_path }}'
+RuntimeMaxSec=21600
+Restart=always
+RestartSec=1

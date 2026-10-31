@@ -1,0 +1,8 @@
+- ansible.builtin.import_tasks: certbot.yml
+  tags: [ 'webtester', 'webtester-certbot' ]
+
+- ansible.builtin.import_tasks: create-certs.yml
+  tags: [ 'webtester', 'webtester-certs' ]
+
+- ansible.builtin.import_tasks: webtester.yml
+  tags: [ 'webtester', 'webtester-src' ]

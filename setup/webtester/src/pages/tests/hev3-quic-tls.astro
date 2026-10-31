@@ -1,0 +1,45 @@
+---
+import PageLayout from "@/layouts/main.astro";
+import Header from "@/components/header.astro";
+import { HEv3QuicTlsTest } from "@/components/tests/hev3-quic-tls-test";
+import Link from "@/components/link.astro";
+---
+
+<PageLayout title="HEv3 QUIC vs. TLS/TCP Test | Happy Eyeballs Webtester">
+  <Header
+    titleLine1="Happy Eyeballs Version 3"
+    titleLine2="QUIC vs. TLS/TCP Test"
+  >
+    <p>
+      Our specialized web server introduces targeted, artificial delays during
+      the transport-layer protocol handshake (based on the TLS SNI). This
+      capability allows us to selectively delay either the TLS/TCP or the QUIC
+      handshake.
+    </p>
+    <p>
+      To signal HTTP/3 (QUIC) availability, our DNS nameserver responds with
+      HTTPS resource records for all test domains. The specific contents of
+      these HTTPS records can be customized in the settings.
+    </p>
+    <p>
+      Note: For the test to function properly, your browser must query and
+      respect these records. You can verify your browser's compatibility using
+      our <Link href="/tests/http3-availability">
+        HTTP/3 availability test
+      </Link>.
+    </p>
+    <p>
+      During the test, the browser establishes connections for a range of
+      transport-layer delays. This allows you to observe if and how the browser
+      handles the Happy Eyeballs version 3 race between TLS/TCP and QUIC.
+    </p>
+    <p>
+      We randomize domains to try to prevent caching effects on the browser's
+      side as much as possible. Furthermore, we aggressively close connections
+      on the server side after every request, forcing the browser to perform a
+      fresh handshake for each new test.
+    </p>
+  </Header>
+
+  <HEv3QuicTlsTest client:load />
+</PageLayout>

@@ -1,0 +1,45 @@
+$TTL 3600
+$ORIGIN v1-rdns.{{ happy_eyeballs.nameserver.base_domain }}.
+
+@                 IN  SOA    ns1.{{ happy_eyeballs.nameserver.base_domain }}. mail.net.in.tum.de. 1722513549 3600 900 604800 180
+@                 IN  NS     ns1.{{ happy_eyeballs.nameserver.base_domain }}.
+@                 IN  NS     ns2.{{ happy_eyeballs.nameserver.base_domain }}.
+
+ipv4-only          IN  A        {{ happy_eyeballs.webserver.ipv4 }}
+ipv6-only          IN  AAAA     {{ happy_eyeballs.webserver.ipv6 }}
+
+
+$TTL 300
+
+id-*.v6ns-only                  IN    NS ipv6-only.v1-rdns.{{ happy_eyeballs.nameserver.base_domain }}.
+
+{% for item in happy_eyeballs.webserver.delays %}
+ns1-id-*.delay-{{ item.delay}}        IN A    {{ item.ipv4 }}
+ns2-id-*.delay-{{ item.delay}}        IN A    {{ item.ipv4 }}
+
+ns1-id-*.delay-{{ item.delay}}        IN AAAA {{ item.ipv6 }}
+ns2-id-*.delay-{{ item.delay}}        IN AAAA {{ item.ipv6 }}
+{% endfor %}
+
+{% for delay in happy_eyeballs.webserver.delays | map(attribute='delay') | unique | sort %}
+id-*.dns-delay-{{ delay }}      IN    NS  ns1-id---.delay-{{ delay }}.v1-rdns.{{ happy_eyeballs.nameserver.base_domain }}.
+id-*.dns-delay-{{ delay }}      IN    NS  ns2-id---.delay-{{ delay }}.v1-rdns.{{ happy_eyeballs.nameserver.base_domain }}.
+{% endfor %}
+
+
+$ORIGIN id-*.v6ns-only.v1-rdns.{{ happy_eyeballs.nameserver.base_domain }}.
+@   IN   SOA    ipv6-only.v1-rdns.{{ happy_eyeballs.nameserver.base_domain }}. mail.net.in.tum.de. 1722513549 3600 900 604800 180
+
+@   IN   A      {{ happy_eyeballs.webserver.ipv4 }}
+@   IN   AAAA   {{ happy_eyeballs.webserver.ipv6 }}
+
+
+{% for delay in happy_eyeballs.webserver.delays | map(attribute='delay') | unique | sort %}
+$ORIGIN id-*.dns-delay-{{ delay }}.v1-rdns.{{ happy_eyeballs.nameserver.base_domain }}.
+@   IN   SOA    ns1-id---.delay-{{ delay }}.v1-rdns.{{ happy_eyeballs.nameserver.base_domain }}. mail.net.in.tum.de. 1722513549 3600 900 604800 180
+
+@   IN   A      {{ happy_eyeballs.webserver.ipv4 }}
+@   IN   AAAA   {{ happy_eyeballs.webserver.ipv6 }}
+
+{% endfor %}
+

@@ -1,0 +1,5 @@
+- ansible.builtin.import_tasks: service.yml
+  tags: [ 'packetcapture', 'packetcapture-service' ]
+
+- ansible.builtin.import_tasks: tshark.yml
+  tags: [ 'packetcapture', 'packetcapture-tshark' ]

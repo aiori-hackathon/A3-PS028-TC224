@@ -1,0 +1,113 @@
+---
+import PageLayout from "@/layouts/main.astro";
+import Header from "@/components/header.astro";
+import TestCard from "@/components/test-card.astro";
+import Link from "@/components/link.astro";
+import { CitationDialog } from "@/components/citation-dialog.tsx";
+---
+
+<PageLayout title="Happy Eyeballs Webtester">
+  <Header titleLine1="Happy Eyeballs" titleLine2="Webtester">
+    <p>
+      Initially developed as part of the paper "Lazy Eye Inspection: Capturing
+      the State of Happy Eyeballs Implementations" by Patrick Sattler.
+    </p>
+    <p>
+      See our
+      <Link href="/contributors"> development team</Link>
+      and
+      <Link href="https://github.com/happy-eyeballs/he-webtester">
+        source code on GitHub
+      </Link>
+      . Hosted on infrastructure of
+      <Link href="https://net.in.tum.de">TUM</Link>
+      .
+    </p>
+    <p>
+      If you use this tool for your research, please
+      <CitationDialog client:idle>
+        <Link>cite</Link>
+      </CitationDialog>
+      our paper which discusses Happy Eyeballs and this tool.
+    </p>
+  </Header>
+
+  <div class="mt-20 grid gap-6 items-start lg:grid-cols-2">
+    <TestCard
+      title="Connection Attempt Delay Test"
+      href="tests/connection-attempt-delay"
+    >
+      Happy Eyeballs version 1 defines the racing of IPv4 vs. IPv6. The term
+      Connection Attempt Delay (CAD) describes the delay a client waits for the
+      IPv6 response before issuing an IPv4 connection. We test this behavior of
+      your client by artificially adding latency to IPv6 packets. Depending on
+      your client's settings, it will wait for the IPv6 connection attempt.
+    </TestCard>
+
+    <TestCard title="Resolution Delay Test" href="tests/resolution-delay">
+      Happy Eyeballs version 2 defines the racing of A vs AAAA DNS queries and
+      uses the term Resolution Delay (RD) to describe the configured accepted
+      delay between A and AAAA responses. We test this behavior of your client
+      by artificially adding latency to A or AAAA queries. In this test, not
+      only your client but also the configured resolver and any forwarder in the
+      resolution chain can impact the result.
+    </TestCard>
+
+    <TestCard
+      title="Happy Eyeballs v3 QUIC vs. TLS/TCP Test"
+      href="tests/hev3-quic-tls"
+    >
+      Happy Eyeballs version 3 extends connection racing to the application
+      layer, specifically racing QUIC against TLS/TCP. Browsers implementing
+      this version should fall back to the alternative protocol if one is
+      unresponsive to avoid blocking. We test this by varying the handshake
+      delay to determine if and when your client decides to switch protocols.
+    </TestCard>
+
+    <TestCard
+      title="Happy Eyeballs v3 Combined Test (QUIC vs. TLS/TCP & IPv4 vs. IPv6)"
+      href="tests/hev3-combined"
+    >
+      Happy Eyeballs version 3 extends connection racing to the application
+      layer. Browsers implementing this version should fall back between IP
+      versions and protocols to avoid blocking if one is unresponsive. We test
+      this by varying the handshake delay and IP version-specific delay to
+      determine if and when your client decides to switch protocols and IP
+      versions.
+    </TestCard>
+
+    <TestCard title="HTTP/3 Availability Test" href="tests/http3-availability">
+      The test checks how your browser establishes connections when HTTP/3 is
+      available. We simulate various scenarios where HTTP/3 can be discovered
+      via Alt-Svc headers or HTTPS DNS records.
+    </TestCard>
+
+    <TestCard
+      title="Resolver CAD Test (Disabled)"
+      href="tests/resolver-connection-attempt-delay"
+      disabled={true}
+    >
+      This test does not test your device, OS, or browser, but targets your
+      recursive resolver. It uses a more complex DNS setup to infer if your
+      resolver performs any type of Happy Eyeballs. While the Happy Eyeballs
+      algorithm and suggested configuration parameters are not adjusted to the
+      iterative resolution process of a resolver, we are still interested in
+      seeing if and how resolvers prefer IPv6.
+
+      <br />
+      <br />
+
+      Only our authoritative name server observes the requests and analyzes the
+      results. As we have not yet implemented a way to live feed the results
+      back to your browser session, we cannot currently show these.
+
+      <br />
+      <br />
+
+      <b>
+        Note: This test is currently disabled. Please contact us if you are
+        interested.
+      </b>
+    </TestCard>
+  </div>
+</PageLayout>

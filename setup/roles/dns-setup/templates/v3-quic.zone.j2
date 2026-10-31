@@ -1,0 +1,35 @@
+$TTL 3600
+$ORIGIN v3-quic.{{ happy_eyeballs.nameserver.base_domain }}.
+
+@                 IN  SOA    ns1.{{ happy_eyeballs.nameserver.base_domain }}. mail.net.in.tum.de. 1722513549 3600 900 604800 180
+@                 IN  NS     ns1.{{ happy_eyeballs.nameserver.base_domain }}.
+@                 IN  NS     ns2.{{ happy_eyeballs.nameserver.base_domain }}.
+
+
+$TTL 300
+l4_*                      IN  A         {{ happy_eyeballs.webserver.he_v3_quic.ipv4 }}
+l4_*                      IN  AAAA      {{ happy_eyeballs.webserver.he_v3_quic.ipv6 }}
+
+l4_https-h3h2_*           IN  HTTPS  1  . alpn=h3,h2
+l4_https-h2h3_*           IN  HTTPS  1  . alpn=h2,h3
+l4_https-h3_*             IN  HTTPS  1  . alpn=h3
+l4_https-h3-no-default_*  IN  HTTPS  1  . alpn=h3 no-default-alpn
+l4_https-h2_*             IN  HTTPS  1  . alpn=h2
+
+
+# netem delays
+
+{% for item in happy_eyeballs.webserver.delays %}
+{% for https_rr in ['https-h3h2', 'https-h2h3', 'https-h3', 'https-h3-no-default', 'https-h2', 'https-none'] %}
+
+l3_{{ https_rr }}_ipv4-0_ipv6-{{ item.delay }}_*  IN A     {{ item.ipv4 }}
+l3_{{ https_rr }}_ipv4-0_ipv6-{{ item.delay }}_*  IN AAAA  {{ item.ipv6 }}
+
+{% endfor %}
+{% endfor %}
+
+l3_https-h3h2_*           IN  HTTPS  1  . alpn=h3,h2
+l3_https-h2h3_*           IN  HTTPS  1  . alpn=h2,h3
+l3_https-h3_*             IN  HTTPS  1  . alpn=h3
+l3_https-h3-no-default_*  IN  HTTPS  1  . alpn=h3 no-default-alpn
+l3_https-h2_*             IN  HTTPS  1  . alpn=h2

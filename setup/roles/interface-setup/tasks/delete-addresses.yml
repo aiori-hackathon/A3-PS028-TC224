@@ -1,0 +1,43 @@
+- name: Delete IPv4 addresses from webserver interface
+  ansible.builtin.shell:
+    cmd: 'ip a del {{ item }}/{{ happy_eyeballs.webserver.ipv4_net_mask }} dev {{ happy_eyeballs.webserver.interface }}'
+  failed_when: false
+  with_items:
+    - '{{ happy_eyeballs.webserver.delays | map(attribute="ipv4") | list }}'
+    - '{{ happy_eyeballs.webserver.ipv4 }}'
+    - '{{ happy_eyeballs.webserver.http3.ipv4 }}'
+    - '{{ happy_eyeballs.webserver.he_v3_quic.ipv4 }}'
+
+- name: Delete IPv6 addresses from webserver interface
+  ansible.builtin.shell:
+    cmd: 'ip a del {{ item }}/{{ happy_eyeballs.webserver.ipv6_net_mask }} dev {{ happy_eyeballs.webserver.interface }}'
+  failed_when: false
+  with_items:
+    - '{{ happy_eyeballs.webserver.delays | map(attribute="ipv6") | list }}'
+    - '{{ happy_eyeballs.webserver.ipv6 }}'
+    - '{{ happy_eyeballs.webserver.http3.ipv6 }}'
+    - '{{ happy_eyeballs.webserver.he_v3_quic.ipv6 }}'
+
+- name: Delete IPv4 addresses from nameserver interface
+  ansible.builtin.shell:
+    cmd: 'ip a del {{ item }}/{{ happy_eyeballs.nameserver.ipv4_net_mask }} dev {{ happy_eyeballs.nameserver.interface }}'
+  failed_when: false
+  with_items:
+    - '{{ happy_eyeballs.nameserver.ipv4 }}'
+
+- name: Delete IPv6 addresses from nameserver interface
+  ansible.builtin.shell:
+    cmd: 'ip a del {{ item }}/{{ happy_eyeballs.nameserver.ipv6_net_mask }} dev {{ happy_eyeballs.nameserver.interface }}'
+  failed_when: false
+  with_items:
+    - '{{ happy_eyeballs.nameserver.ipv6 }}'
+
+- name: Delete IPv4 address from webtester interface
+  ansible.builtin.shell:
+    cmd: 'ip a del {{ happy_eyeballs.webtester.ipv4 }}/{{ happy_eyeballs.webtester.ipv4_net_mask }} dev {{ happy_eyeballs.webtester.interface }}'
+  failed_when: false
+
+- name: Delete IPv6 address from webtester interface
+  ansible.builtin.shell:
+    cmd: 'ip a del {{ happy_eyeballs.webtester.ipv6 }}/{{ happy_eyeballs.webtester.ipv6_net_mask }} dev {{ happy_eyeballs.webtester.interface }}'
+  failed_when: false

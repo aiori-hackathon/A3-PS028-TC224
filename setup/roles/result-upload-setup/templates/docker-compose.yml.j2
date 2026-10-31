@@ -1,0 +1,14 @@
+services:
+  result-upload-service:
+    container_name: he-result-upload-service
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - '{{ happy_eyeballs.result_upload.service.host }}:{{ happy_eyeballs.result_upload.service.port }}:8080/tcp'
+    volumes:
+      - '{{ happy_eyeballs.base_path }}/results:/results'
+    environment:
+      RESULT_BASE_DIRECTORY: '/results'
+      ALLOWED_TEST_NAMES: 'connection-attempt-delay,resolution-delay,hev3-quic-tls,hev3-combined,http3-availability'

@@ -1,0 +1,25 @@
+{
+	debug
+	auto_https disable_redirects
+	layer4 {
+		tcp/:8443 {
+            route {
+                proxy tcp/127.0.0.1:3000
+            }
+		}
+		udp/:8443 {
+		    @q quic sni_regexp ^delay-([0-9]+)\.example.com$
+            route @q {
+                throttle_var {tls.regexp.1}ms
+                proxy udp/127.0.0.1:3000
+            }
+		}
+	}
+}
+
+localhost:3000 {
+	tls {
+		issuer internal
+	}
+    respond `{http.request.proto}`
+}

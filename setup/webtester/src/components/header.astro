@@ -1,0 +1,39 @@
+---
+import { ArrowLeftIcon } from "lucide-react";
+
+type Props = {
+  titleLine1: string;
+  titleLine2: string;
+};
+
+const { titleLine1, titleLine2 } = Astro.props;
+const currentPath = Astro.url.pathname;
+---
+
+<header>
+  <div class="mb-5 h-9 group w-max">
+    {
+      currentPath !== "/" && (
+        <a class="block text-muted-foreground p-2" href="/">
+          <ArrowLeftIcon className="size-5 transition-transform duration-200 group-hover:-translate-x-1.5" />
+        </a>
+      )
+    }
+  </div>
+
+  <h1
+    class="text-3xl sm:text-5xl lg:text-6xl font-bold tracking-tighter leading-none"
+  >
+    {titleLine1}
+    <br />
+    <span
+      class="bg-linear-to-r from-blue-600 to-cyan-400 bg-clip-text text-transparent"
+    >
+      {titleLine2}
+    </span>
+  </h1>
+
+  <div class="mt-6 max-w-4xl text-sm text-muted-foreground grid gap-2">
+    <slot />
+  </div>
+</header>

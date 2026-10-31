@@ -1,0 +1,328 @@
+### GLOBAL
+
+{
+    admin off
+
+    servers {{ happy_eyeballs.webserver.ipv4 }}:443 {
+        protocols h1
+    }
+    servers [{{ happy_eyeballs.webserver.ipv6 }}]:443 {
+        protocols h1
+    }
+
+    {% for item in happy_eyeballs.webserver.delays %}
+    servers {{ item.ipv4 }}:8443 {
+        protocols h1
+    }
+    servers [{{ item.ipv6 }}]:8443 {
+        protocols h1
+    }
+    {% endfor %}
+
+    servers {{ happy_eyeballs.webserver.he_v3_quic.ipv4 }}:8443 {
+        timeouts {
+			idle 1000ms
+        }
+    }
+    servers [{{ happy_eyeballs.webserver.he_v3_quic.ipv6 }}]:8443 {
+        timeouts {
+			idle 1000ms
+        }
+    }
+
+    servers {{ happy_eyeballs.webserver.http3.ipv4 }}:443 {
+        timeouts {
+            idle 1000ms
+        }
+    }
+    servers [{{ happy_eyeballs.webserver.http3.ipv6 }}]:443 {
+        timeouts {
+            idle 1000ms
+        }
+    }
+
+    ### Caddy Layer 4 Proxy
+
+    layer4 {
+        udp/{{ happy_eyeballs.webserver.he_v3_quic.ipv4 }}:443 {
+            route {
+                subroute {
+                    @quic-delay quic sni_regexp ^l4_https-[a-z0-9-]+_ipv4-([0-9]+)_ipv6-([0-9]+)_quic-([0-9]+)_tls-([0-9]+)_id-[0-9]+\.v3-quic\.{{ happy_eyeballs.nameserver.base_domain | replace('.', '\\.') }}$
+                    route @quic-delay {
+                        throttle_var {tls.regexp.1}ms  # IPv4
+                        throttle_var {tls.regexp.3}ms  # QUIC
+
+                        proxy udp/{{ happy_eyeballs.webserver.he_v3_quic.ipv4 }}:8443
+                    }
+                }
+            }
+        }
+
+        udp/[{{ happy_eyeballs.webserver.he_v3_quic.ipv6 }}]:443 {
+            route {
+                subroute {
+                    @quic-delay quic sni_regexp ^l4_https-[a-z0-9-]+_ipv4-([0-9]+)_ipv6-([0-9]+)_quic-([0-9]+)_tls-([0-9]+)_id-[0-9]+\.v3-quic\.{{ happy_eyeballs.nameserver.base_domain | replace('.', '\\.') }}$
+                    route @quic-delay {
+                        throttle_var {tls.regexp.2}ms  # IPv6
+                        throttle_var {tls.regexp.3}ms  # QUIC
+
+                        proxy udp/[{{ happy_eyeballs.webserver.he_v3_quic.ipv6 }}]:8443
+                    }
+                }
+            }
+        }
+
+        tcp/{{ happy_eyeballs.webserver.he_v3_quic.ipv4 }}:443 {
+            route {
+                subroute {
+                    @tls-delay tls sni_regexp ^l4_https-[a-z0-9-]+_ipv4-([0-9]+)_ipv6-([0-9]+)_quic-([0-9]+)_tls-([0-9]+)_id-[0-9]+\.v3-quic\.{{ happy_eyeballs.nameserver.base_domain | replace('.', '\\.') }}$
+                    route @tls-delay {
+                        throttle_var {tls.regexp.1}ms  # IPv4
+                        throttle_var {tls.regexp.4}ms  # TLS
+
+                        proxy tcp/{{ happy_eyeballs.webserver.he_v3_quic.ipv4 }}:8443
+                    }
+                }
+            }
+        }
+
+        tcp/[{{ happy_eyeballs.webserver.he_v3_quic.ipv6 }}]:443 {
+            route {
+                subroute {
+                    @tls-delay tls sni_regexp ^l4_https-[a-z0-9-]+_ipv4-([0-9]+)_ipv6-([0-9]+)_quic-([0-9]+)_tls-([0-9]+)_id-[0-9]+\.v3-quic\.{{ happy_eyeballs.nameserver.base_domain | replace('.', '\\.') }}$
+                    route @tls-delay {
+                        throttle_var {tls.regexp.2}ms  # IPv6
+                        throttle_var {tls.regexp.4}ms  # TLS
+
+                        proxy tcp/[{{ happy_eyeballs.webserver.he_v3_quic.ipv6 }}]:8443
+                    }
+                }
+            }
+        }
+
+        ### IPs with netem delay
+
+        {% for item in happy_eyeballs.webserver.delays %}
+        # exclusive to HEv3 test
+        udp/{{ item.ipv4 }}:443 {
+            route {
+                subroute {
+                    @quic-delay quic sni_regexp ^.*_quic-([0-9]+)_tls-([0-9]+)_id-[0-9]+\.v3-quic\.{{ happy_eyeballs.nameserver.base_domain | replace('.', '\\.') }}$
+                    route @quic-delay {
+                        throttle_var {tls.regexp.1}ms  # QUIC
+
+                        proxy udp/{{ happy_eyeballs.webserver.he_v3_quic.ipv4 }}:8443
+                    }
+                }
+            }
+        }
+
+        # exclusive to HEv3 test
+        udp/[{{ item.ipv6 }}]:443 {
+            route {
+                subroute {
+                    @quic-delay quic sni_regexp ^.*_quic-([0-9]+)_tls-([0-9]+)_id-[0-9]+\.v3-quic\.{{ happy_eyeballs.nameserver.base_domain | replace('.', '\\.') }}$
+                    route @quic-delay {
+                        throttle_var {tls.regexp.1}ms  # QUIC
+
+                        proxy udp/[{{ happy_eyeballs.webserver.he_v3_quic.ipv6 }}]:8443
+                    }
+                }
+            }
+        }
+
+        # shared between CAD and HEv3 tests
+        tcp/{{ item.ipv4 }}:443 {
+            route {
+                subroute {
+                    @tls-delay tls sni_regexp ^.*_quic-([0-9]+)_tls-([0-9]+)_id-[0-9]+\.v3-quic\.{{ happy_eyeballs.nameserver.base_domain | replace('.', '\\.') }}$
+                    route @tls-delay {
+                        throttle_var {tls.regexp.2}ms  # TLS
+
+                        proxy tcp/{{ happy_eyeballs.webserver.he_v3_quic.ipv4 }}:8443
+                    }
+
+                    @other tls
+                    route @other {
+                        proxy tcp/{{ item.ipv4 }}:8443
+                    }
+                }
+            }
+        }
+
+        # shared between CAD and HEv3 tests
+        tcp/[{{ item.ipv6 }}]:443 {
+            route {
+                subroute {
+                    @tls-delay tls sni_regexp ^.*_quic-([0-9]+)_tls-([0-9]+)_id-[0-9]+\.v3-quic\.{{ happy_eyeballs.nameserver.base_domain | replace('.', '\\.') }}$
+                    route @tls-delay {
+                        throttle_var {tls.regexp.2}ms  # TLS
+
+                        proxy tcp/[{{ happy_eyeballs.webserver.he_v3_quic.ipv6 }}]:8443
+                    }
+
+                    @other tls
+                    route @other {
+                        proxy tcp/[{{ item.ipv6 }}]:8443
+                    }
+                }
+            }
+        }
+        {% endfor %}
+    }
+}
+
+### SNIPPETS
+
+(cors) {
+    header {
+        Access-Control-Allow-Origin *
+        Access-Control-Allow-Methods "GET, POST, OPTIONS"
+        Access-Control-Allow-Headers "Content-Type, Authorization"
+        Access-Control-Expose-Headers "X-Protocol, X-Server-IP"
+        Access-Control-Max-Age 1728000
+        Timing-Allow-Origin *
+    }
+}
+
+(respond_with_client_ip) {
+    templates {
+        between (( ))
+        mime text/plain
+    }
+    header Content-Type text/plain
+    respond `((.ClientIP))`
+}
+
+(respond_with_server_ip) {
+    header Content-Type text/plain
+    respond `{http.request.local.host}`
+}
+
+(respond_with_json) {
+    header Content-Type application/json
+    respond `{"server_ip": "{http.request.local.host}", "protocol": "{http.request.proto}"}`
+}
+
+(handle_trace) {
+    reverse_proxy {{ happy_eyeballs.packet_capture.service.host }}:{{ happy_eyeballs.packet_capture.service.port }} {
+        header_up X-SNI {host}
+
+        header_down X-Protocol {http.request.proto}
+        header_down X-Server-IP {http.request.local.host}
+    }
+}
+
+### SERVERS
+
+{{ happy_eyeballs.webtester.domains | join(', ') }} {
+    bind {{ happy_eyeballs.webtester.ipv4 }} {{ happy_eyeballs.webtester.ipv6 }}
+
+    tls {{ certbot.email }}
+
+    handle /results/* {
+        reverse_proxy {{ happy_eyeballs.result_upload.service.host }}:{{ happy_eyeballs.result_upload.service.port }}
+    }
+
+    handle {
+        root * {{ happy_eyeballs.base_path }}/www-root
+        file_server
+    }
+}
+
+{{ happy_eyeballs_domains.v1_ipv4_only }}, {{ happy_eyeballs_domains.v1_ipv6_only }} {
+    bind {{ happy_eyeballs.webserver.ipv4 }} {{ happy_eyeballs.webserver.ipv6 }}
+
+    tls /etc/letsencrypt/live/{{ happy_eyeballs_domains.v1_ipv6_only }}/fullchain.pem /etc/letsencrypt/live/{{ happy_eyeballs_domains.v1_ipv6_only }}/privkey.pem
+
+    import cors
+    import respond_with_client_ip
+}
+
+{{ happy_eyeballs_domains.v1 | map('regex_replace', '$', ':8443') | join(', ') }} {
+    bind {% for item in happy_eyeballs.webserver.delays %}{{ item.ipv4 }} {{ item.ipv6 }} {% endfor %}
+
+    tls /etc/letsencrypt/live/{{ happy_eyeballs_domains.v1 | first | replace('*.', '') }}/fullchain.pem /etc/letsencrypt/live/{{ happy_eyeballs_domains.v1 | first | replace('*.', '') }}/privkey.pem
+
+    import cors
+
+    handle /trace {
+        import handle_trace
+    }
+
+    handle {
+        import respond_with_server_ip
+    }
+}
+
+{{ happy_eyeballs_domains.v2 }} {
+    bind {{ happy_eyeballs.webserver.ipv4 }} {{ happy_eyeballs.webserver.ipv6 }}
+
+    tls /etc/letsencrypt/live/{{ happy_eyeballs_domains.v2 | replace('*.', '') }}/fullchain.pem /etc/letsencrypt/live/{{ happy_eyeballs_domains.v2 | replace('*.', '') }}/privkey.pem
+
+    import cors
+
+    handle /trace {
+        import handle_trace
+    }
+
+    handle {
+        import respond_with_server_ip
+    }
+}
+
+{{ happy_eyeballs_domains.v3_quic }}:8443 {
+    bind {{ happy_eyeballs.webserver.he_v3_quic.ipv4 }} {{ happy_eyeballs.webserver.he_v3_quic.ipv6 }}
+
+    tls /etc/letsencrypt/live/{{ happy_eyeballs_domains.v3_quic | replace('*.', '') }}/fullchain.pem /etc/letsencrypt/live/{{ happy_eyeballs_domains.v3_quic | replace('*.', '') }}/privkey.pem
+
+    header -Alt-Svc
+
+    import cors
+
+    handle /trace {
+        import handle_trace
+    }
+
+    handle {
+        import respond_with_json
+    }
+}
+
+*.http3.http3.{{ happy_eyeballs.nameserver.base_domain }}, *.http3-https.http3.{{ happy_eyeballs.nameserver.base_domain }} {
+    bind {{ happy_eyeballs.webserver.http3.ipv4 }} {{ happy_eyeballs.webserver.http3.ipv6 }}
+
+    tls /etc/letsencrypt/live/{{ happy_eyeballs_domains.http3.http3 | replace('*.', '') }}/fullchain.pem /etc/letsencrypt/live/{{ happy_eyeballs_domains.http3.http3 | replace('*.', '') }}/privkey.pem
+    tls /etc/letsencrypt/live/{{ happy_eyeballs_domains.http3.http3_https | replace('*.', '') }}/fullchain.pem /etc/letsencrypt/live/{{ happy_eyeballs_domains.http3.http3_https | replace('*.', '') }}/privkey.pem
+
+    header -Alt-Svc
+
+    import cors
+
+    handle /trace {
+        import handle_trace
+    }
+
+    handle {
+        import respond_with_json
+    }
+}
+
+*.http3-altsvc.http3.{{ happy_eyeballs.nameserver.base_domain }}, *.http3-https-altsvc.http3.{{ happy_eyeballs.nameserver.base_domain }} {
+    bind {{ happy_eyeballs.webserver.http3.ipv4 }} {{ happy_eyeballs.webserver.http3.ipv6 }}
+
+    tls /etc/letsencrypt/live/{{ happy_eyeballs_domains.http3.http3_altsvc | replace('*.', '') }}/fullchain.pem /etc/letsencrypt/live/{{ happy_eyeballs_domains.http3.http3_altsvc | replace('*.', '') }}/privkey.pem
+    tls /etc/letsencrypt/live/{{ happy_eyeballs_domains.http3.http3_https_altsvc | replace('*.', '') }}/fullchain.pem /etc/letsencrypt/live/{{ happy_eyeballs_domains.http3.http3_https_altsvc | replace('*.', '') }}/privkey.pem
+
+    header Alt-Svc `h3=":443"; ma=600`
+
+    import cors
+
+    handle /trace {
+        import handle_trace
+    }
+
+    handle {
+        import respond_with_json
+    }
+}

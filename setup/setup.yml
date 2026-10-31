@@ -1,0 +1,23 @@
+- name: Setup Host for HE Web Test
+  hosts: webtester
+  gather_facts: true
+  roles:
+    - system
+    - interface-setup
+    - dns-setup
+    - webtester-setup
+    - caddy-setup
+    - result-upload-setup
+    - packet-capture-setup
+  vars:
+    happy_eyeballs_domains:
+      v1: '{{ happy_eyeballs.webserver.delays | map(attribute="delay") | map("string") | map("regex_replace", "(.+)", "*.delay-\1.v1." ~ happy_eyeballs.nameserver.base_domain) | unique | list }}'
+      v1_ipv6_only: 'ipv6-only.v1.{{ happy_eyeballs.nameserver.base_domain }}'
+      v1_ipv4_only: 'ipv4-only.v1.{{ happy_eyeballs.nameserver.base_domain }}'
+      v2: '*.v2.{{ happy_eyeballs.nameserver.base_domain }}'
+      v3_quic: '*.v3-quic.{{ happy_eyeballs.nameserver.base_domain }}'
+      http3:
+        http3: '*.http3.http3.{{ happy_eyeballs.nameserver.base_domain }}'
+        http3_https: '*.http3-https.http3.{{ happy_eyeballs.nameserver.base_domain }}'
+        http3_altsvc: '*.http3-altsvc.http3.{{ happy_eyeballs.nameserver.base_domain }}'
+        http3_https_altsvc: '*.http3-https-altsvc.http3.{{ happy_eyeballs.nameserver.base_domain }}'

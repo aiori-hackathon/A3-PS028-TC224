@@ -1,0 +1,18 @@
+$TTL 3600
+$ORIGIN v1.{{ happy_eyeballs.nameserver.base_domain }}.
+
+@                 IN  SOA    ns1.{{ happy_eyeballs.nameserver.base_domain }}. mail.net.in.tum.de. 1722513549 3600 900 604800 180
+@                 IN  NS     ns1.{{ happy_eyeballs.nameserver.base_domain }}.
+@                 IN  NS     ns2.{{ happy_eyeballs.nameserver.base_domain }}.
+
+ipv4-only          IN  A        {{ happy_eyeballs.webserver.ipv4 }}
+ipv6-only          IN  AAAA     {{ happy_eyeballs.webserver.ipv6 }}
+
+
+$TTL 300
+
+{% for item in happy_eyeballs.webserver.delays %}
+id-*.delay-{{ item.delay }}        IN A    {{ item.ipv4 }}
+id-*.delay-{{ item.delay }}        IN AAAA {{ item.ipv6 }}
+{% endfor %}
+

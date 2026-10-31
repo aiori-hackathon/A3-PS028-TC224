@@ -1,0 +1,28 @@
+- name: Add docker apt key
+  ansible.builtin.get_url:
+    url: 'https://download.docker.com/linux/{{ os.name }}/gpg'
+    dest: '/etc/apt/keyrings/docker.asc'
+    mode: '0644'
+
+- name: Add docker apt source
+  ansible.builtin.copy:
+    content: |
+      Types: deb
+      URIs: https://download.docker.com/linux/{{ os.name }}
+      Suites: {{ os.version_codename }}
+      Components: stable
+      Signed-By: /etc/apt/keyrings/docker.asc
+    dest: '/etc/apt/sources.list.d/docker.sources'
+
+- name: Install docker
+  ansible.builtin.apt:
+    name: '{{ item }}'
+    update_cache: true
+    state: present
+  loop:
+    - 'docker-ce'
+    - 'docker-ce-cli'
+    - 'containerd.io'
+    - 'docker-buildx-plugin'
+    - 'docker-compose-plugin'
+  notify: restart docker

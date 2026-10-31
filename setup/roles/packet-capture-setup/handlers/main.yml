@@ -1,0 +1,13 @@
+- name: restart he-packet-capture-service
+  ansible.builtin.systemd:
+    name: he-packet-capture-service
+    enabled: true
+    daemon_reload: true
+    state: restarted
+
+- name: restart he-packet-capture-tshark
+  ansible.builtin.systemd:
+    name: he-packet-capture-tshark
+    enabled: true
+    daemon_reload: true
+    state: restarted

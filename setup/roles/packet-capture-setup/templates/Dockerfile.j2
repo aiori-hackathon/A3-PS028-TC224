@@ -1,0 +1,13 @@
+FROM golang:1.25-alpine AS builder
+
+WORKDIR /src
+
+ADD src /src/
+
+RUN go build -o /packet-capture-service ./cmd/main.go
+
+FROM alpine:latest
+
+COPY --from=builder /packet-capture-service /packet-capture-service
+
+ENTRYPOINT ["/packet-capture-service"]

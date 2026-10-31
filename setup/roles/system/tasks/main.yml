@@ -1,0 +1,11 @@
+- ansible.builtin.import_tasks: apt.yml
+  tags: [ 'system', 'system-apt' ]
+
+- ansible.builtin.import_tasks: docker.yml
+  tags: [ 'system', 'system-docker' ]
+
+- ansible.builtin.import_tasks: user.yml
+  tags: [ 'system', 'system-user' ]
+
+- ansible.builtin.import_tasks: podman.yml
+  tags: [ 'system', 'system-podman' ]

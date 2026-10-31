@@ -1,0 +1,13 @@
+FROM golang:1.25-alpine AS builder
+
+WORKDIR /src
+
+ADD src /src/
+
+RUN go build -o /result-upload-service ./cmd/main.go
+
+FROM alpine:latest
+
+COPY --from=builder /result-upload-service /result-upload-service
+
+ENTRYPOINT ["/result-upload-service"]

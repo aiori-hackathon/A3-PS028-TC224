@@ -1,0 +1,49 @@
+- name: Create packet-capture service directory
+  ansible.builtin.file:
+    path: '{{ happy_eyeballs.base_path }}/packet-capture/service'
+    owner: root
+    group: root
+    mode: '0755'
+    state: 'directory'
+
+- name: Copy packet-capture service src
+  ansible.posix.synchronize:
+    src: 'packet-capture-service/'
+    dest: '{{ happy_eyeballs.base_path }}/packet-capture/service/src/'
+    owner: false
+    group: false
+  notify: restart he-packet-capture-service
+
+- name: Copy packet-capture service dockerfile
+  ansible.builtin.template:
+    src: 'Dockerfile.j2'
+    dest: '{{ happy_eyeballs.base_path }}/packet-capture/service/Dockerfile'
+    owner: root
+    group: root
+    mode: '0644'
+  notify: restart he-packet-capture-service
+
+- name: Copy packet-capture service docker compose file
+  ansible.builtin.template:
+    src: 'docker-compose.yml.j2'
+    dest: '{{ happy_eyeballs.base_path }}/packet-capture/service/docker-compose.yml'
+    owner: root
+    group: root
+    mode: '0644'
+  notify: restart he-packet-capture-service
+
+- name: Copy packet-capture service systemd service file
+  ansible.builtin.template:
+    src: 'he-packet-capture-service.service.j2'
+    dest: '/etc/systemd/system/he-packet-capture-service.service'
+    owner: root
+    group: root
+    mode: '0644'
+  notify: restart he-packet-capture-service
+
+- name: Ensure packet capture service is started
+  ansible.builtin.systemd:
+    name: 'he-packet-capture-service.service'
+    state: started
+    enabled: true
+    daemon_reload: true

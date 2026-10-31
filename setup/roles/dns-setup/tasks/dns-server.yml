@@ -1,0 +1,74 @@
+- name: Create directory
+  ansible.builtin.file:
+    path: '{{ happy_eyeballs.base_path }}/dns'
+    owner: root
+    group: root
+    state: directory
+
+- name: Copy DNS python server
+  ansible.posix.synchronize:
+    src: 'dns/'
+    dest: '{{ happy_eyeballs.base_path }}/dns/'
+    owner: false
+    group: false
+
+- name: Copy systemd service file
+  ansible.builtin.template:
+    src: 'he-dns-server.service.j2'
+    dest: '/etc/systemd/system/he-dns-server.service'
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Copy docker compose file
+  ansible.builtin.template:
+    src: 'docker-compose.yml.j2'
+    dest: '{{ happy_eyeballs.base_path }}/dns/docker-compose.yml'
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Copy zone file templates
+  ansible.builtin.template:
+    src: '{{ item }}.j2'
+    dest: '{{ happy_eyeballs.base_path }}/dns/zones/{{ item }}.part'
+    owner: root
+    group: root
+    mode: '0644'
+  with_items:
+    - 'v1.zone'
+    - 'v2.zone'
+    - 'v1-rdns.zone'
+    - 'v3-quic.zone'
+    - 'http3.zone'
+  register: zone_result
+
+- name: Remove zone file
+  ansible.builtin.file:
+    path: '{{ happy_eyeballs.base_path }}/dns/zones/dns.zone'
+    state: absent
+
+- name: Cut all zone files to a single file
+  ansible.builtin.shell:
+    cmd: 'cat {{ happy_eyeballs.base_path }}/dns/zones/{{ item }}.part >> {{ happy_eyeballs.base_path }}/dns/zones/dns.zone'
+  with_items:
+    - 'v1.zone'
+    - 'v2.zone'
+    - 'v1-rdns.zone'
+    - 'v3-quic.zone'
+    - 'http3.zone'
+  changed_when: zone_result.changed
+
+- name: Create output directory
+  ansible.builtin.file:
+    path: '{{ happy_eyeballs.base_path }}/dns-query-data'
+    owner: '{{ happy_eyeballs.user.name }}'
+    group: '{{ happy_eyeballs.user.name }}'
+    mode: '0755'
+    state: directory
+
+- name: Reload systemd and start DNS server
+  ansible.builtin.systemd:
+    name: 'he-dns-server.service'
+    daemon_reload: true
+    state: restarted

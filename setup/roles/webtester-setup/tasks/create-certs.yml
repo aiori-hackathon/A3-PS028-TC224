@@ -1,0 +1,60 @@
+- name: Prepare certificate creation
+  block:
+    - name: Create certificate scripts directory
+      ansible.builtin.file:
+        path: '{{ happy_eyeballs.base_path }}/cert-scripts'
+        owner: root
+        group: root
+        mode: '0755'
+        state: directory
+
+    - name: Copy auth scripts
+      ansible.builtin.template:
+        src: '{{ item }}.j2'
+        dest: '{{ happy_eyeballs.base_path }}/cert-scripts/{{ item }}'
+        owner: root
+        group: root
+        mode: '0755'
+      with_items:
+        - 'auth-hook-handler.sh'
+        - 'auth-cleanup-handler.sh'
+
+- name: Create certificates
+  ansible.builtin.include_tasks: create-cert.yml
+  vars:
+    domains: '{{ item }}'
+  loop:
+    - '{{ happy_eyeballs_domains.v1 | join(",") }}'
+    - '{{ happy_eyeballs_domains.v1_ipv6_only }},{{ happy_eyeballs_domains.v1_ipv4_only }}'
+    - '{{ happy_eyeballs_domains.v2 }}'
+    - '{{ happy_eyeballs_domains.v3_quic }}'
+    - '{{ happy_eyeballs_domains.http3.http3 }}'
+    - '{{ happy_eyeballs_domains.http3.http3_https }}'
+    - '{{ happy_eyeballs_domains.http3.http3_altsvc }}'
+    - '{{ happy_eyeballs_domains.http3.http3_https_altsvc }}'
+
+# Adjust permissions of certificates and private keys so that caddy running as non-root can access them
+# https://eff-certbot.readthedocs.io/en/stable/using.html#where-are-my-certificates
+- name: Adjust permissions of certificates directory
+  ansible.builtin.file:
+    path: '{{ item }}'
+    mode: '0755'
+  with_items:
+    - '/etc/letsencrypt/live'
+    - '/etc/letsencrypt/archive'
+
+- name: Find certificate private keys
+  ansible.builtin.find:
+    paths: '/etc/letsencrypt/live'
+    patterns: 'privkey.pem'
+    file_type: link
+    recurse: true
+  register: certificate_private_keys
+
+- name: Adjust permissions of certificate private keys
+  ansible.builtin.file:
+    path: '{{ item.path }}'
+    owner: root
+    group: '{{ happy_eyeballs.user.name }}'
+    mode: '0640'
+  with_items: '{{ certificate_private_keys.files }}'

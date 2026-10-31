@@ -1,0 +1,58 @@
+- name: Create result upload service directory
+  ansible.builtin.file:
+    path: '{{ happy_eyeballs.base_path }}/result-upload-service'
+    owner: root
+    group: root
+    mode: '0755'
+    state: 'directory'
+
+- name: Create result directory
+  ansible.builtin.file:
+    path: '{{ happy_eyeballs.base_path }}/results'
+    owner: '{{ happy_eyeballs.user.name }}'
+    group: '{{ happy_eyeballs.user.name }}'
+    mode: '0755'
+    state: 'directory'
+  notify: restart he-result-upload-service
+
+- name: Copy result upload service src
+  ansible.posix.synchronize:
+    src: 'result-upload-service/'
+    dest: '{{ happy_eyeballs.base_path }}/result-upload-service/src/'
+    owner: false
+    group: false
+  notify: restart he-result-upload-service
+
+- name: Copy result upload service dockerfile
+  ansible.builtin.template:
+    src: 'Dockerfile.j2'
+    dest: '{{ happy_eyeballs.base_path }}/result-upload-service/Dockerfile'
+    owner: root
+    group: root
+    mode: '0644'
+  notify: restart he-result-upload-service
+
+- name: Copy result upload service docker compose file
+  ansible.builtin.template:
+    src: 'docker-compose.yml.j2'
+    dest: '{{ happy_eyeballs.base_path }}/result-upload-service/docker-compose.yml'
+    owner: root
+    group: root
+    mode: '0644'
+  notify: restart he-result-upload-service
+
+- name: Copy result upload service systemd service file
+  ansible.builtin.template:
+    src: 'he-result-upload-service.service.j2'
+    dest: '/etc/systemd/system/he-result-upload-service.service'
+    owner: root
+    group: root
+    mode: '0644'
+  notify: restart he-result-upload-service
+
+- name: Ensure result upload service is started
+  ansible.builtin.systemd:
+    name: 'he-result-upload-service.service'
+    state: started
+    enabled: true
+    daemon_reload: true

@@ -1,0 +1,14 @@
+services:
+  dns:
+    container_name: he-dns-server
+    build:
+      context: .
+      dockerfile: build/Dockerfile
+    restart: unless-stopped
+    command: '--local-ns-ip {{ happy_eyeballs.nameserver.ipv4 | join(" ") }} {{ happy_eyeballs.nameserver.ipv6 | join(" ") }} --v6delay-prefix {{ happy_eyeballs.nameserver.ipv6_delay_prefix }} --output-dir /data --basedomain {{ happy_eyeballs.nameserver.base_domain }}'
+    network_mode: 'host'
+    volumes:
+      - '/etc/localtime:/etc/localtime:ro'
+      - './zones:/app/zones:ro'
+      - '{{ happy_eyeballs.base_path }}/dns-query-data:/data'
+#      - './queries:/data'

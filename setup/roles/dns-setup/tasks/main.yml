@@ -1,0 +1,3 @@
+- name: Setup DNS server
+  ansible.builtin.import_tasks: dns-server.yml
+  tags: [ 'dns', 'dns-server' ]

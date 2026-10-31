@@ -1,0 +1,32 @@
+---
+import PageLayout from "@/layouts/main.astro";
+import Header from "@/components/header.astro";
+import { ConnectionAttemptDelayTest } from "@/components/tests/connection-attempt-delay-test.tsx";
+---
+
+<PageLayout title="HE CAD Test | Happy Eyeballs Webtester">
+  <Header
+    titleLine1="Happy Eyeballs"
+    titleLine2="Connection Attempt Delay Test"
+  >
+    <p>
+      We set up a server with as many unique IPv4 and IPv6 addresses as measured
+      delays. Each delay has a corresponding IPv4 and IPv6 address bound to all
+      subdomains of a delay-specific domain name. By using tc netem, we delay
+      the traffic for the IPv6 address by the configured number of milliseconds.
+      This enables us to test how browsers deploy Happy Eyeballs.
+    </p>
+    <p>
+      We randomize domains to prevent caching effects on the browser's side. The
+      measurement without randomization shows whether the browser caches or uses
+      performance measurements to select IP versions. The web server only offers
+      HTTP/1.1 to prevent connection reuse between tests.
+    </p>
+    <p>
+      Please note that the connection attempt trace for this test is currently
+      unreliable, as correlation requires an SNI to be present.
+    </p>
+  </Header>
+
+  <ConnectionAttemptDelayTest client:load />
+</PageLayout>

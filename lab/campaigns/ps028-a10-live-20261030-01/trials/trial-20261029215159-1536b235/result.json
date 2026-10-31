@@ -1,0 +1,122 @@
+{
+  "schema_version": "1.0.0",
+  "trial_id": "trial-20261029215159-1536b235",
+  "scenario_id": "S2",
+  "scenario_name": "ipv6_tcp_rst",
+  "scenario_description": "IPv6 TCP RST rejection: IPv6 TCP SYN packets are actively rejected with TCP RST (triggers immediate client reset and Happy Eyeballs fallback without waiting for timeout)",
+  "hostname": "trial-20261029215159-1536b235.he.test",
+  "target_url": "http://trial-20261029215159-1536b235.he.test/",
+  "execution_mode": "LIVE",
+  "is_simulation": false,
+  "timestamps": {
+    "start_time": "2026-10-29T21:51:59.195362+00:00",
+    "scenario_applied_time": "2026-10-29T21:52:03.750212+00:00",
+    "capture_start_time": "2026-10-29T21:52:03.750223+00:00",
+    "browser_start_time": "2026-10-29T21:52:03.892950+00:00",
+    "browser_end_time": "2026-10-29T21:52:04.554661+00:00",
+    "capture_stop_time": "2026-10-29T21:52:04.783399+00:00",
+    "baseline_restored_time": "2026-10-29T21:52:04.921439+00:00",
+    "end_time": "2026-10-29T21:52:09.372097+00:00",
+    "total_duration_ms": 10176.75
+  },
+  "browser": {
+    "name": "google-chrome",
+    "executable": "/usr/bin/google-chrome",
+    "version": "Google Chrome 156.0.8078.73",
+    "exit_code": 0,
+    "timed_out": false,
+    "duration_ms": 655.92,
+    "profile_cleaned": true
+  },
+  "http_outcome": {
+    "status_code": 200,
+    "success": true,
+    "winning_address_family": "IPv4",
+    "winning_ip": "10.0.2.10",
+    "response_body_bytes": 308
+  },
+  "dns_observations": {
+    "queries": [
+      {
+        "qname": "trial-20261029215159-1536b235.he.test",
+        "qtype": "65",
+        "timestamp": 1793310724.356305
+      },
+      {
+        "qname": "trial-20261029215159-1536b235.he.test",
+        "qtype": "AAAA",
+        "timestamp": 1793310724.356435
+      },
+      {
+        "qname": "trial-20261029215159-1536b235.he.test",
+        "qtype": "A",
+        "timestamp": 1793310724.356497
+      }
+    ],
+    "responses": [
+      {
+        "qname": "trial-20261029215159-1536b235.he.test",
+        "qtype": "65",
+        "address": "",
+        "timestamp": 1793310724.35697
+      },
+      {
+        "qname": "trial-20261029215159-1536b235.he.test",
+        "qtype": "AAAA",
+        "address": "2001:db8:2::10",
+        "timestamp": 1793310724.357616
+      },
+      {
+        "qname": "trial-20261029215159-1536b235.he.test",
+        "qtype": "A",
+        "address": "10.0.2.10",
+        "timestamp": 1793310724.358176
+      }
+    ]
+  },
+  "network_observations": {
+    "ipv6_attempt": true,
+    "ipv4_attempt": true,
+    "ipv6_success": false,
+    "ipv4_success": true,
+    "connection_attempt_delay_ms": 1.32,
+    "connection_setup_time_ms": 31.22,
+    "fallback_occurred": true,
+    "classification": "IPV6_TO_IPV4_FALLBACK",
+    "classification_reason": "Observed initial IPv6 connection attempt, followed by IPv4 attempt and successful IPv4 connection (Connection Attempt Delay: 1.32ms)."
+  },
+  "capture_metadata": {
+    "pcap_path": "/home/indrani/projects/he-webtester/lab/campaigns/ps028-a10-live-20261030-01/trials/trial-20261029215159-1536b235/capture.pcap",
+    "pcap_sha256": "44edb561f42ab37020f2f05333404e7ddded350baed6dbe20443e93165784029",
+    "pcap_size_bytes": 18115,
+    "pcap_valid": true,
+    "packet_count": 172,
+    "validation_message": "Valid PCAP",
+    "tcpdump_log_path": "/home/indrani/projects/he-webtester/lab/campaigns/ps028-a10-live-20261030-01/trials/trial-20261029215159-1536b235/tcpdump.log",
+    "packets_captured": 172,
+    "packets_received_by_filter": 172,
+    "packets_dropped_by_kernel": 0,
+    "packets_dropped_by_interface": 0,
+    "total_packets_dropped": 0,
+    "capture_loss": false,
+    "capture_loss_message": null,
+    "interface": "ps028-cl-rt",
+    "bpf_filter": "(host 10.0.1.1 and port 53) or (host 10.0.2.10 and tcp port 80) or (host 2001:db8:2::10 and tcp port 80)",
+    "buffer_size_kb": 8192
+  },
+  "evidence_paths": {
+    "trial_dir": "/home/indrani/projects/he-webtester/lab/campaigns/ps028-a10-live-20261030-01/trials/trial-20261029215159-1536b235",
+    "result_json": "/home/indrani/projects/he-webtester/lab/campaigns/ps028-a10-live-20261030-01/trials/trial-20261029215159-1536b235/result.json",
+    "capture_pcap": "/home/indrani/projects/he-webtester/lab/campaigns/ps028-a10-live-20261030-01/trials/trial-20261029215159-1536b235/capture.pcap",
+    "tcpdump_log": "/home/indrani/projects/he-webtester/lab/campaigns/ps028-a10-live-20261030-01/trials/trial-20261029215159-1536b235/tcpdump.log",
+    "browser_log": "/home/indrani/projects/he-webtester/lab/campaigns/ps028-a10-live-20261030-01/trials/trial-20261029215159-1536b235/browser.log",
+    "browser_netlog": "/home/indrani/projects/he-webtester/lab/campaigns/ps028-a10-live-20261030-01/trials/trial-20261029215159-1536b235/netlog.json"
+  },
+  "cleanup_status": {
+    "scenario_restored": true,
+    "baseline_verified": true,
+    "profile_cleaned": true,
+    "lock_released": true,
+    "errors": []
+  }
+}

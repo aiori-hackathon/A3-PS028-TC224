@@ -1,0 +1,25 @@
+#!/bin/bash
+
+ZONEFILE="{{ happy_eyeballs.base_path }}/dns/zones/acme.zone.part"
+ACMEDOMAIN="_acme-challenge.${CERTBOT_DOMAIN}"
+
+if [[ "${CERTBOT_DOMAIN}" = "happy.eyeballs.net" ]]; then
+    ACMEDOMAIN="_acme-challenge.acme.he-tests.${CERTBOT_DOMAIN}"
+fi
+
+if [[ "${CERTBOT_DOMAIN}" = "www.happy.eyeballs.net" ]]; then
+    ACMEDOMAIN="_acme-challenge.www.acme.he-tests.happy.eyeballs.net"
+fi
+
+if [[ ! -e ${ZONEFILE} ]]; then
+    echo '$TTL 60' > ${ZONEFILE}
+    echo '$ORIGIN .' >> ${ZONEFILE}
+fi
+
+# Add the new challenge record
+echo "${ACMEDOMAIN} IN TXT \"${CERTBOT_VALIDATION}\"" >> "$ZONEFILE"
+
+cat {{ happy_eyeballs.base_path }}/dns/zones/*.zone.part > {{ happy_eyeballs.base_path }}/dns/zones/dns.zone
+
+# Wait to ensure propagation
+sleep 5

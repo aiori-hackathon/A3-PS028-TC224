@@ -1,0 +1,41 @@
+#- name: Add Debian testing apt repository to get a newer Podman version
+#  apt_repository:
+#    repo: 'deb https://deb.debian.org/{{ os.name }} testing main'
+#    state: present
+
+- name: Install podman
+  ansible.builtin.apt:
+    name: '{{ item }}'
+    state: present
+  loop:
+    - 'podman'
+    - 'crun'
+
+# podman setup for happy-eyeballs user
+- name: Start systemd user service for happy-eyeballs user
+  ansible.builtin.systemd:
+    name: 'user@{{ happy_eyeballs.user.uid }}.service'
+    state: started
+
+- name: Check if podman socket exists for happy-eyeballs user
+  stat:
+    path: '/run/user/{{ happy_eyeballs.user.uid }}/podman/podman.sock'
+  register: podman_socket
+
+- name: Enable podman socket for happy-eyeballs user
+  become: true
+  become_user: '{{ happy_eyeballs.user.name }}'
+  ansible.builtin.shell: 'systemctl --user enable --now podman.socket'
+  environment:
+    DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/{{ happy_eyeballs.user.uid }}/bus'
+  when: not podman_socket.stat.exists
+
+- name: Enable linger for happy-eyeballs user
+  ansible.builtin.shell: 'loginctl enable-linger {{ happy_eyeballs.user.uid }}'
+
+# required for non-root podman containers to listen on ports >= 53
+- name: Configure unprivileged port range
+  ansible.posix.sysctl:
+    name: net.ipv4.ip_unprivileged_port_start
+    value: '53'
+    state: present

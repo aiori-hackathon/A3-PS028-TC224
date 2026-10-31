@@ -1,0 +1,21 @@
+[Unit]
+Description=Happy Eyeballs Packet Capture Service
+Wants=network-online.target
+After=network-online.target
+RequiresMountsFor=%t/containers
+{% if systemd_send_email_on_failure|bool %}
+OnFailure=status-email@%n.service
+{% endif %}
+
+[Service]
+Type=simple
+WorkingDirectory={{ happy_eyeballs.base_path }}/packet-capture/service
+ExecStartPre=-/usr/bin/mkfifo {{ happy_eyeballs.packet_capture.tshark.pipe_path }}
+ExecStartPre=/bin/chmod 666 {{ happy_eyeballs.packet_capture.tshark.pipe_path }}
+ExecStart=/usr/bin/docker compose up --build --abort-on-container-exit --remove-orphans
+ExecStop=/usr/bin/docker compose down
+Environment=PODMAN_SYSTEMD_UNIT=%n
+Environment=DOCKER_HOST=unix:///run/user/{{ happy_eyeballs.user.uid }}/podman/podman.sock
+{% if systemd_send_email_on_failure|bool %}
+ExecStopPost=/usr/local/bin/systemd-email %n --no-send-on-success
+{% endif %}

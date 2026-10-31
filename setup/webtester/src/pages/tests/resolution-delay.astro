@@ -1,0 +1,27 @@
+---
+import PageLayout from "@/layouts/main.astro";
+import Header from "@/components/header.astro";
+import { ResolutionDelayTest } from "@/components/tests/resolution-delay-test.tsx";
+---
+
+<PageLayout title="HE RD Test | Happy Eyeballs Webtester">
+  <Header titleLine1="Happy Eyeballs" titleLine2="Resolution Delay Test">
+    <p>
+      We set up a DNS nameserver that introduces a delay based on parameters
+      specified in the requested domain name. Our test sends a configured number
+      of delay configurations for each DNS record type, allowing us to test how
+      browsers deploy the Happy Eyeballs Resolution Delay.
+    </p>
+    <p>
+      We randomize domain names to prevent caching effects on both the browser
+      and resolver. Additionally, the web server only offers HTTP/1.1 to prevent
+      connection reuse between tests.
+    </p>
+    <p>
+      Please note that the connection attempt trace for this test is currently
+      unreliable, as correlation requires an SNI to be present.
+    </p>
+  </Header>
+
+  <ResolutionDelayTest client:load />
+</PageLayout>

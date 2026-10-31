@@ -1,0 +1,11 @@
+- name: Delete IP addresses
+  ansible.builtin.import_tasks: delete-addresses.yml
+  tags: [ 'never', 'interface-ip-delete' ]
+
+- name: Add IP addresses
+  ansible.builtin.import_tasks: add-addresses.yml
+  tags: [ 'interface', 'interface-ip-add' ]
+
+- name: Setup delays
+  ansible.builtin.import_tasks: setup-delays.yml
+  tags: [ 'interface', 'interface-delays' ]

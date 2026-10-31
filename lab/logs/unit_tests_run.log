@@ -1,0 +1,1870 @@
+test_deterministic_json_and_csv_equality (test_analyze.TestDeterministicOutput.test_deterministic_json_and_csv_equality) ... ok
+test_cleanup_errors_list_excluded (test_analyze.TestExclusionsAndValidity.test_cleanup_errors_list_excluded) ... ok
+test_cleanup_failure_excluded (test_analyze.TestExclusionsAndValidity.test_cleanup_failure_excluded) ... ok
+test_inconclusive_classification_excluded (test_analyze.TestExclusionsAndValidity.test_inconclusive_classification_excluded) ... ok
+test_simulation_separated_by_default (test_analyze.TestExclusionsAndValidity.test_simulation_separated_by_default) ... ok
+test_zero_packet_capture_excluded (test_analyze.TestExclusionsAndValidity.test_zero_packet_capture_excluded) ... ok
+test_live_trials_analysis (test_analyze.TestLiveEvidenceIntegration.test_live_trials_analysis) ... ok
+test_corrupted_json_syntax (test_analyze.TestMalformedRecords.test_corrupted_json_syntax) ... ok
+test_missing_required_sections (test_analyze.TestMalformedRecords.test_missing_required_sections) ... ok
+test_nonexistent_file (test_analyze.TestMalformedRecords.test_nonexistent_file) ... ok
+test_schema_version_mismatch (test_analyze.TestMalformedRecords.test_schema_version_mismatch) ... ok
+test_empty_dns_observations_yield_none (test_analyze.TestMissingData.test_empty_dns_observations_yield_none) ... ok
+test_null_cad_preserved_in_aggregates (test_analyze.TestMissingData.test_null_cad_preserved_in_aggregates) ... ok
+test_partial_dns_matching (test_analyze.TestMissingData.test_partial_dns_matching) ... ok
+test_missing_cad_in_trial_returns_indeterminate (test_analyze.TestRFC8305Assessment.test_missing_cad_in_trial_returns_indeterminate)
+Verifies that S1 or S2 trials without CAD measurement return INDETERMINATE. ... ok
+test_missing_evidence_all_scenarios_indeterminate (test_analyze.TestRFC8305Assessment.test_missing_evidence_all_scenarios_indeterminate)
+Verifies that an empty dataset marks all checks INDETERMINATE with sample_size 0. ... ok
+test_partial_scenarios_missing_evidence_indeterminate (test_analyze.TestRFC8305Assessment.test_partial_scenarios_missing_evidence_indeterminate)
+Verifies that when only S0 is tested, S1, S2, S4, and S6 are marked INDETERMINATE. ... ok
+test_rfc8305_checks_status_types (test_analyze.TestRFC8305Assessment.test_rfc8305_checks_status_types)
+Verifies that all checks return one of the three standard status categories. ... ok
+test_s1_timing_boundaries (test_analyze.TestRFC8305Assessment.test_s1_timing_boundaries)
+RFC 8305 Section 5 specifies permitted CAD range [100ms, 2000ms] (recommended target: 250ms), ... ok
+test_s2_timing_boundaries (test_analyze.TestRFC8305Assessment.test_s2_timing_boundaries)
+RFC 8305 Section 5 distinguishes: ... ok
+test_s4_timing_boundaries (test_analyze.TestRFC8305Assessment.test_s4_timing_boundaries)
+Verifies alternative path selection under 600ms IPv6 RTT. ... ok
+test_s6_chrome_trial_scoped_deviation (test_analyze.TestRFC8305Assessment.test_s6_chrome_trial_scoped_deviation)
+Verifies that S6 conclusion is specifically scoped to the recorded Chrome trial ... ok
+test_unsupported_checks_remain_indeterminate (test_analyze.TestRFC8305Assessment.test_unsupported_checks_remain_indeterminate)
+Verifies that Section 7 (statefulness) and Section 8 (transports) remain INDETERMINATE. ... ok
+test_campaign_manifest_reconciliation (test_analyze.TestReconciliation.test_campaign_manifest_reconciliation) ... ok
+test_bootstrap_median_ci_determinism (test_analyze.TestStatistics.test_bootstrap_median_ci_determinism) ... ok
+test_continuous_stats_complete (test_analyze.TestStatistics.test_continuous_stats_complete) ... ok
+test_percentile_calculations (test_analyze.TestStatistics.test_percentile_calculations) ... ok
+test_wilson_score_interval (test_analyze.TestStatistics.test_wilson_score_interval) ... ok
+test_apply_scenario_contention_prevention (test_concurrency.TestLabWideConcurrency.test_apply_scenario_contention_prevention)
+Concurrent scenario apply must raise LabLockError if another process holds lab lock. ... ok
+test_clear_impairments_contention_prevention (test_concurrency.TestLabWideConcurrency.test_clear_impairments_contention_prevention)
+Concurrent clear_impairments must raise LabLockError if lock is held. ... ok
+test_cross_process_contention_failure (test_concurrency.TestLabWideConcurrency.test_cross_process_contention_failure)
+When lock is held by parent, child process must timeout and raise LabLockError. ... ok
+test_guaranteed_release_on_exception (test_concurrency.TestLabWideConcurrency.test_guaranteed_release_on_exception)
+Lock must be immediately released even if an unhandled exception occurs. ... ok
+test_lock_release_and_handover_between_processes (test_concurrency.TestLabWideConcurrency.test_lock_release_and_handover_between_processes)
+When parent releases lock, child process must acquire it successfully. ... ok
+test_reentrancy_in_same_thread (test_concurrency.TestLabWideConcurrency.test_reentrancy_in_same_thread)
+Nested lock acquisition in the same thread must succeed without deadlocking. ... ok
+test_teardown_contention_prevention (test_concurrency.TestLabWideConcurrency.test_teardown_contention_prevention)
+Concurrent teardown must raise LabLockError if another process holds lab lock. ... [1;34m[INFO][0m Initiating safe teardown (dry_run=True)...
+ok
+test_uncontended_acquisition_and_release (test_concurrency.TestLabWideConcurrency.test_uncontended_acquisition_and_release)
+Uncontended lock must be acquired and released cleanly. ... ok
+test_apex_a_record (test_dns_server.TestDNSResponseBuilding.test_apex_a_record) ... ok
+test_apex_aaaa_record (test_dns_server.TestDNSResponseBuilding.test_apex_aaaa_record) ... ok
+test_empty_question_returns_formerr (test_dns_server.TestDNSResponseBuilding.test_empty_question_returns_formerr) ... ok
+test_trial_hostname_preserves_requested_name_in_a_answer (test_dns_server.TestDNSResponseBuilding.test_trial_hostname_preserves_requested_name_in_a_answer) ... ok
+test_trial_hostname_preserves_requested_name_in_aaaa_answer (test_dns_server.TestDNSResponseBuilding.test_trial_hostname_preserves_requested_name_in_aaaa_answer) ... ok
+test_unsupported_name_returns_nxdomain (test_dns_server.TestDNSResponseBuilding.test_unsupported_name_returns_nxdomain) ... ok
+test_unsupported_record_type_returns_nodata (test_dns_server.TestDNSResponseBuilding.test_unsupported_record_type_returns_nodata) ... ok
+test_live_resolution_and_log_preservation (test_dns_server.TestLiveDNSQueries.test_live_resolution_and_log_preservation) ... ok
+test_apex_zone_matches (test_dns_server.TestWildcardHostnameValidation.test_apex_zone_matches) ... ok
+test_unsupported_or_malformed_hostnames (test_dns_server.TestWildcardHostnameValidation.test_unsupported_or_malformed_hostnames) ... ok
+test_valid_trial_hostnames (test_dns_server.TestWildcardHostnameValidation.test_valid_trial_hostnames) ... ok
+test_dry_run_flag_positions (test_impair.TestCLIOptions.test_dry_run_flag_positions) ... ok
+test_parser_subcommands (test_impair.TestCLIOptions.test_parser_subcommands) ... ok
+test_apply_dns_delays_unprivileged_delegates_to_helper (test_impair.TestControllerLifecycle.test_apply_dns_delays_unprivileged_delegates_to_helper)
+Unprivileged caller calling apply_dns_delays routes through apply-dns helper action. ... ok
+test_apply_failure_triggers_automatic_rollback (test_impair.TestControllerLifecycle.test_apply_failure_triggers_automatic_rollback) ... [1;31m[ERROR][0m Failed to apply scenario S1: Simulated nftables kernel failure. Rolling back to baseline...
+ok
+test_apply_s1_and_clear (test_impair.TestControllerLifecycle.test_apply_s1_and_clear) ... ok
+test_apply_s6_root (test_impair.TestControllerLifecycle.test_apply_s6_root)
+Applying S6 as root sets netem delays and applies DNS delays (A=0, AAAA=500). ... [1;33m[WARN][0m Notice while clearing table ps028_impair: setting the network namespace "ps028-rt" failed: Operation not permitted
+ok
+test_apply_s6_unprivileged_delegates_to_helper (test_impair.TestControllerLifecycle.test_apply_s6_unprivileged_delegates_to_helper)
+Unprivileged caller applying S6 routes through privileged helper and succeeds. ... ok
+test_lock_acquisition_success (test_impair.TestDNSCoordinationAndSafety.test_lock_acquisition_success)
+Uncontended lock must be acquired and released cleanly. ... ok
+test_lock_contention_failure_without_bypass (test_impair.TestDNSCoordinationAndSafety.test_lock_contention_failure_without_bypass)
+When lock is held by another process, acquisition must fail without bypassing. ... ok
+test_refuse_if_a3_backup_exists (test_impair.TestDNSCoordinationAndSafety.test_refuse_if_a3_backup_exists)
+Applying S6 DNS delays must refuse to run if A3's dns_config.json.bak exists. ... ok
+test_s6_backup_creation_and_restoration (test_impair.TestDNSCoordinationAndSafety.test_s6_backup_creation_and_restoration)
+Applying S6 must preserve clean baseline in impair_bak and restore cleanly. ... ok
+test_apply_nftables_rules_generation (test_impair.TestNFTablesManagement.test_apply_nftables_rules_generation) ... ok
+test_apply_nftables_rules_rejects_malformed_before_command_execution (test_impair.TestNFTablesManagement.test_apply_nftables_rules_rejects_malformed_before_command_execution)
+apply_nftables_rules must validate rules and abort BEFORE calling execute_netns_cmd. ... ok
+test_clear_nftables_only_deletes_project_table (test_impair.TestNFTablesManagement.test_clear_nftables_only_deletes_project_table) ... ok
+test_negative_rejects_cross_scenario_rule_mismatch (test_impair.TestNFTablesManagement.test_negative_rejects_cross_scenario_rule_mismatch)
+Reject rules that don't match the designated scenario structure. ... ok
+test_negative_rejects_empty_or_non_string (test_impair.TestNFTablesManagement.test_negative_rejects_empty_or_non_string)
+Rule must reject empty, non-string, or whitespace inputs. ... ok
+test_negative_rejects_injection_and_forbidden_keywords (test_impair.TestNFTablesManagement.test_negative_rejects_injection_and_forbidden_keywords)
+Reject semicolons, newlines, and dangerous commands. ... ok
+test_negative_rejects_invalid_or_unauthorized_ips (test_impair.TestNFTablesManagement.test_negative_rejects_invalid_or_unauthorized_ips)
+Reject invalid IP syntax or unauthorized destination IPs. ... ok
+test_negative_rejects_invalid_s5_loss_parameters (test_impair.TestNFTablesManagement.test_negative_rejects_invalid_s5_loss_parameters)
+Reject malformed numgen random mod parameters in S5 loss rules. ... ok
+test_negative_rejects_missing_tcp_syn_flags (test_impair.TestNFTablesManagement.test_negative_rejects_missing_tcp_syn_flags)
+Reject rules that omit or specify wrong TCP flags. ... ok
+test_negative_rejects_unauthorized_interfaces (test_impair.TestNFTablesManagement.test_negative_rejects_unauthorized_interfaces)
+Reject rules targeting host interfaces (eth0, lo, docker0). ... ok
+test_negative_rejects_unsupported_actions (test_impair.TestNFTablesManagement.test_negative_rejects_unsupported_actions)
+Reject unsupported actions (e.g. accept, masquerade, redirect). ... ok
+test_validate_allowed_s1_s2_s5_rule_structures (test_impair.TestNFTablesManagement.test_validate_allowed_s1_s2_s5_rule_structures)
+Valid S1, S2, and S5 rule structures must pass validation. ... ok
+test_apply_netem_delays (test_impair.TestNetemManagement.test_apply_netem_delays) ... ok
+test_restore_baseline_delays (test_impair.TestNetemManagement.test_restore_baseline_delays) ... ok
+test_all_seven_scenarios_exist (test_impair.TestScenariosYAML.test_all_seven_scenarios_exist)
+All seven Study Guide scenarios S0 through S6 must be defined. ... ok
+test_root_structure (test_impair.TestScenariosYAML.test_root_structure)
+Configuration must define lab topology metadata and all 7 scenarios. ... ok
+test_s0_healthy_baseline (test_impair.TestScenariosYAML.test_s0_healthy_baseline)
+S0 must represent healthy baseline: ~20ms RTT, 0ms DNS delays, no nft rules. ... ok
+test_s1_ipv6_syn_blackhole (test_impair.TestScenariosYAML.test_s1_ipv6_syn_blackhole)
+S1 must silently drop IPv6 TCP SYN packets client-to-server. ... ok
+test_s2_ipv6_tcp_rst (test_impair.TestScenariosYAML.test_s2_ipv6_tcp_rst)
+S2 must actively reject IPv6 TCP SYN packets with TCP RST. ... ok
+test_s3_ipv6_rtt_150ms (test_impair.TestScenariosYAML.test_s3_ipv6_rtt_150ms)
+S3 must specify 150ms total IPv6 RTT (75ms symmetric delay on each end). ... ok
+test_s4_ipv6_rtt_600ms (test_impair.TestScenariosYAML.test_s4_ipv6_rtt_600ms)
+S4 must specify 600ms total IPv6 RTT (300ms symmetric delay on each end). ... ok
+test_s5_ipv6_syn_loss_50pct (test_impair.TestScenariosYAML.test_s5_ipv6_syn_loss_50pct)
+S5 must drop ~50% IPv6 TCP SYN packets in client-to-server direction only. ... ok
+test_s6_delay_aaaa_500ms (test_impair.TestScenariosYAML.test_s6_delay_aaaa_500ms)
+S6 must delay AAAA responses by 500ms while A remains immediate (0ms). ... ok
+test_self_test_baseline_unprivileged (test_impair.TestSelfTestBaseline.test_self_test_baseline_unprivileged)
+Unprivileged self-test-baseline validates files and reports status. ... ok
+test_fresh_connection_between_consecutive_requests (test_nginx.TestLiveHTTPIsolation.test_fresh_connection_between_consecutive_requests)
+Verify consecutive requests require establishing fresh connections. ... ok
+test_ipv4_http_200_and_connection_close (test_nginx.TestLiveHTTPIsolation.test_ipv4_http_200_and_connection_close)
+Verify IPv4 returns 200 OK and closes the TCP connection immediately. ... ok
+test_ipv6_http_200_and_connection_close (test_nginx.TestLiveHTTPIsolation.test_ipv6_http_200_and_connection_close)
+Verify IPv6 returns 200 OK and closes the TCP connection immediately. ... ok
+2026/10/30 19:35:42 [notice] 154704#154704: signal process started
+test_keepalive_timeout_is_zero (test_nginx.TestNginxConfiguration.test_keepalive_timeout_is_zero)
+Verify keepalive_timeout 0 is configured for HTTP isolation. ... ok
+test_invalid_nginx_conf_fails_preflight (test_preflight.TestPreflightExecution.test_invalid_nginx_conf_fails_preflight)
+Simulate nginx.conf with missing keepalive_timeout 0 -> must report invalid config. ... ok
+test_manifest_contains_all_study_guide_categories (test_preflight.TestPreflightExecution.test_manifest_contains_all_study_guide_categories)
+Manifest must include networking, DNS, nftables, Python, Nginx, and capture tools. ... ok
+test_missing_required_binary_fails_preflight (test_preflight.TestPreflightExecution.test_missing_required_binary_fails_preflight)
+Simulate missing 'nft' binary -> must report FAIL and list missing binary. ... ok
+test_missing_system_package_fails_preflight (test_preflight.TestPreflightExecution.test_missing_system_package_fails_preflight)
+Simulate uninstalled package -> must report FAIL. ... ok
+test_python_version_mismatch_fails_preflight (test_preflight.TestPreflightExecution.test_python_version_mismatch_fails_preflight)
+Simulate dnspython version mismatch -> must report FAIL. ... ok
+test_run_preflight_passes_on_current_system (test_preflight.TestPreflightExecution.test_run_preflight_passes_on_current_system)
+Live preflight check on healthy system must return status PASS. ... ok
+test_run_browser_drops_privileges_to_normal_user (test_privileged_helper.TestBrowserIdentityAndPrivilegeDropping.test_run_browser_drops_privileges_to_normal_user)
+CRITICAL REQUIREMENT: ... ok
+test_strict_refusal_to_substitute_curl_for_browser (test_privileged_helper.TestBrowserIdentityAndPrivilegeDropping.test_strict_refusal_to_substitute_curl_for_browser)
+Must strictly refuse to substitute curl for real browser. ... ok
+test_capture_handle_serialization_and_absence_of_popen (test_privileged_helper.TestCaptureLifecycleAndSafety.test_capture_handle_serialization_and_absence_of_popen)
+Regression Test: A10 capture handle serialization ... ok
+test_detached_sudo_failure_evidence (test_privileged_helper.TestCaptureLifecycleAndSafety.test_detached_sudo_failure_evidence)
+Regression Test (Issue 1): ... ok
+test_round_trip_start_stop_capture_with_handle (test_privileged_helper.TestCaptureLifecycleAndSafety.test_round_trip_start_stop_capture_with_handle)
+Regression Test: A10 capture round-trip start/stop with handle ... ok
+test_start_capture_privileged_custom_buffer_and_filter (test_privileged_helper.TestCaptureLifecycleAndSafety.test_start_capture_privileged_custom_buffer_and_filter)
+Verifies start_capture_privileged supports custom interface, filter, and buffer. ... ok
+test_start_capture_privileged_drops_write_privileges_without_sudo (test_privileged_helper.TestCaptureLifecycleAndSafety.test_start_capture_privileged_drops_write_privileges_without_sudo)
+tcpdump inside start_capture_privileged runs with root privileges ... ok
+test_start_packet_capture_corrected_flow_unprivileged (test_privileged_helper.TestCaptureLifecycleAndSafety.test_start_packet_capture_corrected_flow_unprivileged)
+Regression Test (Issue 1): ... ok
+test_start_packet_capture_passes_lock_coordination_to_helper (test_privileged_helper.TestCaptureLifecycleAndSafety.test_start_packet_capture_passes_lock_coordination_to_helper)
+Verifies start_packet_capture coordinates lock with helper when caller holds lock. ... ok
+test_startup_failure_reaps_launched_process_on_timeout (test_privileged_helper.TestCaptureLifecycleAndSafety.test_startup_failure_reaps_launched_process_on_timeout)
+Regression Test: A10 startup failure cleanup ... [1;33m[WARN][0m Refusing to signal proc PID 9555: belongs to unrelated process
+ok
+test_startup_failure_reaps_on_post_spawn_exception (test_privileged_helper.TestCaptureLifecycleAndSafety.test_startup_failure_reaps_on_post_spawn_exception)
+Regression Test: A10 startup failure cleanup on post-spawn exception ... ok
+test_startup_failure_reaps_on_premature_exit (test_privileged_helper.TestCaptureLifecycleAndSafety.test_startup_failure_reaps_on_premature_exit)
+Regression Test: A10 startup premature exit handling ... ok
+test_stop_capture_privileged_already_exited_process_confirms_cleanly (test_privileged_helper.TestCaptureLifecycleAndSafety.test_stop_capture_privileged_already_exited_process_confirms_cleanly)
+Regression Test: A10 already-exited process confirmation ... ok
+test_stop_capture_privileged_escalates_to_sigterm_and_sigkill (test_privileged_helper.TestCaptureLifecycleAndSafety.test_stop_capture_privileged_escalates_to_sigterm_and_sigkill)
+Regression Test: A10 deterministic escalation sequence ... ok
+test_stop_capture_privileged_refuses_to_signal_reused_stale_pid_when_alive (test_privileged_helper.TestCaptureLifecycleAndSafety.test_stop_capture_privileged_refuses_to_signal_reused_stale_pid_when_alive)
+Regression Test: A10 process reuse safety check ... ok
+test_stop_capture_privileged_rejects_mismatched_recorded_pid (test_privileged_helper.TestCaptureLifecycleAndSafety.test_stop_capture_privileged_rejects_mismatched_recorded_pid)
+Regression Test: A10 PID file verification ... ok
+test_stop_capture_privileged_rejects_recycled_pid_with_different_pcap (test_privileged_helper.TestCaptureLifecycleAndSafety.test_stop_capture_privileged_rejects_recycled_pid_with_different_pcap)
+Regression Test: A10 recycled PID rejection ... ok
+test_stop_capture_privileged_rejects_unrelated_process_identity (test_privileged_helper.TestCaptureLifecycleAndSafety.test_stop_capture_privileged_rejects_unrelated_process_identity)
+Regression Test: A10 process identity rejection ... ok
+test_stop_capture_privileged_stuck_process_raises_capture_shutdown_error (test_privileged_helper.TestCaptureLifecycleAndSafety.test_stop_capture_privileged_stuck_process_raises_capture_shutdown_error)
+Regression Test: A10 genuinely stuck capture process handling ... ok
+test_stop_capture_privileged_zombie_process_detected_and_confirmed (test_privileged_helper.TestCaptureLifecycleAndSafety.test_stop_capture_privileged_zombie_process_detected_and_confirmed)
+Regression Test: A10 zombie capture process detection and reap ... ok
+test_stop_packet_capture_delivers_sigint_gracefully_first (test_privileged_helper.TestCaptureLifecycleAndSafety.test_stop_packet_capture_delivers_sigint_gracefully_first)
+Must deliver SIGINT gracefully first and wait for PCAP finalization. ... ok
+test_stop_packet_capture_routes_through_helper_when_unprivileged (test_privileged_helper.TestCaptureLifecycleAndSafety.test_stop_packet_capture_routes_through_helper_when_unprivileged)
+Verifies stop_packet_capture for CaptureProcess routes through privileged helper ... ok
+test_coordinate_lock_acquires_when_caller_does_not_hold_lock (test_privileged_helper.TestLockCoordinationAndDeadlockPrevention.test_coordinate_lock_acquires_when_caller_does_not_hold_lock)
+When caller_holds_lock=False, coordinate_lock must acquire exclusive flock. ... ok
+test_coordinate_lock_does_not_deadlock_when_caller_holds_lock (test_privileged_helper.TestLockCoordinationAndDeadlockPrevention.test_coordinate_lock_does_not_deadlock_when_caller_holds_lock)
+CRITICAL REQUIREMENT: ... ok
+test_start_capture_cli_parser_accepts_caller_holds_lock_and_lock_file (test_privileged_helper.TestLockCoordinationAndDeadlockPrevention.test_start_capture_cli_parser_accepts_caller_holds_lock_and_lock_file)
+Regression Test: A10 helper CLI mismatch ... ok
+test_start_capture_cli_verifies_parent_lock_and_avoids_deadlock (test_privileged_helper.TestLockCoordinationAndDeadlockPrevention.test_start_capture_cli_verifies_parent_lock_and_avoids_deadlock)
+Regression Test: A10 helper CLI mismatch ... ok
+test_start_capture_privileged_fails_closed_when_lock_not_held (test_privileged_helper.TestLockCoordinationAndDeadlockPrevention.test_start_capture_privileged_fails_closed_when_lock_not_held)
+Verifies start_capture_privileged fails closed when caller_holds_lock=True ... ok
+test_verify_caller_holds_lock_fails_closed_when_lock_not_held (test_privileged_helper.TestLockCoordinationAndDeadlockPrevention.test_verify_caller_holds_lock_fails_closed_when_lock_not_held)
+CRITICAL REQUIREMENT: ... ok
+test_verify_caller_holds_lock_succeeds_when_lock_held (test_privileged_helper.TestLockCoordinationAndDeadlockPrevention.test_verify_caller_holds_lock_succeeds_when_lock_held)
+When the caller process actually holds .lab.lock, verification must succeed. ... ok
+test_check_sudo_authorization_fails_when_password_required (test_privileged_helper.TestPrivilegeSeparationAndPreflight.test_check_sudo_authorization_fails_when_password_required)
+Must fail when sudo -n returns non-zero (password required) and document 'sudo -v'. ... ok
+test_check_sudo_authorization_passes_for_root_user (test_privileged_helper.TestPrivilegeSeparationAndPreflight.test_check_sudo_authorization_passes_for_root_user)
+EUID 0 automatically passes sudo authorization. ... ok
+test_check_sudo_authorization_passes_when_authorized (test_privileged_helper.TestPrivilegeSeparationAndPreflight.test_check_sudo_authorization_passes_when_authorized)
+Must pass when sudo -n true returns 0. ... ok
+test_preflight_fails_when_sudo_unauthorized_with_check_sudo (test_privileged_helper.TestPrivilegeSeparationAndPreflight.test_preflight_fails_when_sudo_unauthorized_with_check_sudo)
+preflight.run_preflight(check_sudo=True) must fail when sudo -n is unavailable. ... ok
+test_privileged_helper_rejects_unauthorized_scenarios (test_privileged_helper.TestPrivilegeSeparationAndPreflight.test_privileged_helper_rejects_unauthorized_scenarios)
+Privileged helper must reject invalid scenario IDs like S7. ... ok
+test_trial_readiness_fails_live_mode_when_sudo_unauthorized (test_privileged_helper.TestPrivilegeSeparationAndPreflight.test_trial_readiness_fails_live_mode_when_sudo_unauthorized)
+Trial readiness in live mode must fail preflight if sudo -n is unavailable. ... ok
+test_apply_scenario_privileged_s6_correctly_applies_a_and_aaaa_delays (test_privileged_helper.TestS6PrivilegeBoundaryAndLifecycle.test_apply_scenario_privileged_s6_correctly_applies_a_and_aaaa_delays)
+Privileged helper applying S6 applies netem delays, nftables rules, and sets ... ok
+test_direct_unprivileged_apply_dns_delays_routes_to_helper (test_privileged_helper.TestS6PrivilegeBoundaryAndLifecycle.test_direct_unprivileged_apply_dns_delays_routes_to_helper)
+Direct invocation of impair.apply_dns_delays by an unprivileged caller delegates ... ok
+test_helper_authorization_failure_fails_closed_and_prompts_sudo_v (test_privileged_helper.TestS6PrivilegeBoundaryAndLifecycle.test_helper_authorization_failure_fails_closed_and_prompts_sudo_v)
+When non-interactive sudo fails (e.g. password required), the helper raises ... ok
+test_non_root_s6_application_routes_through_privileged_helper (test_privileged_helper.TestS6PrivilegeBoundaryAndLifecycle.test_non_root_s6_application_routes_through_privileged_helper)
+Calling impair.apply_scenario('S6') as an unprivileged user routes through the privileged ... ok
+test_rollback_after_partial_failure_in_s6_application (test_privileged_helper.TestS6PrivilegeBoundaryAndLifecycle.test_rollback_after_partial_failure_in_s6_application)
+If applying DNS delays fails after netem delays have been applied, ... ok
+test_s6_dns_baseline_restoration_and_verification (test_privileged_helper.TestS6PrivilegeBoundaryAndLifecycle.test_s6_dns_baseline_restoration_and_verification)
+Restoring DNS baseline resets delays to 0ms, reloads the DNS server, cleanly unlinks ... ok
+test_s6_lock_cleanup_on_success_and_failure (test_privileged_helper.TestS6PrivilegeBoundaryAndLifecycle.test_s6_lock_cleanup_on_success_and_failure)
+Exclusive locks on .verify_dns.lock and .lab.lock are released cleanly ... ok
+test_clone_snap_mount_namespace_bind_mount_failure_reporting_and_cleanup (test_privileged_helper.TestSnapBrowserNamespaceMountsAndLaunch.test_clone_snap_mount_namespace_bind_mount_failure_reporting_and_cleanup)
+When child is READY but parent bind mount fails, error must be reported and child cleaned up. ... ok
+test_clone_snap_mount_namespace_stage_error_reporting_setns (test_privileged_helper.TestSnapBrowserNamespaceMountsAndLaunch.test_clone_snap_mount_namespace_stage_error_reporting_setns)
+_clone_snap_mount_namespace must accurately report stage=setns when child fails at setns. ... ok
+test_clone_snap_mount_namespace_verifies_invalid_fd (test_privileged_helper.TestSnapBrowserNamespaceMountsAndLaunch.test_clone_snap_mount_namespace_verifies_invalid_fd)
+_clone_snap_mount_namespace must fail closed if source_fd is invalid. ... ok
+test_clone_snap_mount_namespace_verifies_non_namespace_fd (test_privileged_helper.TestSnapBrowserNamespaceMountsAndLaunch.test_clone_snap_mount_namespace_verifies_non_namespace_fd)
+_clone_snap_mount_namespace must fail closed if source_fd is a regular file, not an nsfs mount. ... ok
+test_clone_snap_mount_namespace_verifies_wrong_namespace_type (test_privileged_helper.TestSnapBrowserNamespaceMountsAndLaunch.test_clone_snap_mount_namespace_verifies_wrong_namespace_type)
+_clone_snap_mount_namespace must fail closed if source_fd refers to non-mount namespace (e.g. netns). ... ok
+test_get_invoking_uid_gid_normal_user (test_privileged_helper.TestSnapBrowserNamespaceMountsAndLaunch.test_get_invoking_uid_gid_normal_user)
+Invoking identity must match non-root process UID/GID. ... ok
+test_get_invoking_uid_gid_sudo_environment (test_privileged_helper.TestSnapBrowserNamespaceMountsAndLaunch.test_get_invoking_uid_gid_sudo_environment)
+Invoking identity under sudo must extract SUDO_UID and SUDO_GID. ... ok
+test_get_lab_resolver_ip_fails_when_missing (test_privileged_helper.TestSnapBrowserNamespaceMountsAndLaunch.test_get_lab_resolver_ip_fails_when_missing)
+Fails closed when candidate resolv.conf does not exist. ... ok
+test_get_lab_resolver_ip_fails_when_wsl_resolver (test_privileged_helper.TestSnapBrowserNamespaceMountsAndLaunch.test_get_lab_resolver_ip_fails_when_wsl_resolver)
+CRITICAL: Fails closed when resolv.conf contains WSL resolver (10.255.255.254). ... ok
+test_get_lab_resolver_ip_success (test_privileged_helper.TestSnapBrowserNamespaceMountsAndLaunch.test_get_lab_resolver_ip_success)
+Verifies resolver selection succeeds when 10.0.1.1 is configured. ... ok
+test_is_snap_browser_detection (test_privileged_helper.TestSnapBrowserNamespaceMountsAndLaunch.test_is_snap_browser_detection)
+Verifies accurate detection of Snap vs non-Snap browser binaries. ... ok
+test_launch_snap_browser_main_exits_71_on_isolated_dns_error (test_privileged_helper.TestSnapBrowserNamespaceMountsAndLaunch.test_launch_snap_browser_main_exits_71_on_isolated_dns_error)
+launch_snap_browser_main must exit with code 71 when setup_snap_isolated_dns fails. ... Snap isolated DNS setup error: Isolated DNS failure
+ok
+test_launch_snap_browser_main_user_identity_drop (test_privileged_helper.TestSnapBrowserNamespaceMountsAndLaunch.test_launch_snap_browser_main_user_identity_drop)
+launch_snap_browser_main must drop privileges to target user UID/GID before exec. ... ok
+test_non_snap_browser_launch_remains_unchanged (test_privileged_helper.TestSnapBrowserNamespaceMountsAndLaunch.test_non_snap_browser_launch_remains_unchanged)
+Non-Snap browser must NOT create private mount namespace or invoke launch-snap-browser. ... ok
+test_preseed_outer_resolver_stubs_configures_all_candidate_locations (test_privileged_helper.TestSnapBrowserNamespaceMountsAndLaunch.test_preseed_outer_resolver_stubs_configures_all_candidate_locations)
+Verifies _preseed_outer_resolver_stubs targets stub, resolv.conf, and wsl paths. ... ok
+test_run_browser_snap_mount_failure_fails_clearly (test_privileged_helper.TestSnapBrowserNamespaceMountsAndLaunch.test_run_browser_snap_mount_failure_fails_clearly)
+When helper returns mount failure (exit code 71), run_browser raises SnapMountError. ... ok
+test_setup_snap_isolated_dns_acquires_genuine_nsfs_from_host_root_when_client_is_placeholder (test_privileged_helper.TestSnapBrowserNamespaceMountsAndLaunch.test_setup_snap_isolated_dns_acquires_genuine_nsfs_from_host_root_when_client_is_placeholder)
+Regression Test (Requirement 1, 2 & 4): ... ok
+test_setup_snap_isolated_dns_fails_and_cleans_up_on_bind_mount_failure (test_privileged_helper.TestSnapBrowserNamespaceMountsAndLaunch.test_setup_snap_isolated_dns_fails_and_cleans_up_on_bind_mount_failure)
+Regression Test (A10 Snap Mount Step Failure & Truthful Blocker Reporting): ... ok
+test_setup_snap_isolated_dns_fails_on_cloner_error (test_privileged_helper.TestSnapBrowserNamespaceMountsAndLaunch.test_setup_snap_isolated_dns_fails_on_cloner_error)
+Failure handling: Propagates error when isolated namespace cloner fails. ... ok
+test_setup_snap_isolated_dns_fails_on_resolver_mismatch (test_privileged_helper.TestSnapBrowserNamespaceMountsAndLaunch.test_setup_snap_isolated_dns_fails_on_resolver_mismatch)
+Failure handling: Refuses to set up isolated DNS if resolver is not 10.0.1.1. ... ok
+test_setup_snap_isolated_dns_fails_on_tmpfs_mount_error (test_privileged_helper.TestSnapBrowserNamespaceMountsAndLaunch.test_setup_snap_isolated_dns_fails_on_tmpfs_mount_error)
+Failure handling: Raises SnapMountError if tmpfs mount fails. ... ok
+test_setup_snap_isolated_dns_fails_when_client_path_is_placeholder_and_no_host_nsfs (test_privileged_helper.TestSnapBrowserNamespaceMountsAndLaunch.test_setup_snap_isolated_dns_fails_when_client_path_is_placeholder_and_no_host_nsfs)
+Regression Test (Requirement 2 & 4): ... ok
+test_setup_snap_isolated_dns_mounts_tmpfs_and_restores_metadata (test_privileged_helper.TestSnapBrowserNamespaceMountsAndLaunch.test_setup_snap_isolated_dns_mounts_tmpfs_and_restores_metadata)
+Namespace isolation: ... ok
+test_setup_snap_isolated_dns_rejects_invalid_explicit_source_fd (test_privileged_helper.TestSnapBrowserNamespaceMountsAndLaunch.test_setup_snap_isolated_dns_rejects_invalid_explicit_source_fd)
+Regression Test: ... ok
+test_setup_snap_isolated_dns_rollback_tmpfs_on_failure (test_privileged_helper.TestSnapBrowserNamespaceMountsAndLaunch.test_setup_snap_isolated_dns_rollback_tmpfs_on_failure)
+When isolated_cloner fails, setup_snap_isolated_dns must lazy-unmount tmpfs and clean up temp files. ... ok
+test_setup_snap_isolated_dns_rollback_when_real_cloner_fails_with_wrong_fs_type (test_privileged_helper.TestSnapBrowserNamespaceMountsAndLaunch.test_setup_snap_isolated_dns_rollback_when_real_cloner_fails_with_wrong_fs_type)
+Regression Test (A10 Live WSL2 Mount Step Failure Simulation): ... ok
+test_setup_snap_isolated_dns_with_explicit_valid_source_fd (test_privileged_helper.TestSnapBrowserNamespaceMountsAndLaunch.test_setup_snap_isolated_dns_with_explicit_valid_source_fd)
+Regression Test: ... ok
+test_setup_snap_mounts_cgroup_mount_failure (test_privileged_helper.TestSnapBrowserNamespaceMountsAndLaunch.test_setup_snap_mounts_cgroup_mount_failure)
+When mounting cgroup2 fails, SnapMountError must be raised with clear details. ... ok
+test_setup_snap_mounts_existing_both (test_privileged_helper.TestSnapBrowserNamespaceMountsAndLaunch.test_setup_snap_mounts_existing_both)
+When both cgroup2 and securityfs are already mounted, neither should be mounted. ... ok
+test_setup_snap_mounts_missing_both (test_privileged_helper.TestSnapBrowserNamespaceMountsAndLaunch.test_setup_snap_mounts_missing_both)
+When both cgroup2 and securityfs are missing, both must be mounted. ... ok
+test_setup_snap_mounts_missing_cgroup_only (test_privileged_helper.TestSnapBrowserNamespaceMountsAndLaunch.test_setup_snap_mounts_missing_cgroup_only)
+When only cgroup2 is missing, only cgroup2 must be mounted. ... ok
+test_setup_snap_mounts_missing_security_only (test_privileged_helper.TestSnapBrowserNamespaceMountsAndLaunch.test_setup_snap_mounts_missing_security_only)
+When only securityfs is missing, only securityfs must be mounted. ... ok
+test_setup_snap_mounts_security_mount_failure (test_privileged_helper.TestSnapBrowserNamespaceMountsAndLaunch.test_setup_snap_mounts_security_mount_failure)
+When mounting securityfs fails, SnapMountError must be raised with clear details. ... ok
+test_snap_browser_launch_creates_private_mount_namespace (test_privileged_helper.TestSnapBrowserNamespaceMountsAndLaunch.test_snap_browser_launch_creates_private_mount_namespace)
+Snap browser must enter netns, unshare private mount namespace, and invoke launch-snap-browser. ... ok
+test_snap_firefox_launch_passes_snap_name_firefox (test_privileged_helper.TestSnapBrowserNamespaceMountsAndLaunch.test_snap_firefox_launch_passes_snap_name_firefox)
+Snap Firefox browser must pass --snap-name=firefox to launch-snap-browser. ... ok
+test_source_fd_remains_valid_after_private_tmpfs_overlay_and_never_reopens_placeholder (test_privileged_helper.TestSnapBrowserNamespaceMountsAndLaunch.test_source_fd_remains_valid_after_private_tmpfs_overlay_and_never_reopens_placeholder)
+Regression Test (Requirement 1 & 4): ... ok
+test_campaign_fail_stop_halts_and_preserves_records_on_cleanup_failure (test_privileged_helper.TestTruthfulCleanupAndFailStopSafety.test_campaign_fail_stop_halts_and_preserves_records_on_cleanup_failure)
+Campaign must halt immediately (FAIL-STOP) on cleanup/baseline failure, ... ok
+test_clear_impairments_fails_truthfully_and_does_not_report_success (test_privileged_helper.TestTruthfulCleanupAndFailStopSafety.test_clear_impairments_fails_truthfully_and_does_not_report_success)
+Regression Test (Issue 2): ... ok
+test_restore_dns_baseline_fails_truthfully_on_helper_error (test_privileged_helper.TestTruthfulCleanupAndFailStopSafety.test_restore_dns_baseline_fails_truthfully_on_helper_error)
+Regression Test (Issue 2): ... ok
+test_restore_dns_baseline_raises_and_never_swallows_reset_errors (test_privileged_helper.TestTruthfulCleanupAndFailStopSafety.test_restore_dns_baseline_raises_and_never_swallows_reset_errors)
+Regression Test (Issue 2): ... [1;31m[ERROR][0m Error resetting DNS config: DNS config root keys mismatch: {'rules'}
+ok
+test_restore_dns_baseline_routes_through_privileged_helper (test_privileged_helper.TestTruthfulCleanupAndFailStopSafety.test_restore_dns_baseline_routes_through_privileged_helper)
+Regression Test (Issue 2): ... ok
+test_self_test_baseline_fails_truthfully_when_privileged_checks_fail (test_privileged_helper.TestTruthfulCleanupAndFailStopSafety.test_self_test_baseline_fails_truthfully_when_privileged_checks_fail)
+CRITICAL REQUIREMENT 3: ... [1;31m[ERROR][0m Baseline Check FAILED: Interface ps028-rt/ps028-rt-sv6 tc qdisc mismatch: netem delay 75ms
+[1;31m[ERROR][0m ONE OR MORE BASELINE SELF-TEST CHECKS FAILED.
+ok
+test_self_test_baseline_fails_truthfully_when_sudo_fails (test_privileged_helper.TestTruthfulCleanupAndFailStopSafety.test_self_test_baseline_fails_truthfully_when_sudo_fails)
+When privileged helper raises an error (e.g. sudo -n unavailable), baseline check must fail. ... [1;31m[ERROR][0m Baseline Check FAILED: Live baseline verification error: sudo -n failed
+[1;31m[ERROR][0m ONE OR MORE BASELINE SELF-TEST CHECKS FAILED.
+ok
+test_cli_custom_scenarios_and_browsers (test_run_campaign.TestCampaignCLIAndConfig.test_cli_custom_scenarios_and_browsers) ... ok
+test_cli_defaults (test_run_campaign.TestCampaignCLIAndConfig.test_cli_defaults) ... ok
+test_invalid_repetitions_rejected (test_run_campaign.TestCampaignCLIAndConfig.test_invalid_repetitions_rejected) ... ok
+test_invalid_scenario_rejected (test_run_campaign.TestCampaignCLIAndConfig.test_invalid_scenario_rejected) ... ok
+test_live_browser_validation_fails_if_runtime_missing (test_run_campaign.TestCampaignCLIAndConfig.test_live_browser_validation_fails_if_runtime_missing) ... ok
+test_full_simulated_campaign_runs_sequentially (test_run_campaign.TestCampaignSimulationExecution.test_full_simulated_campaign_runs_sequentially) ... ok
+test_validate_attempt_evidence_passes_valid_trial (test_run_campaign.TestEvidenceValidationRules.test_validate_attempt_evidence_passes_valid_trial) ... ok
+test_validate_attempt_evidence_rejects_missing_result_json (test_run_campaign.TestEvidenceValidationRules.test_validate_attempt_evidence_rejects_missing_result_json) ... ok
+test_validate_attempt_evidence_rejects_scenario_mismatch (test_run_campaign.TestEvidenceValidationRules.test_validate_attempt_evidence_rejects_scenario_mismatch) ... ok
+test_validate_attempt_evidence_rejects_sha256_mismatch (test_run_campaign.TestEvidenceValidationRules.test_validate_attempt_evidence_rejects_sha256_mismatch) ... ok
+test_validate_attempt_evidence_rejects_unverified_baseline (test_run_campaign.TestEvidenceValidationRules.test_validate_attempt_evidence_rejects_unverified_baseline) ... ok
+test_validate_attempt_evidence_rejects_zero_packets_in_live_mode (test_run_campaign.TestEvidenceValidationRules.test_validate_attempt_evidence_rejects_zero_packets_in_live_mode) ... ok
+test_fail_stop_halts_campaign_when_cleanup_fails (test_run_campaign.TestFailStopSafety.test_fail_stop_halts_campaign_when_cleanup_fails) ... ok
+test_fail_stop_halts_campaign_when_post_trial_baseline_verification_fails (test_run_campaign.TestFailStopSafety.test_fail_stop_halts_campaign_when_post_trial_baseline_verification_fails) ... ok
+test_manifest_atomic_save_creates_valid_file (test_run_campaign.TestManifestConcurrencyAndLocking.test_manifest_atomic_save_creates_valid_file) ... ok
+test_manifest_lock_prevents_concurrent_access (test_run_campaign.TestManifestConcurrencyAndLocking.test_manifest_lock_prevents_concurrent_access) ... ok
+test_manifest_lock_supports_reentrancy_in_same_thread (test_run_campaign.TestManifestConcurrencyAndLocking.test_manifest_lock_supports_reentrancy_in_same_thread) ... ok
+test_build_matrix_slots_dimensions (test_run_campaign.TestMatrixAndAttemptSeparation.test_build_matrix_slots_dimensions) ... ok
+test_matrix_slots_sequential_ordering (test_run_campaign.TestMatrixAndAttemptSeparation.test_matrix_slots_sequential_ordering) ... ok
+test_slot_tracks_multiple_attempts_in_history (test_run_campaign.TestMatrixAndAttemptSeparation.test_slot_tracks_multiple_attempts_in_history) ... ok
+test_finalize_campaign_manifest_fails_on_incomplete_slot (test_run_campaign.TestSafeResume.test_finalize_campaign_manifest_fails_on_incomplete_slot) ... ok
+test_finalize_campaign_manifest_success_and_preserves_history (test_run_campaign.TestSafeResume.test_finalize_campaign_manifest_success_and_preserves_history) ... ok
+test_resume_from_halted_on_failure_completes_and_updates_manifest (test_run_campaign.TestSafeResume.test_resume_from_halted_on_failure_completes_and_updates_manifest) ... ok
+test_resume_rejects_incompatible_configuration (test_run_campaign.TestSafeResume.test_resume_rejects_incompatible_configuration) ... ok
+test_resume_reruns_corrupted_slot_under_new_trial_id (test_run_campaign.TestSafeResume.test_resume_reruns_corrupted_slot_under_new_trial_id) ... ok
+test_resume_skips_verified_completed_slots (test_run_campaign.TestSafeResume.test_resume_skips_verified_completed_slots) ... ok
+test_manifest_contains_s2_and_s4_mismatch_notices (test_run_campaign.TestScenarioMismatchNoticesAndEvidencePreservation.test_manifest_contains_s2_and_s4_mismatch_notices) ... ok
+test_confirm_capture_ready_detects_listening (test_run_trial.TestBrowserLaunchEnvironmentAndPreflight.test_confirm_capture_ready_detects_listening)
+confirm_capture_ready returns True when 'listening on' is logged. ... ok
+test_confirm_capture_ready_raises_when_not_listening (test_run_trial.TestBrowserLaunchEnvironmentAndPreflight.test_confirm_capture_ready_raises_when_not_listening)
+confirm_capture_ready raises TrialExecutionError when 'listening on' is missing. ... ok
+test_get_browser_env_refuses_root_uid (test_run_trial.TestBrowserLaunchEnvironmentAndPreflight.test_get_browser_env_refuses_root_uid)
+get_browser_env must refuse target_uid=0 and raise BrowserPreflightError. ... ok
+test_get_browser_env_rejects_inappropriate_root_paths_in_base_env (test_run_trial.TestBrowserLaunchEnvironmentAndPreflight.test_get_browser_env_rejects_inappropriate_root_paths_in_base_env)
+get_browser_env rejects leaked root paths and cleans environment. ... ok
+test_get_browser_env_sets_unprivileged_identity_and_xdg_paths (test_run_trial.TestBrowserLaunchEnvironmentAndPreflight.test_get_browser_env_sets_unprivileged_identity_and_xdg_paths)
+get_browser_env must set HOME to user home, consistent USER/LOGNAME, ... ok
+test_get_browser_env_xdg_runtime_dir_included_only_if_owned_by_user (test_run_trial.TestBrowserLaunchEnvironmentAndPreflight.test_get_browser_env_xdg_runtime_dir_included_only_if_owned_by_user)
+XDG_RUNTIME_DIR is included only if a valid directory exists and is owned by target_uid. ... ok
+test_get_browser_uid_gid_never_returns_root (test_run_trial.TestBrowserLaunchEnvironmentAndPreflight.test_get_browser_uid_gid_never_returns_root)
+get_browser_uid_gid must return an unprivileged UID/GID and never root (UID 0). ... ok
+test_get_browser_uid_gid_preserves_sudo_invoking_identity (test_run_trial.TestBrowserLaunchEnvironmentAndPreflight.test_get_browser_uid_gid_preserves_sudo_invoking_identity)
+When running under sudo (UID 0), get_browser_uid_gid extracts the invoking user's UID/GID. ... ok
+test_run_browser_executes_with_unprivileged_command_and_clean_env (test_run_trial.TestBrowserLaunchEnvironmentAndPreflight.test_run_browser_executes_with_unprivileged_command_and_clean_env)
+run_browser drops privileges via setpriv or sudo -u, passes env -i with unprivileged variables, ... ok
+test_run_browser_raises_preflight_on_startup_crash (test_run_trial.TestBrowserLaunchEnvironmentAndPreflight.test_run_browser_raises_preflight_on_startup_crash)
+When Chrome crashes on startup (exit code -5 or permission denied / crashpad error), ... ok
+test_run_trial_browser_preflight_failure_aborts_without_network_result (test_run_trial.TestBrowserLaunchEnvironmentAndPreflight.test_run_trial_browser_preflight_failure_aborts_without_network_result)
+Task 5: ... ok
+test_verify_browser_paths_writable_fails_on_unwritable_profile (test_run_trial.TestBrowserLaunchEnvironmentAndPreflight.test_verify_browser_paths_writable_fails_on_unwritable_profile)
+verify_browser_paths_writable raises BrowserPreflightError when profile is not writable. ... ok
+test_verify_browser_paths_writable_success (test_run_trial.TestBrowserLaunchEnvironmentAndPreflight.test_verify_browser_paths_writable_success)
+verify_browser_paths_writable succeeds when profile and crashpad dirs are writable. ... ok
+test_find_browser_runtime_locates_chromium (test_run_trial.TestBrowserRuntimeDiscoveryAndPreflight.test_find_browser_runtime_locates_chromium) ... ok
+test_find_browser_runtime_locates_firefox (test_run_trial.TestBrowserRuntimeDiscoveryAndPreflight.test_find_browser_runtime_locates_firefox) ... ok
+test_find_browser_runtime_preferred_chromium_falls_back_to_non_snap_chrome (test_run_trial.TestBrowserRuntimeDiscoveryAndPreflight.test_find_browser_runtime_preferred_chromium_falls_back_to_non_snap_chrome)
+When preferred chromium is Snap, falls back to non-Snap google-chrome. ... ok
+test_find_browser_runtime_rejects_explicit_snap_path (test_run_trial.TestBrowserRuntimeDiscoveryAndPreflight.test_find_browser_runtime_rejects_explicit_snap_path)
+Explicit path to Snap binary raises BrowserPreflightError reporting the blocker. ... ok
+test_find_browser_runtime_rejects_snap_when_no_non_snap_available (test_run_trial.TestBrowserRuntimeDiscoveryAndPreflight.test_find_browser_runtime_rejects_snap_when_no_non_snap_available)
+When requested browser is Snap and no non-Snap alternative exists, raises BrowserPreflightError. ... ok
+test_find_browser_runtime_skips_snap_in_favor_of_non_snap (test_run_trial.TestBrowserRuntimeDiscoveryAndPreflight.test_find_browser_runtime_skips_snap_in_favor_of_non_snap)
+Verifies auto-discovery skips Snap browsers and selects non-Snap alternative. ... ok
+test_preflight_fails_when_browser_missing (test_run_trial.TestBrowserRuntimeDiscoveryAndPreflight.test_preflight_fails_when_browser_missing)
+Must raise BrowserPreflightError when no supported browser is installed. ... ok
+test_preflight_rejects_nonexistent_preferred_browser (test_run_trial.TestBrowserRuntimeDiscoveryAndPreflight.test_preflight_rejects_nonexistent_preferred_browser) ... ok
+test_query_browser_version_handles_timeout_gracefully (test_run_trial.TestBrowserRuntimeDiscoveryAndPreflight.test_query_browser_version_handles_timeout_gracefully) ... ok
+test_classify_fallback_prevents_conclusive_direct_ipv4_on_loss (test_run_trial.TestCaptureFilterBufferAndDropAccountingRegression.test_classify_fallback_prevents_conclusive_direct_ipv4_on_loss)
+Capture loss prevents conclusive DIRECT_IPV4 claims when IPv6 attempts are unobserved. ... ok
+test_default_bpf_filter_syntax_and_targets (test_run_trial.TestCaptureFilterBufferAndDropAccountingRegression.test_default_bpf_filter_syntax_and_targets)
+BPF filter compiles with tcpdump and strictly targets required lab endpoints. ... ok
+test_netlog_preserved_in_trial_dir_survives_profile_cleanup (test_run_trial.TestCaptureFilterBufferAndDropAccountingRegression.test_netlog_preserved_in_trial_dir_survives_profile_cleanup)
+Task 5: ... ok
+test_parse_tcpdump_drop_statistics_discrepancy_accounting (test_run_trial.TestCaptureFilterBufferAndDropAccountingRegression.test_parse_tcpdump_drop_statistics_discrepancy_accounting)
+When captured < received without explicit drop line, capture loss is detected. ... ok
+test_parse_tcpdump_drop_statistics_exact_trial_kernel_drops (test_run_trial.TestCaptureFilterBufferAndDropAccountingRegression.test_parse_tcpdump_drop_statistics_exact_trial_kernel_drops)
+Verifies drop accounting on the exact output observed in trial-20261029185347-28c5e7cb: ... ok
+test_run_browser_disables_background_traffic_without_bypassing_network (test_run_trial.TestCaptureFilterBufferAndDropAccountingRegression.test_run_browser_disables_background_traffic_without_bypassing_network)
+run_browser configures flags that disable irrelevant background requests ... ok
+test_start_packet_capture_includes_buffer_interface_and_filter (test_run_trial.TestCaptureFilterBufferAndDropAccountingRegression.test_start_packet_capture_includes_buffer_interface_and_filter)
+Verifies start_packet_capture passes -i ps028-cl-rt, -B 8192, and narrow BPF filter. ... ok
+test_start_packet_capture_unprivileged_passes_filter_and_buffer (test_run_trial.TestCaptureFilterBufferAndDropAccountingRegression.test_start_packet_capture_unprivileged_passes_filter_and_buffer)
+When unprivileged, start_packet_capture passes --filter and --buffer-size-kb to helper. ... ok
+test_classify_fallback_with_pcap_valid_false_forces_inconclusive (test_run_trial.TestCaptureLifecycleAndHTTPStatusRegression.test_classify_fallback_with_pcap_valid_false_forces_inconclusive)
+Verifies classify_fallback immediately returns INCONCLUSIVE when pcap_valid is False. ... ok
+test_dissect_pcap_extracts_actual_http_status_from_raw_pcap_data (test_run_trial.TestCaptureLifecycleAndHTTPStatusRegression.test_dissect_pcap_extracts_actual_http_status_from_raw_pcap_data)
+Verifies dissect_pcap extracts HTTP status code (200) from packet evidence. ... ok
+test_empty_pcap_zero_packets_fails_min_packets_validation (test_run_trial.TestCaptureLifecycleAndHTTPStatusRegression.test_empty_pcap_zero_packets_fails_min_packets_validation)
+Verifies validate_pcap_file with min_packets rejects 0-packet PCAP. ... ok
+test_fallback_requires_valid_packet_evidence_for_all_three_criteria (test_run_trial.TestCaptureLifecycleAndHTTPStatusRegression.test_fallback_requires_valid_packet_evidence_for_all_three_criteria)
+Requirement 5: ... ok
+test_find_tcpdump_pid_returns_parent_when_not_found (test_run_trial.TestCaptureLifecycleAndHTTPStatusRegression.test_find_tcpdump_pid_returns_parent_when_not_found)
+Verifies find_tcpdump_pid safely returns parent_pid when /proc is not populated. ... ok
+test_invalid_pcap_live_capture_forces_inconclusive (test_run_trial.TestCaptureLifecycleAndHTTPStatusRegression.test_invalid_pcap_live_capture_forces_inconclusive)
+Requirement 3: ... ok
+test_live_run_leaves_http_status_unknown_when_no_packet_http_response (test_run_trial.TestCaptureLifecycleAndHTTPStatusRegression.test_live_run_leaves_http_status_unknown_when_no_packet_http_response)
+Requirement 4: ... ok
+test_run_browser_does_not_fabricate_http_200_from_exit_zero (test_run_trial.TestCaptureLifecycleAndHTTPStatusRegression.test_run_browser_does_not_fabricate_http_200_from_exit_zero)
+CRITICAL REQUIREMENT: ... ok
+test_start_packet_capture_fails_and_cleans_up_on_readiness_timeout (test_run_trial.TestCaptureLifecycleAndHTTPStatusRegression.test_start_packet_capture_fails_and_cleans_up_on_readiness_timeout)
+Requirement 2: ... ok
+test_start_packet_capture_fails_when_tcpdump_terminates_prematurely (test_run_trial.TestCaptureLifecycleAndHTTPStatusRegression.test_start_packet_capture_fails_when_tcpdump_terminates_prematurely)
+Requirement 2: ... ok
+test_start_packet_capture_includes_immediate_mode_and_readiness (test_run_trial.TestCaptureLifecycleAndHTTPStatusRegression.test_start_packet_capture_includes_immediate_mode_and_readiness)
+Verifies start_packet_capture uses immediate mode, packet buffering, and validates readiness. ... ok
+test_stop_packet_capture_clean_shutdown_and_flush (test_run_trial.TestCaptureLifecycleAndHTTPStatusRegression.test_stop_packet_capture_clean_shutdown_and_flush)
+Requirement 1: ... ok
+test_stop_packet_capture_escalates_only_on_timeout (test_run_trial.TestCaptureLifecycleAndHTTPStatusRegression.test_stop_packet_capture_escalates_only_on_timeout)
+Requirement 1: ... ok
+test_unknown_http_status_when_packet_evidence_missing (test_run_trial.TestCaptureLifecycleAndHTTPStatusRegression.test_unknown_http_status_when_packet_evidence_missing)
+Verifies dissect_pcap leaves http_status_code as None when no HTTP response exists in PCAP. ... ok
+test_zero_packet_capture_treated_as_measurement_failure_not_connection_failed (test_run_trial.TestCaptureLifecycleAndHTTPStatusRegression.test_zero_packet_capture_treated_as_measurement_failure_not_connection_failed)
+CRITICAL REQUIREMENT: ... ok
+test_zero_packet_live_capture_forces_inconclusive_when_browser_fails (test_run_trial.TestCaptureLifecycleAndHTTPStatusRegression.test_zero_packet_live_capture_forces_inconclusive_when_browser_fails)
+Requirement 3: ... ok
+test_zero_packet_live_capture_forces_inconclusive_when_browser_succeeds (test_run_trial.TestCaptureLifecycleAndHTTPStatusRegression.test_zero_packet_live_capture_forces_inconclusive_when_browser_succeeds)
+Requirement 3: ... ok
+test_is_safe_capture_process_distinguishes_tcpdump_from_unrelated (test_run_trial.TestCaptureShutdownAndInvalidationRegression.test_is_safe_capture_process_distinguishes_tcpdump_from_unrelated)
+Verifies is_safe_capture_process correctly identifies safe vs unrelated processes. ... ok
+test_live_trial_unconfirmed_shutdown_invalidates_capture_and_forces_inconclusive (test_run_trial.TestCaptureShutdownAndInvalidationRegression.test_live_trial_unconfirmed_shutdown_invalidates_capture_and_forces_inconclusive)
+CRITICAL REQUIREMENT: ... ok
+test_stop_packet_capture_confirms_exit_and_pcap_finalized (test_run_trial.TestCaptureShutdownAndInvalidationRegression.test_stop_packet_capture_confirms_exit_and_pcap_finalized)
+Verifies stop_packet_capture confirms exit, validates PCAP, and returns True. ... ok
+test_stop_packet_capture_fails_when_pcap_invalid_magic (test_run_trial.TestCaptureShutdownAndInvalidationRegression.test_stop_packet_capture_fails_when_pcap_invalid_magic)
+Verifies stop_packet_capture raises CaptureShutdownError when PCAP magic bytes are corrupted. ... ok
+test_stop_packet_capture_fails_when_pcap_missing (test_run_trial.TestCaptureShutdownAndInvalidationRegression.test_stop_packet_capture_fails_when_pcap_missing)
+Verifies stop_packet_capture raises CaptureShutdownError when output PCAP does not exist. ... ok
+test_stop_packet_capture_fails_when_pcap_truncated (test_run_trial.TestCaptureShutdownAndInvalidationRegression.test_stop_packet_capture_fails_when_pcap_truncated)
+Verifies stop_packet_capture raises CaptureShutdownError when PCAP file is truncated. ... ok
+test_stop_packet_capture_fails_when_process_fails_to_exit_after_sigkill (test_run_trial.TestCaptureShutdownAndInvalidationRegression.test_stop_packet_capture_fails_when_process_fails_to_exit_after_sigkill)
+Verifies stop_packet_capture raises CaptureShutdownError if process survives SIGKILL. ... ok
+test_stop_packet_capture_refuses_to_signal_unrelated_process (test_run_trial.TestCaptureShutdownAndInvalidationRegression.test_stop_packet_capture_refuses_to_signal_unrelated_process)
+Verifies stop_packet_capture never signals unrelated processes ... [1;33m[WARN][0m Refusing to signal PID 154686 with SIGINT: belongs to unrelated process
+[1;33m[WARN][0m Refusing to signal proc PID 154686: belongs to unrelated process
+[1;33m[WARN][0m Refusing to signal PID 154686 with SIGTERM: unrelated process
+[1;33m[WARN][0m Refusing to signal PID 154686 with SIGTERM: unrelated process
+[1;33m[WARN][0m Refusing to terminate proc PID 154686: unrelated process
+ok
+test_parse_chromium_netlog_extracts_http_200_and_ipv6 (test_run_trial.TestChromiumNetLogExtraction.test_parse_chromium_netlog_extracts_http_200_and_ipv6) ... ok
+test_parse_chromium_netlog_extracts_http_404_response (test_run_trial.TestChromiumNetLogExtraction.test_parse_chromium_netlog_extracts_http_404_response) ... ok
+test_parse_chromium_netlog_handles_missing_file_gracefully (test_run_trial.TestChromiumNetLogExtraction.test_parse_chromium_netlog_handles_missing_file_gracefully) ... ok
+test_dissect_pcap_dns_boolean_flags_types_65_a_aaaa (test_run_trial.TestDNSObservationParsingRegression.test_dissect_pcap_dns_boolean_flags_types_65_a_aaaa)
+Verifies dissect_pcap parses queries and responses with boolean flags ('True'/'False'), ... ok
+test_dissect_pcap_dns_hostname_filtering_preserves_target_only (test_run_trial.TestDNSObservationParsingRegression.test_dissect_pcap_dns_hostname_filtering_preserves_target_only)
+Verifies hostname filtering ignores unrelated DNS traffic while retaining target hostname events. ... ok
+test_dissect_pcap_dns_numeric_flags_1_and_0 (test_run_trial.TestDNSObservationParsingRegression.test_dissect_pcap_dns_numeric_flags_1_and_0)
+Verifies dissect_pcap correctly parses '1' and '0' representation for dns.flags.response. ... ok
+test_dissect_pcap_with_recorded_trial_evidence_pcap (test_run_trial.TestDNSObservationParsingRegression.test_dissect_pcap_with_recorded_trial_evidence_pcap)
+Verifies dissect_pcap against the recorded trial PCAP from trial-20261028163450-0ee0c712. ... ok
+test_parse_dns_response_flag_representations (test_run_trial.TestDNSObservationParsingRegression.test_parse_dns_response_flag_representations)
+Verifies parse_dns_response_flag handles boolean, numeric, string, and token formats. ... ok
+test_dissect_pcap_correlates_main_get_over_ipv4_in_fallback_scenario (test_run_trial.TestDissectPcapFlowCorrelationRegression.test_dissect_pcap_correlates_main_get_over_ipv4_in_fallback_scenario)
+Verifies dissect_pcap correlates main GET / on IPv4 (stream 2, code 200) ... ok
+test_dissect_pcap_correlates_main_get_over_ipv6_with_ancillary_ipv4_favicon (test_run_trial.TestDissectPcapFlowCorrelationRegression.test_dissect_pcap_correlates_main_get_over_ipv6_with_ancillary_ipv4_favicon)
+Verifies dissect_pcap correlates main GET / on IPv6 (stream 1, code 200) ... ok
+test_firefox_command_construction_and_flags (test_run_trial.TestFirefoxSupportRegression.test_firefox_command_construction_and_flags)
+Firefox command must include headless, profile, no-remote, new-instance, ... ok
+test_firefox_discovery_with_explicit_standalone_path (test_run_trial.TestFirefoxSupportRegression.test_firefox_discovery_with_explicit_standalone_path)
+Verifies explicit standalone Firefox path is discovered and qualified. ... ok
+test_firefox_evidence_preservation_and_profile_cleanup (test_run_trial.TestFirefoxSupportRegression.test_firefox_evidence_preservation_and_profile_cleanup)
+Telemetry log is copied to trial_dir / 'browser_telemetry.log' ... ok
+test_firefox_execution_environment (test_run_trial.TestFirefoxSupportRegression.test_firefox_execution_environment)
+Browser environment must define MOZ_LOG, MOZ_LOG_FILE, valid XDG dirs, ... ok
+test_firefox_launch_failure_reported_as_preflight_error (test_run_trial.TestFirefoxSupportRegression.test_firefox_launch_failure_reported_as_preflight_error)
+Failed browser discovery or preflight is reported as preflight failure, not network result. ... ok
+test_firefox_snap_binary_is_detected_as_snap (test_run_trial.TestFirefoxSupportRegression.test_firefox_snap_binary_is_detected_as_snap)
+Standard Ubuntu Snap binary at /snap/bin/firefox must be identified as Snap. ... ok
+test_firefox_standalone_is_not_detected_as_snap (test_run_trial.TestFirefoxSupportRegression.test_firefox_standalone_is_not_detected_as_snap)
+Standalone Firefox binary must not be classified as a Snap-backed package. ... ok
+test_parse_firefox_telemetry_empty_or_corrupt (test_run_trial.TestFirefoxSupportRegression.test_parse_firefox_telemetry_empty_or_corrupt)
+Empty or non-existent telemetry logs return None status and None family. ... ok
+test_parse_firefox_telemetry_http_error (test_run_trial.TestFirefoxSupportRegression.test_parse_firefox_telemetry_http_error)
+Telemetry log with 404 or 500 status code is accurately parsed. ... ok
+test_parse_firefox_telemetry_ipv4_fallback (test_run_trial.TestFirefoxSupportRegression.test_parse_firefox_telemetry_ipv4_fallback)
+Telemetry log with IPv4 fallback records HTTP 200 and IPv4 winning family. ... ok
+test_parse_firefox_telemetry_ipv6_success (test_run_trial.TestFirefoxSupportRegression.test_parse_firefox_telemetry_ipv6_success)
+Telemetry log with IPv6 connection records HTTP 200 and IPv6 winning family. ... ok
+test_all_scenarios_s0_to_s6_produce_valid_results (test_run_trial.TestFullSimulatedTrialsS0ThroughS6.test_all_scenarios_s0_to_s6_produce_valid_results) ... [1;34m[INFO][0m Applying Scenario S1: ipv6_syn_blackhole — IPv6 TCP SYN blackhole: IPv6 TCP SYN packets are silently discarded without response (triggers client SYN timeout and Happy Eyeballs fallback to IPv4)
+[1;34m[INFO][0m Clearing impairments and restoring clean baseline...
+[1;32m[OK][0m System restored to baseline.
+[1;34m[INFO][0m Clearing impairments and restoring clean baseline...
+[1;32m[OK][0m System restored to baseline.
+[1;34m[INFO][0m Applying Scenario S1: ipv6_syn_blackhole — IPv6 TCP SYN blackhole: IPv6 TCP SYN packets are silently discarded without response (triggers client SYN timeout and Happy Eyeballs fallback to IPv4)
+[1;34m[INFO][0m Clearing impairments and restoring clean baseline...
+[1;32m[OK][0m System restored to baseline.
+[1;32m[OK][0m Scenario S1 successfully applied.
+[1;34m[INFO][0m Clearing impairments and restoring clean baseline...
+[1;32m[OK][0m System restored to baseline.
+[1;34m[INFO][0m Applying Scenario S6: delay_aaaa_500ms — Delay AAAA DNS responses by 500ms while A remains immediate: Tests Happy Eyeballs behavior when AAAA record resolution is delayed relative to A record resolution
+[1;34m[INFO][0m Clearing impairments and restoring clean baseline...
+[1;32m[OK][0m A1 baseline delays (10ms on all server-facing links) verified and restored.
+[1;32m[OK][0m System restored to baseline.
+[1;32m[OK][0m Preserved original DNS baseline to dns_config.json.impair_bak.
+[1;32m[OK][0m DNS delays applied: A=0ms, AAAA=500ms
+[1;32m[OK][0m Scenario S6 successfully applied.
+[1;34m[INFO][0m Applying Scenario S6: delay_aaaa_500ms — Delay AAAA DNS responses by 500ms while A remains immediate: Tests Happy Eyeballs behavior when AAAA record resolution is delayed relative to A record resolution
+[1;34m[INFO][0m Clearing impairments and restoring clean baseline...
+[1;32m[OK][0m System restored to baseline.
+[1;32m[OK][0m Scenario S6 successfully applied.
+[1;32m[OK][0m Preserved original DNS baseline to dns_config.json.impair_bak.
+[1;32m[OK][0m DNS delays applied: A=0ms, AAAA=500ms
+[1;32m[OK][0m Restored DNS baseline from dns_config.json.impair_bak.
+[1;32m[OK][0m Deleted project nftables table ps028_impair in ps028-rt.
+[1;32m[OK][0m Applied 1 nftables impairment rule(s) in ps028-rt -> ps028_impair.
+[1;32m[OK][0m Deleted project nftables table ps028_impair in ps028-rt.
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv4.
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt4.
+[1;32m[OK][0m Configured tc netem delay 75ms on ps028-rt/ps028-rt-sv6.
+[1;32m[OK][0m Configured tc netem delay 75ms on ps028-sv/ps028-sv-rt6.
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv4.
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt4.
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv6.
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt6.
+[1;32m[OK][0m A1 baseline delays (10ms on all server-facing links) verified and restored.
+[1;34m[INFO][0m Executing self-test-baseline verification...
+[1;32m[OK][0m Check 1 PASSED: No active scenario recorded in state file.
+[1;32m[OK][0m Check 2 PASSED: DNS configuration has baseline 0ms delays for A and AAAA.
+[1;32m[OK][0m Check 3 PASSED: No leftover impairment DNS backups found.
+[1;32m[OK][0m Check 4 PASSED: DNS server process (PID 6524) is running (verified active).
+[1;32m[OK][0m Preserved original DNS baseline to dns_config.json.impair_bak.
+[1;32m[OK][0m DNS delays applied: A=0ms, AAAA=500ms
+[1;34m[INFO][0m Applying Scenario S6: delay_aaaa_500ms — Delay AAAA DNS responses by 500ms while A remains immediate: Tests Happy Eyeballs behavior when AAAA record resolution is delayed relative to A record resolution
+[1;34m[INFO][0m Clearing impairments and restoring clean baseline...
+[1;34m[INFO][0m Applying Scenario S6: delay_aaaa_500ms — Delay AAAA DNS responses by 500ms while A remains immediate: Tests Happy Eyeballs behavior when AAAA record resolution is delayed relative to A record resolution
+[1;34m[INFO][0m Clearing impairments and restoring clean baseline...
+[1;32m[OK][0m System restored to baseline.
+[1;32m[OK][0m Scenario S6 successfully applied.
+[1;32m[OK][0m Restored DNS baseline from dns_config.json.impair_bak.
+[1;32m[OK][0m Preserved original DNS baseline to dns_config.json.impair_bak.
+[1;32m[OK][0m DNS delays applied: A=0ms, AAAA=500ms
+[1;32m[OK][0m Restored DNS baseline from dns_config.json.impair_bak.
+[1;32m[OK][0m Preserved original DNS baseline to dns_config.json.impair_bak.
+[1;34m[INFO][0m Clearing impairments and restoring clean baseline...
+[1;34m[INFO][0m Executing self-test-baseline verification...
+[1;32m[OK][0m Check 1 PASSED: No active scenario recorded in state file.
+[1;32m[OK][0m Check 2 PASSED: DNS configuration has baseline 0ms delays for A and AAAA.
+[1;32m[OK][0m Check 3 PASSED: No leftover impairment DNS backups found.
+[1;32m[OK][0m Check 4 PASSED: DNS server process (PID 6524) is running (verified active).
+[1;34m[INFO][0m Executing self-test-baseline verification...
+[1;32m[OK][0m Check 1 PASSED: No active scenario recorded in state file.
+[1;32m[OK][0m Check 2 PASSED: DNS configuration has baseline 0ms delays for A and AAAA.
+[1;32m[OK][0m Check 3 PASSED: No leftover impairment DNS backups found.
+[1;32m[OK][0m Check 4 PASSED: DNS server process (PID 6524) is running (verified active).
+[1;34m[INFO][0m Applying Scenario S0: healthy_baseline — Healthy baseline: 10ms netem delay on each server link (~20ms RTT), immediate DNS responses (0ms delay), no packet loss or drops
+[1;34m[INFO][0m Clearing impairments and restoring clean baseline...
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt nft delete table inet ps028_impair
+[1;32m[OK][0m Deleted project nftables table ps028_impair in ps028-rt.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt6.
+[1;32m[OK][0m A1 baseline delays (10ms on all server-facing links) verified and restored.
+[1;34m[INFO][0m [DRY-RUN] Would acquire DNS lock and restore DNS baseline (0ms for A and AAAA)
+[1;34m[INFO][0m [DRY-RUN] Would remove state file .impair_state.json
+[1;32m[OK][0m System restored to baseline.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt6.
+[1;34m[INFO][0m [DRY-RUN] Would record active scenario 'S0' in .impair_state.json
+[1;32m[OK][0m Scenario S0 successfully applied.
+[1;34m[INFO][0m Clearing impairments and restoring clean baseline...
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt nft delete table inet ps028_impair
+[1;32m[OK][0m Deleted project nftables table ps028_impair in ps028-rt.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt6.
+[1;32m[OK][0m A1 baseline delays (10ms on all server-facing links) verified and restored.
+[1;34m[INFO][0m [DRY-RUN] Would acquire DNS lock and restore DNS baseline (0ms for A and AAAA)
+[1;34m[INFO][0m [DRY-RUN] Would remove state file .impair_state.json
+[1;32m[OK][0m System restored to baseline.
+[1;34m[INFO][0m Executing self-test-baseline verification...
+[1;32m[OK][0m Check 1 PASSED: No active scenario recorded in state file.
+[1;32m[OK][0m Check 2 PASSED: DNS configuration has baseline 0ms delays for A and AAAA.
+[1;32m[OK][0m Check 3 PASSED: No leftover impairment DNS backups found.
+[1;32m[OK][0m Check 4 PASSED: DNS server process (PID 6524) is running (verified active).
+[1;34m[INFO][0m Applying Scenario S1: ipv6_syn_blackhole — IPv6 TCP SYN blackhole: IPv6 TCP SYN packets are silently discarded without response (triggers client SYN timeout and Happy Eyeballs fallback to IPv4)
+[1;34m[INFO][0m Clearing impairments and restoring clean baseline...
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt nft delete table inet ps028_impair
+[1;32m[OK][0m Deleted project nftables table ps028_impair in ps028-rt.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt6.
+[1;32m[OK][0m A1 baseline delays (10ms on all server-facing links) verified and restored.
+[1;34m[INFO][0m [DRY-RUN] Would acquire DNS lock and restore DNS baseline (0ms for A and AAAA)
+[1;34m[INFO][0m [DRY-RUN] Would remove state file .impair_state.json
+[1;32m[OK][0m System restored to baseline.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt nft delete table inet ps028_impair
+[1;32m[OK][0m Deleted project nftables table ps028_impair in ps028-rt.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt nft -f - with input:
+add table inet ps028_impair
+add chain inet ps028_impair forward { type filter hook forward priority 0; policy accept; }
+add rule inet ps028_impair forward oifname "ps028-rt-sv6" ip6 daddr 2001:db8:2::10 tcp flags syn / syn,ack drop
+[1;32m[OK][0m Applied 1 nftables impairment rule(s) in ps028-rt -> ps028_impair.
+[1;34m[INFO][0m [DRY-RUN] Would record active scenario 'S1' in .impair_state.json
+[1;32m[OK][0m Scenario S1 successfully applied.
+[1;34m[INFO][0m Clearing impairments and restoring clean baseline...
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt nft delete table inet ps028_impair
+[1;32m[OK][0m Deleted project nftables table ps028_impair in ps028-rt.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt6.
+[1;32m[OK][0m A1 baseline delays (10ms on all server-facing links) verified and restored.
+[1;34m[INFO][0m [DRY-RUN] Would acquire DNS lock and restore DNS baseline (0ms for A and AAAA)
+[1;34m[INFO][0m [DRY-RUN] Would remove state file .impair_state.json
+[1;32m[OK][0m System restored to baseline.
+[1;34m[INFO][0m Executing self-test-baseline verification...
+[1;32m[OK][0m Check 1 PASSED: No active scenario recorded in state file.
+[1;32m[OK][0m Check 2 PASSED: DNS configuration has baseline 0ms delays for A and AAAA.
+[1;32m[OK][0m Check 3 PASSED: No leftover impairment DNS backups found.
+[1;32m[OK][0m Check 4 PASSED: DNS server process (PID 6524) is running (verified active).
+[1;34m[INFO][0m Applying Scenario S2: ipv6_tcp_rst — IPv6 TCP RST rejection: IPv6 TCP SYN packets are actively rejected with TCP RST (triggers immediate client reset and Happy Eyeballs fallback without waiting for timeout)
+[1;34m[INFO][0m Clearing impairments and restoring clean baseline...
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt nft delete table inet ps028_impair
+[1;32m[OK][0m Deleted project nftables table ps028_impair in ps028-rt.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt6.
+[1;32m[OK][0m A1 baseline delays (10ms on all server-facing links) verified and restored.
+[1;34m[INFO][0m [DRY-RUN] Would acquire DNS lock and restore DNS baseline (0ms for A and AAAA)
+[1;34m[INFO][0m [DRY-RUN] Would remove state file .impair_state.json
+[1;32m[OK][0m System restored to baseline.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt nft delete table inet ps028_impair
+[1;32m[OK][0m Deleted project nftables table ps028_impair in ps028-rt.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt nft -f - with input:
+add table inet ps028_impair
+add chain inet ps028_impair forward { type filter hook forward priority 0; policy accept; }
+add rule inet ps028_impair forward oifname "ps028-rt-sv6" ip6 daddr 2001:db8:2::10 tcp flags syn / syn,ack reject with tcp reset
+[1;32m[OK][0m Applied 1 nftables impairment rule(s) in ps028-rt -> ps028_impair.
+[1;34m[INFO][0m [DRY-RUN] Would record active scenario 'S2' in .impair_state.json
+[1;32m[OK][0m Scenario S2 successfully applied.
+[1;34m[INFO][0m Clearing impairments and restoring clean baseline...
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt nft delete table inet ps028_impair
+[1;32m[OK][0m Deleted project nftables table ps028_impair in ps028-rt.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt6.
+[1;32m[OK][0m A1 baseline delays (10ms on all server-facing links) verified and restored.
+[1;34m[INFO][0m [DRY-RUN] Would acquire DNS lock and restore DNS baseline (0ms for A and AAAA)
+[1;34m[INFO][0m [DRY-RUN] Would remove state file .impair_state.json
+[1;32m[OK][0m System restored to baseline.
+[1;34m[INFO][0m Executing self-test-baseline verification...
+[1;32m[OK][0m Check 1 PASSED: No active scenario recorded in state file.
+[1;32m[OK][0m Check 2 PASSED: DNS configuration has baseline 0ms delays for A and AAAA.
+[1;32m[OK][0m Check 3 PASSED: No leftover impairment DNS backups found.
+[1;32m[OK][0m Check 4 PASSED: DNS server process (PID 6524) is running (verified active).
+[1;34m[INFO][0m Applying Scenario S3: ipv6_rtt_150ms — IPv6 RTT 150ms: Symmetric 75ms delay on each IPv6 link end, increasing IPv6 round-trip time from 20ms baseline to 150ms while IPv4 remains at 20ms
+[1;34m[INFO][0m Clearing impairments and restoring clean baseline...
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt nft delete table inet ps028_impair
+[1;32m[OK][0m Deleted project nftables table ps028_impair in ps028-rt.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt6.
+[1;32m[OK][0m A1 baseline delays (10ms on all server-facing links) verified and restored.
+[1;34m[INFO][0m [DRY-RUN] Would acquire DNS lock and restore DNS baseline (0ms for A and AAAA)
+[1;34m[INFO][0m [DRY-RUN] Would remove state file .impair_state.json
+[1;32m[OK][0m System restored to baseline.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv6 root netem delay 75ms
+[1;32m[OK][0m Configured tc netem delay 75ms on ps028-rt/ps028-rt-sv6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt6 root netem delay 75ms
+[1;32m[OK][0m Configured tc netem delay 75ms on ps028-sv/ps028-sv-rt6.
+[1;34m[INFO][0m [DRY-RUN] Would record active scenario 'S3' in .impair_state.json
+[1;32m[OK][0m Scenario S3 successfully applied.
+[1;34m[INFO][0m Clearing impairments and restoring clean baseline...
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt nft delete table inet ps028_impair
+[1;32m[OK][0m Deleted project nftables table ps028_impair in ps028-rt.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt6.
+[1;32m[OK][0m A1 baseline delays (10ms on all server-facing links) verified and restored.
+[1;34m[INFO][0m [DRY-RUN] Would acquire DNS lock and restore DNS baseline (0ms for A and AAAA)
+[1;34m[INFO][0m [DRY-RUN] Would remove state file .impair_state.json
+[1;32m[OK][0m System restored to baseline.
+[1;34m[INFO][0m Executing self-test-baseline verification...
+[1;32m[OK][0m Check 1 PASSED: No active scenario recorded in state file.
+[1;32m[OK][0m Check 2 PASSED: DNS configuration has baseline 0ms delays for A and AAAA.
+[1;32m[OK][0m Check 3 PASSED: No leftover impairment DNS backups found.
+[1;32m[OK][0m Check 4 PASSED: DNS server process (PID 6524) is running (verified active).
+[1;34m[INFO][0m Applying Scenario S4: ipv6_rtt_600ms — IPv6 RTT 600ms: Symmetric 300ms delay on each IPv6 link end, increasing IPv6 round-trip time from 20ms baseline to 600ms while IPv4 remains at 20ms
+[1;34m[INFO][0m Clearing impairments and restoring clean baseline...
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt nft delete table inet ps028_impair
+[1;32m[OK][0m Deleted project nftables table ps028_impair in ps028-rt.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt6.
+[1;32m[OK][0m A1 baseline delays (10ms on all server-facing links) verified and restored.
+[1;34m[INFO][0m [DRY-RUN] Would acquire DNS lock and restore DNS baseline (0ms for A and AAAA)
+[1;34m[INFO][0m [DRY-RUN] Would remove state file .impair_state.json
+[1;32m[OK][0m System restored to baseline.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv6 root netem delay 300ms
+[1;32m[OK][0m Configured tc netem delay 300ms on ps028-rt/ps028-rt-sv6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt6 root netem delay 300ms
+[1;32m[OK][0m Configured tc netem delay 300ms on ps028-sv/ps028-sv-rt6.
+[1;34m[INFO][0m [DRY-RUN] Would record active scenario 'S4' in .impair_state.json
+[1;32m[OK][0m Scenario S4 successfully applied.
+[1;34m[INFO][0m Clearing impairments and restoring clean baseline...
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt nft delete table inet ps028_impair
+[1;32m[OK][0m Deleted project nftables table ps028_impair in ps028-rt.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt6.
+[1;32m[OK][0m A1 baseline delays (10ms on all server-facing links) verified and restored.
+[1;34m[INFO][0m [DRY-RUN] Would acquire DNS lock and restore DNS baseline (0ms for A and AAAA)
+[1;34m[INFO][0m [DRY-RUN] Would remove state file .impair_state.json
+[1;32m[OK][0m System restored to baseline.
+[1;34m[INFO][0m Executing self-test-baseline verification...
+[1;32m[OK][0m Check 1 PASSED: No active scenario recorded in state file.
+[1;32m[OK][0m Check 2 PASSED: DNS configuration has baseline 0ms delays for A and AAAA.
+[1;32m[OK][0m Check 3 PASSED: No leftover impairment DNS backups found.
+[1;32m[OK][0m Check 4 PASSED: DNS server process (PID 6524) is running (verified active).
+[1;34m[INFO][0m Applying Scenario S5: ipv6_syn_loss_50pct — Approximately 50% IPv6 SYN loss in the client-to-server direction only: Client-to-server IPv6 TCP SYN packets are dropped with 50% probability; server-to-client traffic and non-SYN packets are unaffected
+[1;34m[INFO][0m Clearing impairments and restoring clean baseline...
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt nft delete table inet ps028_impair
+[1;32m[OK][0m Deleted project nftables table ps028_impair in ps028-rt.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt6.
+[1;32m[OK][0m A1 baseline delays (10ms on all server-facing links) verified and restored.
+[1;34m[INFO][0m [DRY-RUN] Would acquire DNS lock and restore DNS baseline (0ms for A and AAAA)
+[1;34m[INFO][0m [DRY-RUN] Would remove state file .impair_state.json
+[1;32m[OK][0m System restored to baseline.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt nft delete table inet ps028_impair
+[1;32m[OK][0m Deleted project nftables table ps028_impair in ps028-rt.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt nft -f - with input:
+add table inet ps028_impair
+add chain inet ps028_impair forward { type filter hook forward priority 0; policy accept; }
+add rule inet ps028_impair forward oifname "ps028-rt-sv6" ip6 daddr 2001:db8:2::10 tcp flags syn / syn,ack numgen random mod 100 < 50 drop
+[1;32m[OK][0m Applied 1 nftables impairment rule(s) in ps028-rt -> ps028_impair.
+[1;34m[INFO][0m [DRY-RUN] Would record active scenario 'S5' in .impair_state.json
+[1;32m[OK][0m Scenario S5 successfully applied.
+[1;34m[INFO][0m Clearing impairments and restoring clean baseline...
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt nft delete table inet ps028_impair
+[1;32m[OK][0m Deleted project nftables table ps028_impair in ps028-rt.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt6.
+[1;32m[OK][0m A1 baseline delays (10ms on all server-facing links) verified and restored.
+[1;34m[INFO][0m [DRY-RUN] Would acquire DNS lock and restore DNS baseline (0ms for A and AAAA)
+[1;34m[INFO][0m [DRY-RUN] Would remove state file .impair_state.json
+[1;32m[OK][0m System restored to baseline.
+[1;34m[INFO][0m Executing self-test-baseline verification...
+[1;32m[OK][0m Check 1 PASSED: No active scenario recorded in state file.
+[1;32m[OK][0m Check 2 PASSED: DNS configuration has baseline 0ms delays for A and AAAA.
+[1;32m[OK][0m Check 3 PASSED: No leftover impairment DNS backups found.
+[1;32m[OK][0m Check 4 PASSED: DNS server process (PID 6524) is running (verified active).
+[1;34m[INFO][0m Applying Scenario S6: delay_aaaa_500ms — Delay AAAA DNS responses by 500ms while A remains immediate: Tests Happy Eyeballs behavior when AAAA record resolution is delayed relative to A record resolution
+[1;34m[INFO][0m Clearing impairments and restoring clean baseline...
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt nft delete table inet ps028_impair
+[1;32m[OK][0m Deleted project nftables table ps028_impair in ps028-rt.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv4.ok
+test_connection_failed_classified_when_both_fail (test_run_trial.TestHappyEyeballsFallbackClassification.test_connection_failed_classified_when_both_fail) ... ok
+test_direct_ipv6_classified_when_ipv6_succeeds_without_ipv4_attempt (test_run_trial.TestHappyEyeballsFallbackClassification.test_direct_ipv6_classified_when_ipv6_succeeds_without_ipv4_attempt) ... ok
+test_direct_ipv6_when_both_attempted_and_main_flow_correlated_to_ipv6 (test_run_trial.TestHappyEyeballsFallbackClassification.test_direct_ipv6_when_both_attempted_and_main_flow_correlated_to_ipv6)
+Regression test for S5 flow correlation: ... ok
+test_direct_ipv6_when_both_attempted_but_ipv6_wins_navigation (test_run_trial.TestHappyEyeballsFallbackClassification.test_direct_ipv6_when_both_attempted_but_ipv6_wins_navigation)
+When both IPv6 and IPv4 connections are established but IPv6 won HTTP navigation ... ok
+test_direct_ipv6_when_secondary_ipv4_attempt_fails_to_establish (test_run_trial.TestHappyEyeballsFallbackClassification.test_direct_ipv6_when_secondary_ipv4_attempt_fails_to_establish)
+When primary IPv6 establishes and wins, and secondary IPv4 attempt is made ... ok
+test_do_not_infer_fallback_from_http_200_alone_when_ipv6_not_attempted (test_run_trial.TestHappyEyeballsFallbackClassification.test_do_not_infer_fallback_from_http_200_alone_when_ipv6_not_attempted)
+CRITICAL PS-028 REQUIREMENT: ... ok
+test_fallback_classified_when_ipv6_and_ipv4_attempted_and_ipv4_wins (test_run_trial.TestHappyEyeballsFallbackClassification.test_fallback_classified_when_ipv6_and_ipv4_attempted_and_ipv4_wins) ... ok
+test_readiness_fails_when_topology_absent (test_run_trial.TestLabReadinessValidation.test_readiness_fails_when_topology_absent) ... ok
+test_readiness_passes_in_simulation_mode (test_run_trial.TestLabReadinessValidation.test_readiness_passes_in_simulation_mode) ... ok
+test_cleanup_restores_baseline_on_trial_exception (test_run_trial.TestLockingAndCleanupSafety.test_cleanup_restores_baseline_on_trial_exception) ... ok
+test_in_process_reentrancy_avoids_subprocess_deadlock (test_run_trial.TestLockingAndCleanupSafety.test_in_process_reentrancy_avoids_subprocess_deadlock)
+run_trial acquires the shared lab lock and calls apply_scenario/clear_impairments ... 
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt6.
+[1;32m[OK][0m A1 baseline delays (10ms on all server-facing links) verified and restored.
+[1;34m[INFO][0m [DRY-RUN] Would acquire DNS lock and restore DNS baseline (0ms for A and AAAA)
+[1;34m[INFO][0m [DRY-RUN] Would remove state file .impair_state.json
+[1;32m[OK][0m System restored to baseline.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt6.
+[1;34m[INFO][0m [DRY-RUN] Would acquire DNS lock, save backup, and set delays A=0ms, AAAA=500ms
+[1;34m[INFO][0m [DRY-RUN] Would record active scenario 'S6' in .impair_state.json
+[1;32m[OK][0m Scenario S6 successfully applied.
+[1;34m[INFO][0m Clearing impairments and restoring clean baseline...
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt nft delete table inet ps028_impair
+[1;32m[OK][0m Deleted project nftables table ps028_impair in ps028-rt.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt6.
+[1;32m[OK][0m A1 baseline delays (10ms on all server-facing links) verified and restored.
+[1;34m[INFO][0m [DRY-RUN] Would acquire DNS lock and restore DNS baseline (0ms for A and AAAA)
+[1;34m[INFO][0m [DRY-RUN] Would remove state file .impair_state.json
+[1;32m[OK][0m System restored to baseline.
+[1;34m[INFO][0m Executing self-test-baseline verification...
+[1;32m[OK][0m Check 1 PASSED: No active scenario recorded in state file.
+[1;32m[OK][0m Check 2 PASSED: DNS configuration has baseline 0ms delays for A and AAAA.
+[1;32m[OK][0m Check 3 PASSED: No leftover impairment DNS backups found.
+[1;32m[OK][0m Check 4 PASSED: DNS server process (PID 6524) is running (verified active).
+[1;34m[INFO][0m Clearing impairments and restoring clean baseline...
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt nft delete table inet ps028_impair
+[1;32m[OK][0m Deleted project nftables table ps028_impair in ps028-rt.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt6.
+[1;32m[OK][0m A1 baseline delays (10ms on all server-facing links) verified and restored.
+[1;34m[INFO][0m [DRY-RUN] Would acquire DNS lock and restore DNS baseline (0ms for A and AAAA)
+[1;34m[INFO][0m [DRY-RUN] Would remove state file .impair_state.json
+[1;32m[OK][0m System restored to baseline.
+[1;34m[INFO][0m Executing self-test-baseline verification...
+[1;32m[OK][0m Check 1 PASSED: No active scenario recorded in state file.
+[1;32m[OK][0m Check 2 PASSED: DNS configuration has baseline 0ms delays for A and AAAA.
+[1;32m[OK][0m Check 3 PASSED: No leftover impairment DNS backups found.
+[1;32m[OK][0m Check 4 PASSED: DNS server process (PID 6524) is running (verified active).
+[1;34m[INFO][0m Executing self-test-baseline verification...
+[1;32m[OK][0m Check 1 PASSED: No active scenario recorded in state file.
+[1;32m[OK][0m Check 2 PASSED: DNS configuration has baseline 0ms delays for A and AAAA.
+[1;32m[OK][0m Check 3 PASSED: No leftover impairment DNS backups found.
+[1;32m[OK][0m Check 4 PASSED: DNS server process (PID 6524) is running (verified active).
+[1;34m[INFO][0m Applying Scenario S0: healthy_baseline — Healthy baseline: 10ms netem delay on each server link (~20ms RTT), immediate DNS responses (0ms delay), no packet loss or drops
+[1;34m[INFO][0m Clearing impairments and restoring clean baseline...
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt nft delete table inet ps028_impair
+[1;32m[OK][0m Deleted project nftables table ps028_impair in ps028-rt.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt6.
+[1;32m[OK][0m A1 baseline delays (10ms on all server-facing links) verified and restored.
+[1;34m[INFO][0m [DRY-RUN] Would acquire DNS lock and restore DNS baseline (0ms for A and AAAA)
+[1;34m[INFO][0m [DRY-RUN] Would remove state file .impair_state.json
+[1;32m[OK][0m System restored to baseline.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt6.
+[1;34m[INFO][0m [DRY-RUN] Would record active scenario 'S0' in .impair_state.json
+[1;32m[OK][0m Scenario S0 successfully applied.
+[1;34m[INFO][0m Clearing impairments and restoring clean baseline...ok
+test_validate_pcap_rejects_invalid_magic (test_run_trial.TestPacketCaptureValidationAndDissection.test_validate_pcap_rejects_invalid_magic) ... ok
+test_validate_pcap_rejects_truncated_file (test_run_trial.TestPacketCaptureValidationAndDissection.test_validate_pcap_rejects_truncated_file) ... ok
+test_validate_pcap_validates_standard_magic_and_sha256 (test_run_trial.TestPacketCaptureValidationAndDissection.test_validate_pcap_validates_standard_magic_and_sha256) ... ok
+test_accepts_verified_tcpdump_and_parent_processes (test_run_trial.TestSafeCaptureProcessRegression.test_accepts_verified_tcpdump_and_parent_processes)
+Verifies genuine tcpdump and parent capture processes pass identification. ... ok
+test_fails_closed_when_cmdline_missing (test_run_trial.TestSafeCaptureProcessRegression.test_fails_closed_when_cmdline_missing)
+Must return False when /proc/<pid>/cmdline is missing even if comm matches. ... ok
+test_fails_closed_when_comm_missing (test_run_trial.TestSafeCaptureProcessRegression.test_fails_closed_when_comm_missing)
+Must return False when /proc/<pid>/comm is missing even if cmdline matches. ... ok
+test_fails_closed_when_comm_or_cmdline_empty (test_run_trial.TestSafeCaptureProcessRegression.test_fails_closed_when_comm_or_cmdline_empty)
+Must return False when /proc identity files are empty. ... ok
+test_fails_closed_when_proc_entry_missing (test_run_trial.TestSafeCaptureProcessRegression.test_fails_closed_when_proc_entry_missing)
+Must return False when the /proc PID directory or files are completely absent. ... ok
+test_fails_closed_when_proc_file_unreadable (test_run_trial.TestSafeCaptureProcessRegression.test_fails_closed_when_proc_file_unreadable)
+Must return False when reading /proc files raises permission or I/O errors. ... ok
+test_rejects_substring_matches_on_comm_and_parent (test_run_trial.TestSafeCaptureProcessRegression.test_rejects_substring_matches_on_comm_and_parent)
+Tightened parent and capture identification must reject substring matches: ... ok
+test_stop_packet_capture_distinguishes_exited_process_from_recycled_unrelated_pid (test_run_trial.TestSafeCaptureProcessRegression.test_stop_packet_capture_distinguishes_exited_process_from_recycled_unrelated_pid)
+Confirms stop_packet_capture distinguishes an already exited process from a live unrelated/recycled PID: ... [1;33m[WARN][0m Refusing to signal PID 40003 with SIGINT: belongs to unrelated process
+[1;33m[WARN][0m Refusing to signal proc PID 40003: belongs to unrelated process
+[1;33m[WARN][0m Refusing to signal PID 40003 with SIGTERM: unrelated process
+[1;33m[WARN][0m Refusing to signal PID 40003 with SIGTERM: unrelated process
+[1;33m[WARN][0m Refusing to terminate proc PID 40003: unrelated process
+ok
+test_classify_fallback_marks_inconclusive_when_capture_loss_is_true (test_run_trial.TestTcpdumpDropStatisticsAndCaptureLoss.test_classify_fallback_marks_inconclusive_when_capture_loss_is_true)
+PS-028 Invariant: ... ok
+test_parse_tcpdump_drop_statistics_interface_drops (test_run_trial.TestTcpdumpDropStatisticsAndCaptureLoss.test_parse_tcpdump_drop_statistics_interface_drops) ... ok
+test_parse_tcpdump_drop_statistics_with_kernel_drops (test_run_trial.TestTcpdumpDropStatisticsAndCaptureLoss.test_parse_tcpdump_drop_statistics_with_kernel_drops) ... ok
+test_parse_tcpdump_drop_statistics_zero_drops (test_run_trial.TestTcpdumpDropStatisticsAndCaptureLoss.test_parse_tcpdump_drop_statistics_zero_drops) ... ok
+test_generate_trial_id_format (test_run_trial.TestTrialIdentifierAndHostname.test_generate_trial_id_format) ... ok
+test_invalid_trial_id_rejected (test_run_trial.TestTrialIdentifierAndHostname.test_invalid_trial_id_rejected) ... ok
+test_trial_hostname_matches_dns_server_supported_pattern (test_run_trial.TestTrialIdentifierAndHostname.test_trial_hostname_matches_dns_server_supported_pattern) ... ok
+test_impair_parser_test_scenarios_subcommands (test_self_test_scenarios.TestHarnessCLIAndIntegration.test_impair_parser_test_scenarios_subcommands) ... ok
+test_sts_parser_options (test_self_test_scenarios.TestHarnessCLIAndIntegration.test_sts_parser_options) ... ok
+test_dry_run_run_all_self_tests (test_self_test_scenarios.TestHarnessLifecycleAndSafety.test_dry_run_run_all_self_tests)
+Executing run_all_self_tests in dry-run mode completes all 7 scenarios successfully. ... 
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt nft delete table inet ps028_impair
+[1;32m[OK][0m Deleted project nftables table ps028_impair in ps028-rt.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt6.
+[1;32m[OK][0m A1 baseline delays (10ms on all server-facing links) verified and restored.
+[1;34m[INFO][0m [DRY-RUN] Would acquire DNS lock and restore DNS baseline (0ms for A and AAAA)
+[1;34m[INFO][0m [DRY-RUN] Would remove state file .impair_state.json
+[1;32m[OK][0m System restored to baseline.
+[1;34m[INFO][0m Executing self-test-baseline verification...
+[1;32m[OK][0m Check 1 PASSED: No active scenario recorded in state file.
+[1;32m[OK][0m Check 2 PASSED: DNS configuration has baseline 0ms delays for A and AAAA.
+[1;32m[OK][0m Check 3 PASSED: No leftover impairment DNS backups found.
+[1;32m[OK][0m Check 4 PASSED: DNS server process (PID 6524) is running (verified active).
+[1;34m[INFO][0m Executing self-test harness for scenarios: S0, S1, S2, S3, S4, S5, S6
+[1;34m[INFO][0m ============================================================
+[1;34m[INFO][0m Starting Self-Test Harness for Scenario S0
+[1;34m[INFO][0m ============================================================
+[1;34m[INFO][0m Applying Scenario S0: healthy_baseline — Healthy baseline: 10ms netem delay on each server link (~20ms RTT), immediate DNS responses (0ms delay), no packet loss or drops
+[1;34m[INFO][0m Clearing impairments and restoring clean baseline...
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt nft delete table inet ps028_impair
+[1;32m[OK][0m Deleted project nftables table ps028_impair in ps028-rt.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt6.
+[1;32m[OK][0m A1 baseline delays (10ms on all server-facing links) verified and restored.
+[1;34m[INFO][0m [DRY-RUN] Would acquire DNS lock and restore DNS baseline (0ms for A and AAAA)
+[1;34m[INFO][0m [DRY-RUN] Would remove state file .impair_state.json
+[1;32m[OK][0m System restored to baseline.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt6.
+[1;34m[INFO][0m [DRY-RUN] Would record active scenario 'S0' in .impair_state.json
+[1;32m[OK][0m Scenario S0 successfully applied.
+[1;34m[INFO][0m --- Verifying Scenario S0 (Healthy Baseline) ---
+[1;34m[INFO][0m [DRY-RUN] DNS query A he.test via 10.0.1.1 -> 10.0.2.10 (5.0ms)
+[1;34m[INFO][0m [DRY-RUN] DNS query AAAA he.test via 10.0.1.1 -> 2001:db8:2::10 (5.0ms)
+[1;32m[OK][0m S0 Check 1 PASSED: DNS A=10.0.2.10 (5.0ms), AAAA=2001:db8:2::10 (5.0ms)
+[1;34m[INFO][0m [DRY-RUN] Ping 10.0.2.10 in ps028-cl (simulated mean RTT: 20.10ms)
+[1;34m[INFO][0m [DRY-RUN] Ping 2001:db8:2::10 in ps028-cl (simulated mean RTT: 20.20ms)
+[1;32m[OK][0m S0 Check 2 PASSED: Baseline Latency IPv4 RTT=20.10ms, IPv6 RTT=20.20ms
+[1;34m[INFO][0m [DRY-RUN] HTTP GET http://10.0.2.10/ in ps028-cl -> 200 OK (20.0ms)
+[1;34m[INFO][0m [DRY-RUN] HTTP GET http://[2001:db8:2::10]/ in ps028-cl -> 200 OK (20.0ms)
+[1;34m[INFO][0m [DRY-RUN] HTTP GET http://he.test/ in ps028-cl -> 200 OK (20.0ms)
+[1;32m[OK][0m S0 Check 3 PASSED: Dual-Stack HTTP 200 OK on IPv4, IPv6, and he.test
+[1;32m[OK][0m Scenario S0 self-test verification SUCCEEDED.
+[1;34m[INFO][0m Post-scenario S0 lifecycle: clearing impairments and restoring baseline...
+[1;34m[INFO][0m Clearing impairments and restoring clean baseline...
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt nft delete table inet ps028_impair
+[1;32m[OK][0m Deleted project nftables table ps028_impair in ps028-rt.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt6.
+[1;32m[OK][0m A1 baseline delays (10ms on all server-facing links) verified and restored.
+[1;34m[INFO][0m [DRY-RUN] Would acquire DNS lock and restore DNS baseline (0ms for A and AAAA)
+[1;34m[INFO][0m [DRY-RUN] Would remove state file .impair_state.json
+[1;32m[OK][0m System restored to baseline.
+[1;34m[INFO][0m Running self-test-baseline after scenario S0...
+[1;34m[INFO][0m Executing self-test-baseline verification...
+[1;32m[OK][0m Check 1 PASSED: No active scenario recorded in state file.
+[1;32m[OK][0m Check 2 PASSED: DNS configuration has baseline 0ms delays for A and AAAA.
+[1;32m[OK][0m Check 3 PASSED: No leftover impairment DNS backups found.
+[1;32m[OK][0m Check 4 PASSED: DNS server process (PID 6524) is running (verified active).
+[1;32m[OK][0m Post-scenario S0 baseline verified pristine.
+[1;34m[INFO][0m ============================================================
+[1;34m[INFO][0m Starting Self-Test Harness for Scenario S1
+[1;34m[INFO][0m ============================================================
+[1;34m[INFO][0m Applying Scenario S1: ipv6_syn_blackhole — IPv6 TCP SYN blackhole: IPv6 TCP SYN packets are silently discarded without response (triggers client SYN timeout and Happy Eyeballs fallback to IPv4)
+[1;34m[INFO][0m Clearing impairments and restoring clean baseline...
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt nft delete table inet ps028_impair
+[1;32m[OK][0m Deleted project nftables table ps028_impair in ps028-rt.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt6.
+[1;32m[OK][0m A1 baseline delays (10ms on all server-facing links) verified and restored.
+[1;34m[INFO][0m [DRY-RUN] Would acquire DNS lock and restore DNS baseline (0ms for A and AAAA)
+[1;34m[INFO][0m [DRY-RUN] Would remove state file .impair_state.json
+[1;32m[OK][0m System restored to baseline.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt nft delete table inet ps028_impair
+[1;32m[OK][0m Deleted project nftables table ps028_impair in ps028-rt.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt nft -f - with input:
+add table inet ps028_impair
+add chain inet ps028_impair forward { type filter hook forward priority 0; policy accept; }
+add rule inet ps028_impair forward oifname "ps028-rt-sv6" ip6 daddr 2001:db8:2::10 tcp flags syn / syn,ack drop
+[1;32m[OK][0m Applied 1 nftables impairment rule(s) in ps028-rt -> ps028_impair.
+[1;34m[INFO][0m [DRY-RUN] Would record active scenario 'S1' in .impair_state.json
+[1;32m[OK][0m Scenario S1 successfully applied.
+[1;34m[INFO][0m --- Verifying Scenario S1 (IPv6 SYN Blackhole) ---
+[1;34m[INFO][0m [DRY-RUN] HTTP GET http://10.0.2.10/ in ps028-cl -> 200 OK (20.0ms)
+[1;32m[OK][0m S1 Check 1 PASSED: IPv4 HTTP succeeded (200 OK, 20.0ms)
+[1;34m[INFO][0m [DRY-RUN] TCP connect to [2001:db8:2::10]:80 -> timeout (2000.0ms)
+[1;32m[OK][0m S1 Check 2 PASSED: IPv6 TCP SYN timed out after 2.00s (silent blackhole drop verified)
+[1;32m[OK][0m Scenario S1 self-test verification SUCCEEDED.
+[1;34m[INFO][0m Post-scenario S1 lifecycle: clearing impairments and restoring baseline...
+[1;34m[INFO][0m Clearing impairments and restoring clean baseline...
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt nft delete table inet ps028_impair
+[1;32m[OK][0m Deleted project nftables table ps028_impair in ps028-rt.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt6.
+[1;32m[OK][0m A1 baseline delays (10ms on all server-facing links) verified and restored.
+[1;34m[INFO][0m [DRY-RUN] Would acquire DNS lock and restore DNS baseline (0ms for A and AAAA)
+[1;34m[INFO][0m [DRY-RUN] Would remove state file .impair_state.json
+[1;32m[OK][0m System restored to baseline.
+[1;34m[INFO][0m Running self-test-baseline after scenario S1...
+[1;34m[INFO][0m Executing self-test-baseline verification...
+[1;32m[OK][0m Check 1 PASSED: No active scenario recorded in state file.
+[1;32m[OK][0m Check 2 PASSED: DNS configuration has baseline 0ms delays for A and AAAA.
+[1;32m[OK][0m Check 3 PASSED: No leftover impairment DNS backups found.
+[1;32m[OK][0m Check 4 PASSED: DNS server process (PID 6524) is running (verified active).
+[1;32m[OK][0m Post-scenario S1 baseline verified pristine.
+[1;34m[INFO][0m ============================================================
+[1;34m[INFO][0m Starting Self-Test Harness for Scenario S2
+[1;34m[INFO][0m ============================================================
+[1;34m[INFO][0m Applying Scenario S2: ipv6_tcp_rst — IPv6 TCP RST rejection: IPv6 TCP SYN packets are actively rejected with TCP RST (triggers immediate client reset and Happy Eyeballs fallback without waiting for timeout)
+[1;34m[INFO][0m Clearing impairments and restoring clean baseline...
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt nft delete table inet ps028_impair
+[1;32m[OK][0m Deleted project nftables table ps028_impair in ps028-rt.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt6.
+[1;32m[OK][0m A1 baseline delays (10ms on all server-facing links) verified and restored.
+[1;34m[INFO][0m [DRY-RUN] Would acquire DNS lock and restore DNS baseline (0ms for A and AAAA)
+[1;34m[INFO][0m [DRY-RUN] Would remove state file .impair_state.json
+[1;32m[OK][0m System restored to baseline.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt nft delete table inet ps028_impair
+[1;32m[OK][0m Deleted project nftables table ps028_impair in ps028-rt.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt nft -f - with input:
+add table inet ps028_impair
+add chain inet ps028_impair forward { type filter hook forward priority 0; policy accept; }
+add rule inet ps028_impair forward oifname "ps028-rt-sv6" ip6 daddr 2001:db8:2::10 tcp flags syn / syn,ack reject with tcp reset
+[1;32m[OK][0m Applied 1 nftables impairment rule(s) in ps028-rt -> ps028_impair.
+[1;34m[INFO][0m [DRY-RUN] Would record active scenario 'S2' in .impair_state.json
+[1;32m[OK][0m Scenario S2 successfully applied.
+[1;34m[INFO][0m --- Verifying Scenario S2 (IPv6 TCP RST Rejection) ---
+[1;34m[INFO][0m [DRY-RUN] HTTP GET http://10.0.2.10/ in ps028-cl -> 200 OK (20.0ms)
+[1;34m[INFO][0m [DRY-RUN] Ping 10.0.2.10 in ps028-cl (simulated mean RTT: 20.10ms)
+[1;32m[OK][0m S2 Check 1 PASSED: IPv4 HTTP succeeded (200 OK) with baseline RTT 20.10ms
+[1;34m[INFO][0m [DRY-RUN] TCP connect to [2001:db8:2::10]:80 -> refused (20.0ms)
+[1;32m[OK][0m S2 Check 2 PASSED: IPv6 TCP SYN actively rejected with TCP RST in 20.0ms
+[1;32m[OK][0m Scenario S2 self-test verification SUCCEEDED.
+[1;34m[INFO][0m Post-scenario S2 lifecycle: clearing impairments and restoring baseline...
+[1;34m[INFO][0m Clearing impairments and restoring clean baseline...
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt nft delete table inet ps028_impair
+[1;32m[OK][0m Deleted project nftables table ps028_impair in ps028-rt.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt6.
+[1;32m[OK][0m A1 baseline delays (10ms on all server-facing links) verified and restored.
+[1;34m[INFO][0m [DRY-RUN] Would acquire DNS lock and restore DNS baseline (0ms for A and AAAA)
+[1;34m[INFO][0m [DRY-RUN] Would remove state file .impair_state.json
+[1;32m[OK][0m System restored to baseline.
+[1;34m[INFO][0m Running self-test-baseline after scenario S2...
+[1;34m[INFO][0m Executing self-test-baseline verification...
+[1;32m[OK][0m Check 1 PASSED: No active scenario recorded in state file.
+[1;32m[OK][0m Check 2 PASSED: DNS configuration has baseline 0ms delays for A and AAAA.
+[1;32m[OK][0m Check 3 PASSED: No leftover impairment DNS backups found.
+[1;32m[OK][0m Check 4 PASSED: DNS server process (PID 6524) is running (verified active).
+[1;32m[OK][0m Post-scenario S2 baseline verified pristine.
+[1;34m[INFO][0m ============================================================
+[1;34m[INFO][0m Starting Self-Test Harness for Scenario S3
+[1;34m[INFO][0m ============================================================
+[1;34m[INFO][0m Applying Scenario S3: ipv6_rtt_150ms — IPv6 RTT 150ms: Symmetric 75ms delay on each IPv6 link end, increasing IPv6 round-trip time from 20ms baseline to 150ms while IPv4 remains at 20ms
+[1;34m[INFO][0m Clearing impairments and restoring clean baseline...
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt nft delete table inet ps028_impair
+[1;32m[OK][0m Deleted project nftables table ps028_impair in ps028-rt.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt6.
+[1;32m[OK][0m A1 baseline delays (10ms on all server-facing links) verified and restored.
+[1;34m[INFO][0m [DRY-RUN] Would acquire DNS lock and restore DNS baseline (0ms for A and AAAA)
+[1;34m[INFO][0m [DRY-RUN] Would remove state file .impair_state.json
+[1;32m[OK][0m System restored to baseline.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv6 root netem delay 75ms
+[1;32m[OK][0m Configured tc netem delay 75ms on ps028-rt/ps028-rt-sv6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt6 root netem delay 75ms
+[1;32m[OK][0m Configured tc netem delay 75ms on ps028-sv/ps028-sv-rt6.
+[1;34m[INFO][0m [DRY-RUN] Would record active scenario 'S3' in .impair_state.json
+[1;32m[OK][0m Scenario S3 successfully applied.
+[1;34m[INFO][0m --- Verifying Scenario S3 (IPv6 RTT 150ms) ---
+[1;34m[INFO][0m [DRY-RUN] Ping 10.0.2.10 in ps028-cl (simulated mean RTT: 20.20ms)
+[1;34m[INFO][0m [DRY-RUN] Ping 2001:db8:2::10 in ps028-cl (simulated mean RTT: 150.30ms)
+[1;32m[OK][0m S3 Check 1 PASSED: Latency verified (IPv6 RTT=150.30ms ~150ms, IPv4 RTT=20.20ms ~baseline)
+[1;34m[INFO][0m [DRY-RUN] HTTP GET http://10.0.2.10/ in ps028-cl -> 200 OK (20.0ms)
+[1;34m[INFO][0m [DRY-RUN] HTTP GET http://[2001:db8:2::10]/ in ps028-cl -> 200 OK (20.0ms)
+[1;32m[OK][0m S3 Check 2 PASSED: Dual-stack HTTP 200 OK on both IPv4 and IPv6
+[1;32m[OK][0m Scenario S3 self-test verification SUCCEEDED.
+[1;34m[INFO][0m Post-scenario S3 lifecycle: clearing impairments and restoring baseline...
+[1;34m[INFO][0m Clearing impairments and restoring clean baseline...
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt nft delete table inet ps028_impair
+[1;32m[OK][0m Deleted project nftables table ps028_impair in ps028-rt.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt6.
+[1;32m[OK][0m A1 baseline delays (10ms on all server-facing links) verified and restored.
+[1;34m[INFO][0m [DRY-RUN] Would acquire DNS lock and restore DNS baseline (0ms for A and AAAA)
+[1;34m[INFO][0m [DRY-RUN] Would remove state file .impair_state.json
+[1;32m[OK][0m System restored to baseline.
+[1;34m[INFO][0m Running self-test-baseline after scenario S3...
+[1;34m[INFO][0m Executing self-test-baseline verification...
+[1;32m[OK][0m Check 1 PASSED: No active scenario recorded in state file.
+[1;32m[OK][0m Check 2 PASSED: DNS configuration has baseline 0ms delays for A and AAAA.
+[1;32m[OK][0m Check 3 PASSED: No leftover impairment DNS backups found.
+[1;32m[OK][0m Check 4 PASSED: DNS server process (PID 6524) is running (verified active).
+[1;32m[OK][0m Post-scenario S3 baseline verified pristine.
+[1;34m[INFO][0m ============================================================
+[1;34m[INFO][0m Starting Self-Test Harness for Scenario S4
+[1;34m[INFO][0m ============================================================
+[1;34m[INFO][0m Applying Scenario S4: ipv6_rtt_600ms — IPv6 RTT 600ms: Symmetric 300ms delay on each IPv6 link end, increasing IPv6 round-trip time from 20ms baseline to 600ms while IPv4 remains at 20ms
+[1;34m[INFO][0m Clearing impairments and restoring clean baseline...
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt nft delete table inet ps028_impair
+[1;32m[OK][0m Deleted project nftables table ps028_impair in ps028-rt.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt6.
+[1;32m[OK][0m A1 baseline delays (10ms on all server-facing links) verified and restored.
+[1;34m[INFO][0m [DRY-RUN] Would acquire DNS lock and restore DNS baseline (0ms for A and AAAA)
+[1;34m[INFO][0m [DRY-RUN] Would remove state file .impair_state.json
+[1;32m[OK][0m System restored to baseline.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv6 root netem delay 300ms
+[1;32m[OK][0m Configured tc netem delay 300ms on ps028-rt/ps028-rt-sv6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt6 root netem delay 300ms
+[1;32m[OK][0m Configured tc netem delay 300ms on ps028-sv/ps028-sv-rt6.
+[1;34m[INFO][0m [DRY-RUN] Would record active scenario 'S4' in .impair_state.json
+[1;32m[OK][0m Scenario S4 successfully applied.
+[1;34m[INFO][0m --- Verifying Scenario S4 (IPv6 RTT 600ms) ---
+[1;34m[INFO][0m [DRY-RUN] Ping 10.0.2.10 in ps028-cl (simulated mean RTT: 20.20ms)
+[1;34m[INFO][0m [DRY-RUN] Ping 2001:db8:2::10 in ps028-cl (simulated mean RTT: 600.40ms)
+[1;32m[OK][0m S4 Check 1 PASSED: Latency verified (IPv6 RTT=600.40ms ~600ms, IPv4 RTT=20.20ms ~baseline)
+[1;34m[INFO][0m [DRY-RUN] HTTP GET http://10.0.2.10/ in ps028-cl -> 200 OK (20.0ms)
+[1;34m[INFO][0m [DRY-RUN] HTTP GET http://[2001:db8:2::10]/ in ps028-cl -> 200 OK (20.0ms)
+[1;32m[OK][0m S4 Check 2 PASSED: Dual-stack HTTP 200 OK on both IPv4 and IPv6
+[1;32m[OK][0m Scenario S4 self-test verification SUCCEEDED.
+[1;34m[INFO][0m Post-scenario S4 lifecycle: clearing impairments and restoring baseline...
+[1;34m[INFO][0m Clearing impairments and restoring clean baseline...
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt nft delete table inet ps028_impair
+[1;32m[OK][0m Deleted project nftables table ps028_impair in ps028-rt.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt6.
+[1;32m[OK][0m A1 baseline delays (10ms on all server-facing links) verified and restored.
+[1;34m[INFO][0m [DRY-RUN] Would acquire DNS lock and restore DNS baseline (0ms for A and AAAA)
+[1;34m[INFO][0m [DRY-RUN] Would remove state file .impair_state.json
+[1;32m[OK][0m System restored to baseline.
+[1;34m[INFO][0m Running self-test-baseline after scenario S4...
+[1;34m[INFO][0m Executing self-test-baseline verification...
+[1;32m[OK][0m Check 1 PASSED: No active scenario recorded in state file.
+[1;32m[OK][0m Check 2 PASSED: DNS configuration has baseline 0ms delays for A and AAAA.
+[1;32m[OK][0m Check 3 PASSED: No leftover impairment DNS backups found.
+[1;32m[OK][0m Check 4 PASSED: DNS server process (PID 6524) is running (verified active).
+[1;32m[OK][0m Post-scenario S4 baseline verified pristine.
+[1;34m[INFO][0m ============================================================
+[1;34m[INFO][0m Starting Self-Test Harness for Scenario S5
+[1;34m[INFO][0m ============================================================
+[1;34m[INFO][0m Applying Scenario S5: ipv6_syn_loss_50pct — Approximately 50% IPv6 SYN loss in the client-to-server direction only: Client-to-server IPv6 TCP SYN packets are dropped with 50% probability; server-to-client traffic and non-SYN packets are unaffected
+[1;34m[INFO][0m Clearing impairments and restoring clean baseline...
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt nft delete table inet ps028_impair
+[1;32m[OK][0m Deleted project nftables table ps028_impair in ps028-rt.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt6.
+[1;32m[OK][0m A1 baseline delays (10ms on all server-facing links) verified and restored.
+[1;34m[INFO][0m [DRY-RUN] Would acquire DNS lock and restore DNS baseline (0ms for A and AAAA)
+[1;34m[INFO][0m [DRY-RUN] Would remove state file .impair_state.json
+[1;32m[OK][0m System restored to baseline.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt nft delete table inet ps028_impair
+[1;32m[OK][0m Deleted project nftables table ps028_impair in ps028-rt.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt nft -f - with input:
+add table inet ps028_impair
+add chain inet ps028_impair forward { type filter hook forward priority 0; policy accept; }
+add rule inet ps028_impair forward oifname "ps028-rt-sv6" ip6 daddr 2001:db8:2::10 tcp flags syn / syn,ack numgen random mod 100 < 50 drop
+[1;32m[OK][0m Applied 1 nftables impairment rule(s) in ps028-rt -> ps028_impair.
+[1;34m[INFO][0m [DRY-RUN] Would record active scenario 'S5' in .impair_state.json
+[1;32m[OK][0m Scenario S5 successfully applied.
+[1;34m[INFO][0m --- Verifying Scenario S5 (IPv6 SYN Loss 50%, 20 probes) ---
+[1;34m[INFO][0m [DRY-RUN] S5 SYN Loss (simulated counts): simulated_total=20, simulated_dropped=10, simulated_accepted=10, simulated_not_dropped=10, simulated_loss=50.0%ok
+test_lifecycle_baseline_check_exception_handled_and_raised (test_self_test_scenarios.TestHarnessLifecycleAndSafety.test_lifecycle_baseline_check_exception_handled_and_raised)
+Exceptions raised during baseline check must be handled and preserved. ... [1;31m[ERROR][0m Post-scenario S1 baseline check exception: Baseline verification probe crashed
+ok
+test_lifecycle_cleans_up_even_when_verification_fails (test_self_test_scenarios.TestHarnessLifecycleAndSafety.test_lifecycle_cleans_up_even_when_verification_fails) ... 
+[1;32m[OK][0m [DRY-RUN] S5 PASSED (simulated counts): simulated SYN packet count=20 (initial probes=20, extra SYN packets=0), simulated dropped packets=10, simulated not-dropped packets=10, simulated loss percentage=50.0% (target ~50% random loss)
+[1;32m[OK][0m Scenario S5 self-test verification SUCCEEDED.
+[1;34m[INFO][0m Post-scenario S5 lifecycle: clearing impairments and restoring baseline...
+[1;34m[INFO][0m Clearing impairments and restoring clean baseline...
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt nft delete table inet ps028_impair
+[1;32m[OK][0m Deleted project nftables table ps028_impair in ps028-rt.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt6.
+[1;32m[OK][0m A1 baseline delays (10ms on all server-facing links) verified and restored.
+[1;34m[INFO][0m [DRY-RUN] Would acquire DNS lock and restore DNS baseline (0ms for A and AAAA)
+[1;34m[INFO][0m [DRY-RUN] Would remove state file .impair_state.json
+[1;32m[OK][0m System restored to baseline.
+[1;34m[INFO][0m Running self-test-baseline after scenario S5...
+[1;34m[INFO][0m Executing self-test-baseline verification...
+[1;32m[OK][0m Check 1 PASSED: No active scenario recorded in state file.
+[1;32m[OK][0m Check 2 PASSED: DNS configuration has baseline 0ms delays for A and AAAA.
+[1;32m[OK][0m Check 3 PASSED: No leftover impairment DNS backups found.
+[1;32m[OK][0m Check 4 PASSED: DNS server process (PID 6524) is running (verified active).
+[1;32m[OK][0m Post-scenario S5 baseline verified pristine.
+[1;34m[INFO][0m ============================================================
+[1;34m[INFO][0m Starting Self-Test Harness for Scenario S6
+[1;34m[INFO][0m ============================================================
+[1;34m[INFO][0m Applying Scenario S6: delay_aaaa_500ms — Delay AAAA DNS responses by 500ms while A remains immediate: Tests Happy Eyeballs behavior when AAAA record resolution is delayed relative to A record resolution
+[1;34m[INFO][0m Clearing impairments and restoring clean baseline...
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt nft delete table inet ps028_impair
+[1;32m[OK][0m Deleted project nftables table ps028_impair in ps028-rt.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt6.
+[1;32m[OK][0m A1 baseline delays (10ms on all server-facing links) verified and restored.
+[1;34m[INFO][0m [DRY-RUN] Would acquire DNS lock and restore DNS baseline (0ms for A and AAAA)
+[1;34m[INFO][0m [DRY-RUN] Would remove state file .impair_state.json
+[1;32m[OK][0m System restored to baseline.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt6.
+[1;34m[INFO][0m [DRY-RUN] Would acquire DNS lock, save backup, and set delays A=0ms, AAAA=500ms
+[1;34m[INFO][0m [DRY-RUN] Would record active scenario 'S6' in .impair_state.json
+[1;32m[OK][0m Scenario S6 successfully applied.
+[1;34m[INFO][0m --- Verifying Scenario S6 (AAAA Delayed ~500ms, A Immediate) ---
+[1;34m[INFO][0m [DRY-RUN] DNS query A he.test via 10.0.1.1 -> 10.0.2.10 (3.5ms)
+[1;32m[OK][0m S6 Check 1 PASSED: A record resolved immediately (3.5ms < 100.0ms -> 10.0.2.10)
+[1;34m[INFO][0m [DRY-RUN] DNS query AAAA he.test via 10.0.1.1 -> 2001:db8:2::10 (508.0ms)
+[1;32m[OK][0m S6 Check 2 PASSED: AAAA record delayed approximately 500ms (508.0ms -> 2001:db8:2::10, delta=504.5ms)
+[1;32m[OK][0m Scenario S6 self-test verification SUCCEEDED.
+[1;34m[INFO][0m Post-scenario S6 lifecycle: clearing impairments and restoring baseline...
+[1;34m[INFO][0m Clearing impairments and restoring clean baseline...
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt nft delete table inet ps028_impair
+[1;32m[OK][0m Deleted project nftables table ps028_impair in ps028-rt.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt4 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt4.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-rt tc qdisc replace dev ps028-rt-sv6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-rt/ps028-rt-sv6.
+[1;34m[INFO][0m [DRY-RUN] Would execute: ip netns exec ps028-sv tc qdisc replace dev ps028-sv-rt6 root netem delay 10ms
+[1;32m[OK][0m Configured tc netem delay 10ms on ps028-sv/ps028-sv-rt6.
+[1;32m[OK][0m A1 baseline delays (10ms on all server-facing links) verified and restored.
+[1;34m[INFO][0m [DRY-RUN] Would acquire DNS lock and restore DNS baseline (0ms for A and AAAA)
+[1;34m[INFO][0m [DRY-RUN] Would remove state file .impair_state.json
+[1;32m[OK][0m System restored to baseline.
+[1;34m[INFO][0m Running self-test-baseline after scenario S6...
+[1;34m[INFO][0m Executing self-test-baseline verification...
+[1;32m[OK][0m Check 1 PASSED: No active scenario recorded in state file.
+[1;32m[OK][0m Check 2 PASSED: DNS configuration has baseline 0ms delays for A and AAAA.
+[1;32m[OK][0m Check 3 PASSED: No leftover impairment DNS backups found.
+[1;32m[OK][0m Check 4 PASSED: DNS server process (PID 6524) is running (verified active).
+[1;32m[OK][0m Post-scenario S6 baseline verified pristine.
+[1;34m[INFO][0m ============================================================
+[1;32m[OK][0m ALL 7 SCENARIO SELF-TESTS COMPLETED SUCCESSFULLY in 0.10s
+[1;34m[INFO][0m ============================================================
+[1;34m[INFO][0m ============================================================
+[1;34m[INFO][0m Starting Self-Test Harness for Scenario S1
+[1;34m[INFO][0m ============================================================
+[1;32m[OK][0m Scenario S1 self-test verification SUCCEEDED.
+[1;34m[INFO][0m Post-scenario S1 lifecycle: clearing impairments and restoring baseline...
+[1;34m[INFO][0m Running self-test-baseline after scenario S1...
+[1;34m[INFO][0m ============================================================[1;31m[ERROR][0m Scenario S1 self-test verification FAILED: Simulated scenario check failure
+ok
+test_lifecycle_cleanup_failure_not_suppressed_when_baseline_passes (test_self_test_scenarios.TestHarnessLifecycleAndSafety.test_lifecycle_cleanup_failure_not_suppressed_when_baseline_passes)
+Cleanup failure must NOT be suppressed even when post-scenario baseline check passes. ... [1;31m[ERROR][0m Post-scenario S1 cleanup failed: Simulated cleanup lock failure
+ok
+test_lifecycle_combined_verification_and_cleanup_failure (test_self_test_scenarios.TestHarnessLifecycleAndSafety.test_lifecycle_combined_verification_and_cleanup_failure)
+Preserve both scenario verification error and cleanup error. ... [1;31m[ERROR][0m Scenario S1 self-test verification FAILED: Original verification check failed
+[1;31m[ERROR][0m Post-scenario S1 cleanup failed: Simulated cleanup lock failure
+ok
+test_lifecycle_combined_verification_cleanup_and_baseline_failure (test_self_test_scenarios.TestHarnessLifecycleAndSafety.test_lifecycle_combined_verification_cleanup_and_baseline_failure)
+Preserve scenario verification error, cleanup error, and baseline check failure. ... [1;31m[ERROR][0m Scenario S1 self-test verification FAILED: Original verification check failed
+[1;31m[ERROR][0m Post-scenario S1 cleanup failed: Simulated cleanup lock failure
+[1;31m[ERROR][0m Post-scenario S1 baseline check exception: Baseline check probe crashed
+ok
+test_lifecycle_raises_if_post_baseline_check_fails (test_self_test_scenarios.TestHarnessLifecycleAndSafety.test_lifecycle_raises_if_post_baseline_check_fails) ... [1;31m[ERROR][0m CRITICAL: Baseline self-test failed following scenario S1 execution!
+ok
+test_lifecycle_sequence_on_success (test_self_test_scenarios.TestHarnessLifecycleAndSafety.test_lifecycle_sequence_on_success) ... ok
+test_build_s5_probe_script_syntax_and_socket_lifecycle (test_self_test_scenarios.TestNetworkProbeParsing.test_build_s5_probe_script_syntax_and_socket_lifecycle)
+Regression test: Verify build_s5_probe_script compiles cleanly with compile() ... ok
+test_measure_ping_rtt_failure_raises (test_self_test_scenarios.TestNetworkProbeParsing.test_measure_ping_rtt_failure_raises) ... ok
+test_measure_ping_rtt_ipv6_flag (test_self_test_scenarios.TestNetworkProbeParsing.test_measure_ping_rtt_ipv6_flag) ... ok
+test_measure_ping_rtt_parsing_success (test_self_test_scenarios.TestNetworkProbeParsing.test_measure_ping_rtt_parsing_success) ... ok
+test_measure_ping_rtt_realistic_ipv6_s3_output (test_self_test_scenarios.TestNetworkProbeParsing.test_measure_ping_rtt_realistic_ipv6_s3_output)
+Regression test: verify parsing of realistic Linux iputils ping output for S3 (150ms target). ... ok
+test_measure_ping_rtt_realistic_ipv6_s4_output (test_self_test_scenarios.TestNetworkProbeParsing.test_measure_ping_rtt_realistic_ipv6_s4_output)
+Regression test: verify parsing of realistic Linux iputils ping output for S4 (600ms target). ... ok
+test_measure_ping_rtt_round_trip_format_compatibility (test_self_test_scenarios.TestNetworkProbeParsing.test_measure_ping_rtt_round_trip_format_compatibility)
+Verify compatibility with 'round-trip min/avg/max/stddev' summary line. ... ok
+test_measure_syn_loss_compiles_actual_generated_script_before_execution (test_self_test_scenarios.TestNetworkProbeParsing.test_measure_syn_loss_compiles_actual_generated_script_before_execution)
+Regression test: Verify that the actual generated probe script passed to ... ok
+test_measure_syn_loss_counter_mismatch_fails_without_overwriting (test_self_test_scenarios.TestNetworkProbeParsing.test_measure_syn_loss_counter_mismatch_fails_without_overwriting)
+Regression test: fail if total_syn_count != dropped + not_dropped; never overwrite raw counters. ... ok
+test_measure_syn_loss_dry_run_consistency (test_self_test_scenarios.TestNetworkProbeParsing.test_measure_syn_loss_dry_run_consistency)
+Regression test: verify S5 dry-run derives loss percentage from dropped/total*100 and accepted=total-dropped. ... ok
+test_measure_syn_loss_dry_run_evidence_and_terminology (test_self_test_scenarios.TestNetworkProbeParsing.test_measure_syn_loss_dry_run_evidence_and_terminology)
+Regression test: dry-run marks measurement_method='dry_run_simulation', evidence.source='simulation', ... ok
+test_measure_syn_loss_infers_extra_syn_packets (test_self_test_scenarios.TestNetworkProbeParsing.test_measure_syn_loss_infers_extra_syn_packets)
+Verify measurement infers extra SYN packets: total packets > initial probe attempts. ... ok
+test_measure_syn_loss_live_with_nftables_evidence (test_self_test_scenarios.TestNetworkProbeParsing.test_measure_syn_loss_live_with_nftables_evidence) ... ok
+test_probe_http_status_parsing (test_self_test_scenarios.TestNetworkProbeParsing.test_probe_http_status_parsing) ... ok
+test_probe_tcp_connect_outcomes (test_self_test_scenarios.TestNetworkProbeParsing.test_probe_tcp_connect_outcomes) ... ok
+test_query_dns_with_timing_malformed_query_time_raises (test_self_test_scenarios.TestNetworkProbeParsing.test_query_dns_with_timing_malformed_query_time_raises)
+Verify ImpairmentError is raised if query-time field is malformed. ... ok
+test_query_dns_with_timing_missing_query_time_raises (test_self_test_scenarios.TestNetworkProbeParsing.test_query_dns_with_timing_missing_query_time_raises)
+Verify ImpairmentError is raised if query-time line is missing from dig stdout. ... ok
+test_query_dns_with_timing_normal_query_time (test_self_test_scenarios.TestNetworkProbeParsing.test_query_dns_with_timing_normal_query_time)
+Verify parsing a normal query-time line from dig stdout. ... ok
+test_query_dns_with_timing_parsing_a_and_aaaa (test_self_test_scenarios.TestNetworkProbeParsing.test_query_dns_with_timing_parsing_a_and_aaaa) ... ok
+test_query_dns_with_timing_zero_milliseconds (test_self_test_scenarios.TestNetworkProbeParsing.test_query_dns_with_timing_zero_milliseconds)
+Verify parsing zero milliseconds (0 msec) resolution duration. ... ok
+test_read_s5_nftables_counters_both_formats_command_failure_raises (test_self_test_scenarios.TestNetworkProbeParsing.test_read_s5_nftables_counters_both_formats_command_failure_raises)
+Regression test: raise ImpairmentError if both format commands fail. ... ok
+test_read_s5_nftables_counters_json (test_self_test_scenarios.TestNetworkProbeParsing.test_read_s5_nftables_counters_json) ... ok
+test_read_s5_nftables_counters_malformed_json_falls_back_to_valid_text (test_self_test_scenarios.TestNetworkProbeParsing.test_read_s5_nftables_counters_malformed_json_falls_back_to_valid_text)
+Regression test: malformed JSON format cleanly falls back to text format. ... ok
+test_read_s5_nftables_counters_malformed_raises (test_self_test_scenarios.TestNetworkProbeParsing.test_read_s5_nftables_counters_malformed_raises)
+Regression test: raise ImpairmentError if counters are malformed in both formats. ... ok
+test_read_s5_nftables_counters_missing_counter_raises (test_self_test_scenarios.TestNetworkProbeParsing.test_read_s5_nftables_counters_missing_counter_raises)
+Regression test: raise ImpairmentError if any required named counter is missing from both formats. ... ok
+test_read_s5_nftables_counters_text_fallback (test_self_test_scenarios.TestNetworkProbeParsing.test_read_s5_nftables_counters_text_fallback) ... ok
+test_s5_probe_script_detects_malformed_syntax_error (test_self_test_scenarios.TestNetworkProbeParsing.test_s5_probe_script_detects_malformed_syntax_error)
+Regression test: Verify compile() catches the malformed unindented finally ... ok
+test_setup_s5_nftables_counters_consistent_filters (test_self_test_scenarios.TestNetworkProbeParsing.test_setup_s5_nftables_counters_consistent_filters)
+Regression test: verify consistent filters (client IP, server IP, dport, SYN flags, oifname) on all 3 counters. ... ok
+test_cli_probes_rejection_in_impair (test_self_test_scenarios.TestProbeCountValidation.test_cli_probes_rejection_in_impair) ... usage: python3 -m unittest test-scenarios [-h]
+                                          [--scenarios-file SCENARIOS_FILE]
+                                          [--dry-run] [--scenario SCENARIO]
+                                          [--scenarios SCENARIOS]
+                                          [--probes PROBES] [--json]
+python3 -m unittest test-scenarios: error: argument --probes: Probe count must be a positive integer (> 0), got 0
+usage: python3 -m unittest test-scenarios [-h]
+                                          [--scenarios-file SCENARIOS_FILE]
+                                          [--dry-run] [--scenario SCENARIO]
+                                          [--scenarios SCENARIOS]
+                                          [--probes PROBES] [--json]
+python3 -m unittest test-scenarios: error: argument --probes: Probe count must be a positive integer (> 0), got -5
+ok
+test_cli_probes_rejection_in_sts (test_self_test_scenarios.TestProbeCountValidation.test_cli_probes_rejection_in_sts) ... usage: python3 -m unittest [-h] [--scenarios-file SCENARIOS_FILE]
+                           [--scenario SCENARIO] [--scenarios SCENARIOS]
+                           [--probes PROBES] [--dry-run] [--json]
+python3 -m unittest: error: argument --probes: Probe count must be a positive integer (> 0), got 0
+usage: python3 -m unittest [-h] [--scenarios-file SCENARIOS_FILE]
+                           [--scenario SCENARIO] [--scenarios SCENARIOS]
+                           [--probes PROBES] [--dry-run] [--json]
+python3 -m unittest: error: argument --probes: Probe count must be a positive integer (> 0), got -10
+ok
+test_measure_syn_loss_rejects_invalid_probes (test_self_test_scenarios.TestProbeCountValidation.test_measure_syn_loss_rejects_invalid_probes) ... ok
+test_run_all_self_tests_rejects_invalid_probes_without_applying (test_self_test_scenarios.TestProbeCountValidation.test_run_all_self_tests_rejects_invalid_probes_without_applying)
+Reject probe_count <= 0 in run_all_self_tests before applying any scenario. ... ok
+test_run_scenario_self_test_rejects_invalid_probes_without_applying (test_self_test_scenarios.TestProbeCountValidation.test_run_scenario_self_test_rejects_invalid_probes_without_applying)
+Reject probe_count <= 0 before applying any scenario. ... ok
+test_validate_probe_count_invalid_values (test_self_test_scenarios.TestProbeCountValidation.test_validate_probe_count_invalid_values) ... ok
+test_validate_probe_count_valid (test_self_test_scenarios.TestProbeCountValidation.test_validate_probe_count_valid) ... ok
+test_verify_s5_rejects_invalid_probes (test_self_test_scenarios.TestProbeCountValidation.test_verify_s5_rejects_invalid_probes) ... ok
+test_verify_s0_dns_failure (test_self_test_scenarios.TestScenarioVerifiers.test_verify_s0_dns_failure) ... ok
+test_verify_s0_latency_out_of_bounds (test_self_test_scenarios.TestScenarioVerifiers.test_verify_s0_latency_out_of_bounds) ... ok
+test_verify_s0_success (test_self_test_scenarios.TestScenarioVerifiers.test_verify_s0_success) ... ok
+test_verify_s1_failure_if_ipv6_connects (test_self_test_scenarios.TestScenarioVerifiers.test_verify_s1_failure_if_ipv6_connects) ... ok
+test_verify_s1_ipv4_succeeds_ipv6_times_out (test_self_test_scenarios.TestScenarioVerifiers.test_verify_s1_ipv4_succeeds_ipv6_times_out) ... ok
+test_verify_s2_failure_if_timed_out_instead_of_rst (test_self_test_scenarios.TestScenarioVerifiers.test_verify_s2_failure_if_timed_out_instead_of_rst) ... ok
+test_verify_s2_ipv4_succeeds_ipv6_rst (test_self_test_scenarios.TestScenarioVerifiers.test_verify_s2_ipv4_succeeds_ipv6_rst) ... ok
+test_verify_s3_150ms_rtt (test_self_test_scenarios.TestScenarioVerifiers.test_verify_s3_150ms_rtt) ... ok
+test_verify_s3_failure_if_rtt_wrong (test_self_test_scenarios.TestScenarioVerifiers.test_verify_s3_failure_if_rtt_wrong) ... ok
+test_verify_s3_faulty_doubled_measurement_fails (test_self_test_scenarios.TestScenarioVerifiers.test_verify_s3_faulty_doubled_measurement_fails)
+Regression test: S3 must reject 2x doubled live ping value (300.62ms). ... ok
+test_verify_s3_faulty_measurement_301ms_fails (test_self_test_scenarios.TestScenarioVerifiers.test_verify_s3_faulty_measurement_301ms_fails)
+Regression test: S3 must reject the faulty ~2x measurement (301.00ms) from evidence. ... ok
+test_verify_s3_live_ping_evidence_success (test_self_test_scenarios.TestScenarioVerifiers.test_verify_s3_live_ping_evidence_success)
+Verify S3 passes when ping measures 150.309ms (real live evidence) and 20.229ms IPv4. ... ok
+test_verify_s4_600ms_rtt (test_self_test_scenarios.TestScenarioVerifiers.test_verify_s4_600ms_rtt) ... ok
+test_verify_s4_faulty_measurement_fails (test_self_test_scenarios.TestScenarioVerifiers.test_verify_s4_faulty_measurement_fails)
+Regression test: S4 must reject faulty/doubled measurement (~1200ms) or baseline (~20ms). ... ok
+test_verify_s4_realistic_live_ping_evidence_success (test_self_test_scenarios.TestScenarioVerifiers.test_verify_s4_realistic_live_ping_evidence_success)
+Verify S4 passes when ping measures realistic 600.412ms and 20.229ms IPv4. ... ok
+test_verify_s5_dry_run_consistency (test_self_test_scenarios.TestScenarioVerifiers.test_verify_s5_dry_run_consistency)
+Regression test: verify_s5 in dry-run mode returns consistent counts and percentages. ... ok
+test_verify_s5_inconsistent_percentage_accounting_error (test_self_test_scenarios.TestScenarioVerifiers.test_verify_s5_inconsistent_percentage_accounting_error)
+Regression test: verify_s5 rejects inconsistent counts and percentages (e.g. 10/20 reporting 48%). ... ok
+test_verify_s5_syn_loss_variation_success (test_self_test_scenarios.TestScenarioVerifiers.test_verify_s5_syn_loss_variation_success) ... ok
+test_verify_s5_zero_loss_failure (test_self_test_scenarios.TestScenarioVerifiers.test_verify_s5_zero_loss_failure) ... ok
+test_verify_s6_a_immediate_aaaa_delayed_500ms (test_self_test_scenarios.TestScenarioVerifiers.test_verify_s6_a_immediate_aaaa_delayed_500ms) ... 
+[1;34m[INFO][0m Starting Self-Test Harness for Scenario S1
+[1;34m[INFO][0m ============================================================
+[1;34m[INFO][0m Post-scenario S1 lifecycle: clearing impairments and restoring baseline...
+[1;34m[INFO][0m Running self-test-baseline after scenario S1...
+[1;32m[OK][0m Post-scenario S1 baseline verified pristine.
+[1;34m[INFO][0m ============================================================
+[1;34m[INFO][0m Starting Self-Test Harness for Scenario S1
+[1;34m[INFO][0m ============================================================
+[1;32m[OK][0m Scenario S1 self-test verification SUCCEEDED.
+[1;34m[INFO][0m Post-scenario S1 lifecycle: clearing impairments and restoring baseline...
+[1;34m[INFO][0m Running self-test-baseline after scenario S1...
+[1;32m[OK][0m Post-scenario S1 baseline verified pristine.
+[1;34m[INFO][0m ============================================================
+[1;34m[INFO][0m Starting Self-Test Harness for Scenario S1
+[1;34m[INFO][0m ============================================================
+[1;34m[INFO][0m Post-scenario S1 lifecycle: clearing impairments and restoring baseline...
+[1;34m[INFO][0m Running self-test-baseline after scenario S1...
+[1;32m[OK][0m Post-scenario S1 baseline verified pristine.
+[1;34m[INFO][0m ============================================================
+[1;34m[INFO][0m Starting Self-Test Harness for Scenario S1
+[1;34m[INFO][0m ============================================================
+[1;34m[INFO][0m Post-scenario S1 lifecycle: clearing impairments and restoring baseline...
+[1;34m[INFO][0m Running self-test-baseline after scenario S1...
+[1;34m[INFO][0m ============================================================
+[1;34m[INFO][0m Starting Self-Test Harness for Scenario S1
+[1;34m[INFO][0m ============================================================
+[1;32m[OK][0m Scenario S1 self-test verification SUCCEEDED.
+[1;34m[INFO][0m Post-scenario S1 lifecycle: clearing impairments and restoring baseline...
+[1;34m[INFO][0m Running self-test-baseline after scenario S1...
+[1;34m[INFO][0m ============================================================
+[1;34m[INFO][0m Starting Self-Test Harness for Scenario S1
+[1;34m[INFO][0m ============================================================
+[1;32m[OK][0m Scenario S1 self-test verification SUCCEEDED.
+[1;34m[INFO][0m Post-scenario S1 lifecycle: clearing impairments and restoring baseline...
+[1;34m[INFO][0m Running self-test-baseline after scenario S1...
+[1;32m[OK][0m Post-scenario S1 baseline verified pristine.
+[1;34m[INFO][0m S5 Evidence [nftables counters]: total=50 (probes=50, inferred_extra_syn=0), dropped=25, not_dropped=25, loss=50.0%
+[1;34m[INFO][0m [DRY-RUN] S5 SYN Loss (simulated counts): simulated_total=20, simulated_dropped=10, simulated_accepted=10, simulated_not_dropped=10, simulated_loss=50.0%
+[1;34m[INFO][0m [DRY-RUN] S5 SYN Loss (simulated counts): simulated_total=50, simulated_dropped=24, simulated_accepted=26, simulated_not_dropped=26, simulated_loss=48.0%
+[1;34m[INFO][0m [DRY-RUN] S5 SYN Loss (simulated counts): simulated_total=25, simulated_dropped=12, simulated_accepted=13, simulated_not_dropped=13, simulated_loss=48.0%
+[1;34m[INFO][0m [DRY-RUN] S5 SYN Loss (simulated counts): simulated_total=30, simulated_dropped=15, simulated_accepted=15, simulated_not_dropped=15, simulated_loss=50.0%
+[1;34m[INFO][0m S5 Evidence [nftables counters]: total=60 (probes=50, inferred_extra_syn=10), dropped=30, not_dropped=30, loss=50.0%
+[1;34m[INFO][0m S5 Evidence [nftables counters]: total=50 (probes=50, inferred_extra_syn=0), dropped=24, not_dropped=26, loss=48.0%
+[1;32m[OK][0m Configured project-scoped nftables counters in ps028-rt -> ps028_impair.
+[1;34m[INFO][0m --- Verifying Scenario S0 (Healthy Baseline) ---
+[1;34m[INFO][0m --- Verifying Scenario S0 (Healthy Baseline) ---
+[1;32m[OK][0m S0 Check 1 PASSED: DNS A=10.0.2.10 (3.0ms), AAAA=2001:db8:2::10 (3.5ms)
+[1;34m[INFO][0m --- Verifying Scenario S0 (Healthy Baseline) ---
+[1;32m[OK][0m S0 Check 1 PASSED: DNS A=10.0.2.10 (3.0ms), AAAA=2001:db8:2::10 (3.5ms)
+[1;32m[OK][0m S0 Check 2 PASSED: Baseline Latency IPv4 RTT=20.10ms, IPv6 RTT=20.20ms
+[1;32m[OK][0m S0 Check 3 PASSED: Dual-Stack HTTP 200 OK on IPv4, IPv6, and he.test
+[1;34m[INFO][0m --- Verifying Scenario S1 (IPv6 SYN Blackhole) ---
+[1;32m[OK][0m S1 Check 1 PASSED: IPv4 HTTP succeeded (200 OK, 20.0ms)
+[1;34m[INFO][0m --- Verifying Scenario S1 (IPv6 SYN Blackhole) ---
+[1;32m[OK][0m S1 Check 1 PASSED: IPv4 HTTP succeeded (200 OK, 20.0ms)
+[1;32m[OK][0m S1 Check 2 PASSED: IPv6 TCP SYN timed out after 1.50s (silent blackhole drop verified)
+[1;34m[INFO][0m --- Verifying Scenario S2 (IPv6 TCP RST Rejection) ---
+[1;32m[OK][0m S2 Check 1 PASSED: IPv4 HTTP succeeded (200 OK) with baseline RTT 20.10ms
+[1;34m[INFO][0m --- Verifying Scenario S2 (IPv6 TCP RST Rejection) ---
+[1;32m[OK][0m S2 Check 1 PASSED: IPv4 HTTP succeeded (200 OK) with baseline RTT 20.10ms
+[1;32m[OK][0m S2 Check 2 PASSED: IPv6 TCP SYN actively rejected with TCP RST in 5.0ms
+[1;34m[INFO][0m --- Verifying Scenario S3 (IPv6 RTT 150ms) ---
+[1;32m[OK][0m S3 Check 1 PASSED: Latency verified (IPv6 RTT=150.30ms ~150ms, IPv4 RTT=20.20ms ~baseline)
+[1;32m[OK][0m S3 Check 2 PASSED: Dual-stack HTTP 200 OK on both IPv4 and IPv6
+[1;34m[INFO][0m --- Verifying Scenario S3 (IPv6 RTT 150ms) ---
+[1;34m[INFO][0m --- Verifying Scenario S3 (IPv6 RTT 150ms) ---
+[1;34m[INFO][0m --- Verifying Scenario S3 (IPv6 RTT 150ms) ---
+[1;34m[INFO][0m --- Verifying Scenario S3 (IPv6 RTT 150ms) ---
+[1;32m[OK][0m S3 Check 1 PASSED: Latency verified (IPv6 RTT=150.31ms ~150ms, IPv4 RTT=20.23ms ~baseline)
+[1;32m[OK][0m S3 Check 2 PASSED: Dual-stack HTTP 200 OK on both IPv4 and IPv6
+[1;34m[INFO][0m --- Verifying Scenario S4 (IPv6 RTT 600ms) ---
+[1;32m[OK][0m S4 Check 1 PASSED: Latency verified (IPv6 RTT=600.40ms ~600ms, IPv4 RTT=20.20ms ~baseline)
+[1;32m[OK][0m S4 Check 2 PASSED: Dual-stack HTTP 200 OK on both IPv4 and IPv6
+[1;34m[INFO][0m --- Verifying Scenario S4 (IPv6 RTT 600ms) ---
+[1;34m[INFO][0m --- Verifying Scenario S4 (IPv6 RTT 600ms) ---
+[1;34m[INFO][0m --- Verifying Scenario S4 (IPv6 RTT 600ms) ---
+[1;32m[OK][0m S4 Check 1 PASSED: Latency verified (IPv6 RTT=600.41ms ~600ms, IPv4 RTT=20.23ms ~baseline)
+[1;32m[OK][0m S4 Check 2 PASSED: Dual-stack HTTP 200 OK on both IPv4 and IPv6
+[1;34m[INFO][0m --- Verifying Scenario S5 (IPv6 SYN Loss 50%, 20 probes) ---
+[1;34m[INFO][0m [DRY-RUN] S5 SYN Loss (simulated counts): simulated_total=20, simulated_dropped=10, simulated_accepted=10, simulated_not_dropped=10, simulated_loss=50.0%
+[1;32m[OK][0m [DRY-RUN] S5 PASSED (simulated counts): simulated SYN packet count=20 (initial probes=20, extra SYN packets=0), simulated dropped packets=10, simulated not-dropped packets=10, simulated loss percentage=50.0% (target ~50% random loss)
+[1;34m[INFO][0m --- Verifying Scenario S5 (IPv6 SYN Loss 50%, 50 probes) ---
+[1;34m[INFO][0m [DRY-RUN] S5 SYN Loss (simulated counts): simulated_total=50, simulated_dropped=24, simulated_accepted=26, simulated_not_dropped=26, simulated_loss=48.0%
+[1;32m[OK][0m [DRY-RUN] S5 PASSED (simulated counts): simulated SYN packet count=50 (initial probes=50, extra SYN packets=0), simulated dropped packets=24, simulated not-dropped packets=26, simulated loss percentage=48.0% (target ~50% random loss)
+[1;34m[INFO][0m --- Verifying Scenario S5 (IPv6 SYN Loss 50%, 20 probes) ---
+[1;34m[INFO][0m --- Verifying Scenario S5 (IPv6 SYN Loss 50%, 50 probes) ---
+[1;32m[OK][0m S5 PASSED: SYN packet count=50 (initial probes=50, extra SYN packets=0), dropped packets=24, not-dropped packets=26, observed loss percentage=48.0% (target ~50% random loss)
+[1;34m[INFO][0m --- Verifying Scenario S5 (IPv6 SYN Loss 50%, 50 probes) ---
+[1;34m[INFO][0m --- Verifying Scenario S6 (AAAA Delayed ~500ms, A Immediate) ---
+[1;32m[OK][0m S6 Check 1 PASSED: A record resolved immediately (3.2ms < 100.0ms -> 10.0.2.10)
+[1;32m[OK][0m S6 Check 2 PASSED: AAAA record delayed approximately 500ms (508.5ms -> 2001:db8:2::10, delta=505.3ms)ok
+test_verify_s6_failure_if_aaaa_not_delayed (test_self_test_scenarios.TestScenarioVerifiers.test_verify_s6_failure_if_aaaa_not_delayed) ... ok
+test_clean_owned_resolver_matching_source (test_teardown.TestSafeTeardown.test_clean_owned_resolver_matching_source)
+Resolver created by PS-028 matching source must be removed. ... ok
+test_clean_owned_resolver_preserves_externally_modified (test_teardown.TestSafeTeardown.test_clean_owned_resolver_preserves_externally_modified)
+Resolver file modified externally must be preserved while cleaning project marker. ... [1;33m[WARN][0m /tmp/ps028_teardown_test__55kda45/resolv.conf was modified externally; preserving file.
+ok
+test_clean_resolver_without_marker_leaves_files_untouched (test_teardown.TestSafeTeardown.test_clean_resolver_without_marker_leaves_files_untouched)
+Without project marker, resolver configuration must never be touched. ... ok
+test_dns_backup_restore_failure_prevents_topology_deletion (test_teardown.TestSafeTeardown.test_dns_backup_restore_failure_prevents_topology_deletion)
+Regression Test 3c: Lingering DNS backup restore failure preventing topology deletion. ... [1;33m[WARN][0m Impairment/DNS restoration failed. Verifying whether lab is already at baseline...
+[1;31m[ERROR][0m Lab baseline could not be verified following restoration failure. Aborting namespace deletion to prevent inconsistent state.
+[1;33m[WARN][0m Permission denied deleting /etc/netns/ps028-cl/resolv.conf; skipping (requires root).
+[1;33m[WARN][0m Skipping removal of project network namespaces because restoration failed or active scenario could not be cleared.
+[1;31m[ERROR][0m Teardown finished with errors: ['restore_dns_backup:dns_config.json.impair_bak:Simulated backup copy error', 'abort_topology_deletion:baseline_not_verified']
+ok
+test_external_lock_contention (test_teardown.TestSafeTeardown.test_external_lock_contention)
+Regression Test 2: External lock contention. ... 
+[1;34m[INFO][0m --- Verifying Scenario S6 (AAAA Delayed ~500ms, A Immediate) ---
+[1;32m[OK][0m S6 Check 1 PASSED: A record resolved immediately (3.2ms < 100.0ms -> 10.0.2.10)
+[1;32m[OK][0m Removed owned resolver configuration /tmp/ps028_teardown_test_8ficeu__/resolv.conf.
+[1;34m[INFO][0m No project resolver marker found; leaving external resolver untouched.
+[1;34m[INFO][0m Initiating safe teardown (dry_run=False)...
+[1;34m[INFO][0m Teardown Stage 1: Restoring impairments and DNS (topology LIVE)...
+[1;34m[INFO][0m Teardown Stage 2: Stopping verified lab-managed services...
+[1;34m[INFO][0m Teardown Stage 3: Cleaning owned client resolver configuration...
+[1;34m[INFO][0m Teardown Stage 4: Removing project network namespaces and interfaces...
+[1;34m[INFO][0m Initiating safe teardown (dry_run=True)...
+ok
+test_regression_absent_topology_idempotence (test_teardown.TestSafeTeardown.test_regression_absent_topology_idempotence)
+Regression Test: Absent topology idempotence (Requirement 1 & 4). ... [1;33m[WARN][0m Permission denied deleting /etc/netns/ps028-cl/resolv.conf; skipping (requires root).
+ok
+test_regression_active_scenario_safe_clear (test_teardown.TestSafeTeardown.test_regression_active_scenario_safe_clear)
+Regression Test: Active scenario safely cleared (Requirement 3 & 4). ... ok
+test_regression_active_scenario_uncleared_prevents_topology_deletion (test_teardown.TestSafeTeardown.test_regression_active_scenario_uncleared_prevents_topology_deletion)
+Regression Test: Active scenario uncleared prevents topology deletion (Requirement 3 & 4). ... [1;31m[ERROR][0m Error during impairment clear: Failed to clear nftables
+[1;31m[ERROR][0m Active scenario 'S1' could not be cleared.
+[1;31m[ERROR][0m Active scenario could not be safely cleared. Aborting topology deletion to prevent inconsistent state.
+[1;33m[WARN][0m Permission denied deleting /etc/netns/ps028-cl/resolv.conf; skipping (requires root).
+[1;33m[WARN][0m Skipping removal of project network namespaces because restoration failed or active scenario could not be cleared.
+[1;31m[ERROR][0m Teardown finished with errors: ['impairments_clear:Failed to clear nftables', 'abort_topology_deletion:active_scenario_not_cleared', 'stop_dns:Failed to signal Controlled DNS Server (PID 6524): [Errno 1] Operation not permitted', 'stop_nginx:Failed to signal Nginx Measurement Endpoint (PID 6563): [Errno 1] Operation not permitted']
+ok
+test_regression_fresh_setup_bootstrap_idempotence (test_teardown.TestSafeTeardown.test_regression_fresh_setup_bootstrap_idempotence)
+Regression Test: Fresh setup bootstrap idempotence (Requirement 1, 4). ... [1;33m[WARN][0m Permission denied deleting /etc/netns/ps028-cl/resolv.conf; skipping (requires root).
+ok
+test_regression_partial_topology_restoration_failure_preserves_topology (test_teardown.TestSafeTeardown.test_regression_partial_topology_restoration_failure_preserves_topology)
+Regression Test: Partial topology preservation (Requirement 3 & 4). ... [1;31m[ERROR][0m Error during impairment clear: Cannot open netns ps028-rt
+[1;31m[ERROR][0m Restoration failed on partial topology. Aborting namespace deletion to prevent inconsistent state.
+[1;33m[WARN][0m Permission denied deleting /etc/netns/ps028-cl/resolv.conf; skipping (requires root).
+[1;33m[WARN][0m Skipping removal of project network namespaces because restoration failed or active scenario could not be cleared.
+[1;31m[ERROR][0m Teardown finished with errors: ['impairments_clear:Cannot open netns ps028-rt', 'abort_topology_deletion:restoration_failed_partial_topology', 'stop_dns:Failed to signal Controlled DNS Server (PID 6524): [Errno 1] Operation not permitted', 'stop_nginx:Failed to signal Nginx Measurement Endpoint (PID 6563): [Errno 1] Operation not permitted']
+ok
+test_regression_reconcile_dns_backups_cleans_tmp_and_resets_delays (test_teardown.TestSafeTeardown.test_regression_reconcile_dns_backups_cleans_tmp_and_resets_delays)
+Regression Test: Reconcile DNS backups (Requirement 2 & 4). ... ok
+test_regression_stop_process_rejects_unverified_pid (test_teardown.TestSafeTeardown.test_regression_stop_process_rejects_unverified_pid)
+Regression Test: Stop only verified project-managed services (Requirement 2 & 4). ... [1;33m[WARN][0m PID 12345 in dns.pid is not a verified Controlled DNS Server (cmdline_mismatch:expected dns_server.py in /bin/bash). Refusing to terminate unrelated process.
+ok
+test_remove_project_topology_collects_failures (test_teardown.TestSafeTeardown.test_remove_project_topology_collects_failures)
+Failed namespace deletions must be recorded in failures list. ... [1;31m[ERROR][0m Failed to delete namespace ps028-rt: Cannot delete netns ps028-rt: Device busy
+ok
+test_remove_project_topology_only_targets_project_resources (test_teardown.TestSafeTeardown.test_remove_project_topology_only_targets_project_resources)
+Topology destruction must strictly delete ps028-* namespaces and interfaces. ... ok
+test_restoration_failure_allows_topology_deletion_if_baseline_verified (test_teardown.TestSafeTeardown.test_restoration_failure_allows_topology_deletion_if_baseline_verified)
+Regression Test 3b: Restoration failure allowing topology deletion when baseline verified. ... [1;31m[ERROR][0m Error during impairment clear: Simulated minor clear error
+[1;33m[WARN][0m Impairment/DNS restoration failed. Verifying whether lab is already at baseline...
+[1;31m[ERROR][0m Teardown finished with errors: ['impairments_clear:Simulated minor clear error']
+ok
+test_restoration_failure_preventing_topology_deletion (test_teardown.TestSafeTeardown.test_restoration_failure_preventing_topology_deletion)
+Regression Test 3a: Restoration failure preventing topology deletion. ... [1;31m[ERROR][0m Error during impairment clear: Simulated impairment clear failure
+[1;33m[WARN][0m Impairment/DNS restoration failed. Verifying whether lab is already at baseline...
+[1;31m[ERROR][0m Lab baseline could not be verified following restoration failure. Aborting namespace deletion to prevent inconsistent state.
+[1;33m[WARN][0m Skipping removal of project network namespaces because restoration failed or active scenario could not be cleared.
+[1;31m[ERROR][0m Teardown finished with errors: ['impairments_clear:Simulated impairment clear failure', 'abort_topology_deletion:baseline_not_verified']
+ok
+test_stop_process_by_pid_file_unlinks_stale (test_teardown.TestSafeTeardown.test_stop_process_by_pid_file_unlinks_stale)
+Stale PID in pid_file must be unlinked safely. ... ok
+test_stop_process_dry_run_preserves_pid_file (test_teardown.TestSafeTeardown.test_stop_process_dry_run_preserves_pid_file)
+Dry-run must not unlink or kill running PID. ... ok
+test_successful_nested_cleanup_under_teardown_lock (test_teardown.TestSafeTeardown.test_successful_nested_cleanup_under_teardown_lock)
+Regression Test 1: Successful nested cleanup under the teardown lock. ... ok
+test_successful_ordered_teardown (test_teardown.TestSafeTeardown.test_successful_ordered_teardown)
+Regression Test 4: Successful ordered teardown. ... ok
+test_teardown_acquires_and_releases_lab_lock (test_teardown.TestSafeTeardown.test_teardown_acquires_and_releases_lab_lock)
+Teardown must execute under the shared lab-wide lock. ... ok
+test_teardown_fails_on_active_lock_contention (test_teardown.TestSafeTeardown.test_teardown_fails_on_active_lock_contention)
+Teardown must refuse to run if another process holds the lab lock. ... [1;32m[OK][0m Restored and reconciled dns_config.json from dns_config.json.impair_bak
+[1;32m[OK][0m Teardown completed successfully. Unrelated host resources preserved.
+[1;34m[INFO][0m Initiating safe teardown (dry_run=True)...
+[1;34m[INFO][0m Teardown Stage 1: Restoring impairments and DNS (topology LIVE)...
+[1;34m[INFO][0m Teardown Stage 2: Stopping verified lab-managed services...
+[1;34m[INFO][0m [DRY-RUN] Would terminate Controlled DNS Server (PID 6524) and unlink dns.pid
+[1;34m[INFO][0m [DRY-RUN] Would terminate Nginx Measurement Endpoint (PID 6563) and unlink nginx.pid
+[1;34m[INFO][0m Teardown Stage 3: Cleaning owned client resolver configuration...
+[1;34m[INFO][0m [DRY-RUN] Would remove owned resolver file /etc/netns/ps028-cl/resolv.conf and marker .resolv_installed_by_ps028
+[1;34m[INFO][0m Teardown Stage 4: Removing project network namespaces and interfaces...
+[1;32m[OK][0m Teardown completed successfully. Unrelated host resources preserved.
+[1;34m[INFO][0m Initiating safe teardown (dry_run=False)...
+[1;34m[INFO][0m Teardown Stage 1: Restoring impairments and DNS (topology LIVE)...
+[1;34m[INFO][0m Teardown Stage 2: Stopping verified lab-managed services...
+[1;34m[INFO][0m Teardown Stage 3: Cleaning owned client resolver configuration...
+[1;34m[INFO][0m Teardown Stage 4: Removing project network namespaces and interfaces...
+[1;34m[INFO][0m Initiating safe teardown (dry_run=False)...
+[1;34m[INFO][0m Lab topology is absent; skipping namespace operations and live baseline checks.
+[1;34m[INFO][0m Teardown Stage 3: Cleaning owned client resolver configuration...
+[1;34m[INFO][0m Teardown Stage 4: Removing project network namespaces and interfaces...
+[1;32m[OK][0m Teardown completed successfully. Unrelated host resources preserved.
+[1;34m[INFO][0m Initiating safe teardown (dry_run=False)...
+[1;34m[INFO][0m Teardown Stage 1: Restoring impairments and DNS (topology PARTIAL)...
+[1;34m[INFO][0m Teardown Stage 2: Stopping verified lab-managed services...
+[1;34m[INFO][0m Teardown Stage 3: Cleaning owned client resolver configuration...
+[1;34m[INFO][0m Teardown Stage 4: Removing project network namespaces and interfaces...
+[1;32m[OK][0m Reset non-zero DNS delays to 0ms baseline in dns_config.json
+[1;32m[OK][0m Deleted project namespace: ps028-cl
+[1;32m[OK][0m Deleted project namespace: ps028-rt
+[1;32m[OK][0m Deleted project namespace: ps028-sv
+[1;32m[OK][0m Deleted dangling host interface: ps028-cl-rt
+[1;32m[OK][0m Deleted dangling host interface: ps028-rt-cl
+[1;34m[INFO][0m Initiating safe teardown (dry_run=True)...
+[1;34m[INFO][0m Teardown Stage 1: Restoring impairments and DNS (topology LIVE)...
+[1;32m[OK][0m Separate verification proved lab is already at baseline despite restoration failure.
+[1;34m[INFO][0m Teardown Stage 2: Stopping verified lab-managed services...
+[1;34m[INFO][0m [DRY-RUN] Would terminate Controlled DNS Server (PID 6524) and unlink dns.pid
+[1;34m[INFO][0m [DRY-RUN] Would terminate Nginx Measurement Endpoint (PID 6563) and unlink nginx.pid
+[1;34m[INFO][0m Teardown Stage 3: Cleaning owned client resolver configuration...
+[1;34m[INFO][0m [DRY-RUN] Would remove owned resolver file /etc/netns/ps028-cl/resolv.conf and marker .resolv_installed_by_ps028
+[1;34m[INFO][0m Teardown Stage 4: Removing project network namespaces and interfaces...
+[1;34m[INFO][0m Initiating safe teardown (dry_run=True)...
+[1;34m[INFO][0m Teardown Stage 1: Restoring impairments and DNS (topology LIVE)...
+[1;34m[INFO][0m Teardown Stage 2: Stopping verified lab-managed services...
+[1;34m[INFO][0m [DRY-RUN] Would terminate Controlled DNS Server (PID 6524) and unlink dns.pid
+[1;34m[INFO][0m [DRY-RUN] Would terminate Nginx Measurement Endpoint (PID 6563) and unlink nginx.pid
+[1;34m[INFO][0m Teardown Stage 3: Cleaning owned client resolver configuration...
+[1;34m[INFO][0m [DRY-RUN] Would remove owned resolver file /etc/netns/ps028-cl/resolv.conf and marker .resolv_installed_by_ps028
+[1;34m[INFO][0m Teardown Stage 4: Removing project network namespaces and interfaces...
+[1;34m[INFO][0m Cleaned stale PID file for inactive Controlled DNS Server (PID 999999).
+[1;34m[INFO][0m [DRY-RUN] Would terminate Controlled DNS Server (PID 154686) and unlink dns.pid
+[1;34m[INFO][0m Initiating safe teardown (dry_run=True)...
+[1;34m[INFO][0m Teardown Stage 1: Restoring impairments and DNS (topology LIVE)...
+[1;34m[INFO][0m Clearing impairments and restoring clean baseline...
+[1;32m[OK][0m System restored to baseline.
+[1;34m[INFO][0m Teardown Stage 2: Stopping verified lab-managed services...
+[1;34m[INFO][0m [DRY-RUN] Would terminate Controlled DNS Server (PID 6524) and unlink dns.pid
+[1;34m[INFO][0m [DRY-RUN] Would terminate Nginx Measurement Endpoint (PID 6563) and unlink nginx.pid
+[1;34m[INFO][0m Teardown Stage 3: Cleaning owned client resolver configuration...
+[1;34m[INFO][0m [DRY-RUN] Would remove owned resolver file /etc/netns/ps028-cl/resolv.conf and marker .resolv_installed_by_ps028
+[1;34m[INFO][0m Teardown Stage 4: Removing project network namespaces and interfaces...
+[1;32m[OK][0m Teardown completed successfully. Unrelated host resources preserved.
+[1;34m[INFO][0m Initiating safe teardown (dry_run=True)...
+[1;34m[INFO][0m Teardown Stage 1: Restoring impairments and DNS (topology LIVE)...
+[1;34m[INFO][0m Teardown Stage 2: Stopping verified lab-managed services...
+[1;34m[INFO][0m Teardown Stage 3: Cleaning owned client resolver configuration...
+[1;34m[INFO][0m Teardown Stage 4: Removing project network namespaces and interfaces...
+[1;32m[OK][0m Teardown completed successfully. Unrelated host resources preserved.
+[1;34m[INFO][0m Initiating safe teardown (dry_run=True)...
+[1;34m[INFO][0m Teardown Stage 1: Restoring impairments and DNS (topology LIVE)...
+[1;34m[INFO][0m Teardown Stage 2: Stopping verified lab-managed services...
+[1;34m[INFO][0m [DRY-RUN] Would terminate Controlled DNS Server (PID 6524) and unlink dns.pid
+[1;34m[INFO][0m [DRY-RUN] Would terminate Nginx Measurement Endpoint (PID 6563) and unlink nginx.pid
+[1;34m[INFO][0m Teardown Stage 3: Cleaning owned client resolver configuration...
+[1;34m[INFO][0m [DRY-RUN] Would remove owned resolver file /etc/netns/ps028-cl/resolv.conf and marker .resolv_installed_by_ps028
+[1;34m[INFO][0m Teardown Stage 4: Removing project network namespaces and interfaces...
+[1;32m[OK][0m Teardown completed successfully. Unrelated host resources preserved.
+[1;34m[INFO][0m Initiating safe teardown (dry_run=True)...
+ok
+test_teardown_sh_delegates_to_python_controller (test_teardown.TestSafeTeardown.test_teardown_sh_delegates_to_python_controller)
+teardown.sh must delegate to teardown.py without holding a conflicting lock. ... ok
+
+----------------------------------------------------------------------
+Ran 400 tests in 20.927s
+
+OK

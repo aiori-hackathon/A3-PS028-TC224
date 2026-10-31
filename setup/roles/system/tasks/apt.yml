@@ -1,0 +1,14 @@
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: true
+    state: present
+
+- name: Install apt packages
+  ansible.builtin.apt:
+    name: '{{ item }}'
+    state: present
+  loop:
+    - 'vim'
+    - 'htop'
+    - 'iptables'
+    - 'dnsutils'

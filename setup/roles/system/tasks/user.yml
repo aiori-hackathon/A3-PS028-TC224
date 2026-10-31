@@ -1,0 +1,7 @@
+- name: Create happy-eyeballs user
+  user:
+    uid: '{{ happy_eyeballs.user.uid }}'
+    name: '{{ happy_eyeballs.user.name }}'
+    shell: '/bin/bash'
+    create_home: true
+    state: present

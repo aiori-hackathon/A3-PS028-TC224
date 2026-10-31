@@ -1,0 +1,13 @@
+services:
+  packet-capture-service:
+    container_name: he-packet-capture-service
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - '{{ happy_eyeballs.packet_capture.service.host }}:{{ happy_eyeballs.packet_capture.service.port }}:8080/tcp'
+    environment:
+      PACKET_CAPTURE_PIPE_PATH: '/tshark.pipe'
+    volumes:
+      - '{{ happy_eyeballs.packet_capture.tshark.pipe_path }}:/tshark.pipe'
