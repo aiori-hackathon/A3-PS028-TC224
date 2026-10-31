@@ -6,7 +6,7 @@
 |-|-|
 |Campaign|`ps028-a10-live-20261030-01`|
 |Evidence and code baseline|Branch `a/lab-foundation` · commit [`002c4453d35d6760760c6a14d2e98618b024f1f2`](https://github.com/aiori-hackathon/A3-PS028-TC224/commit/002c4453d35d6760760c6a14d2e98618b024f1f2)|
-|Final technical report|[`PS028 Detailed Analysis & Report PDF.pdf`](PS028 Detailed Analysis & Report PDF.pdf)|
+|Final technical report|[`PS028 Detailed Analysis & Report PDF.pdf`]([PS028 Detailed Analysis & Report PDF.pdf](https://github.com/aiori-hackathon/A3-PS028-TC224/blob/main/PS028%20Detailed%20Analysis%20%26%20Report%20PDF.pdf))|
 |Team introduction|https://youtu.be/5LLxlW9f6r4?si=EQjgtt3bIgkQ4Nix|
 |Campaign evidence|[`lab/campaigns/ps028-a10-live-20261030-01/`](lab/campaigns/ps028-a10-live-20261030-01)|
 
