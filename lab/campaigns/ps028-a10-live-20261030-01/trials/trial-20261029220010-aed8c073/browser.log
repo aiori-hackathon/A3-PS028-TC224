@@ -1,0 +1,6 @@
+=== Browser Stdout ===
+[GFX1-]: RenderCompositorSWGL failed mapping default framebuffer, no dt
+
+=== Browser Stderr ===
+*** You are running in headless mode.
+

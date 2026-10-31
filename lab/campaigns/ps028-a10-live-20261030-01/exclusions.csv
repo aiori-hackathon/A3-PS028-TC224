@@ -1,0 +1,3 @@
+trial_id,scenario_id,browser,category,reason,source_path
+trial-20261029205442-aba6193c,S0,firefox,CLEANUP_FAILURE,CLEANUP OR BASELINE FAILURE: Lab preflight failed: Baseline self-test failed: [Errno 32] Broken pipe; baseline check error: [Errno 32] Broken pipe; Post-trial self_test_baseline exception: [Errno 32] Broken pipe,/home/indrani/projects/he-webtester/lab/campaigns/ps028-a10-live-20261030-01/trials/trial-20261029205442-aba6193c
+trial-20261029210226-944fcfaa,S6,google-chrome,CLEANUP_FAILURE,CLEANUP OR BASELINE FAILURE: This operation requires root privileges. Please run with sudo or pass --dry-run.,/home/indrani/projects/he-webtester/lab/campaigns/ps028-a10-live-20261030-01/trials/trial-20261029210226-944fcfaa

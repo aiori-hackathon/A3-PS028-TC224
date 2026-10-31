@@ -1,0 +1,17 @@
+=== Browser Stdout ===
+<!DOCTYPE html>
+<html lang="en"><head>
+  <meta charset="utf-8">
+  <title>PS-028 Happy Eyeballs Measurement Endpoint</title>
+</head>
+<body>
+  <h1>PS-028 Happy Eyeballs measurement endpoint</h1>
+  <p>Status: Ready</p>
+  <p>Address Families: IPv4 (10.0.2.10:80), IPv6 ([2001:db8:2::10]:80)</p>
+
+
+</body></html>
+
+=== Browser Stderr ===
+[130551:130551:1029/224257.849696:ERROR:dbus/object_proxy.cc:572] Failed to call method: org.freedesktop.DBus.Properties.GetAll: object_path= /org/freedesktop/UPower/devices/DisplayDevice: org.freedesktop.DBus.Error.ServiceUnknown: The name org.freedesktop.UPower was not provided by any .service files
+

@@ -1,0 +1,20 @@
+=== Browser Stdout ===
+<!DOCTYPE html>
+<html lang="en"><head>
+  <meta charset="utf-8">
+  <title>PS-028 Happy Eyeballs Measurement Endpoint</title>
+</head>
+<body>
+  <h1>PS-028 Happy Eyeballs measurement endpoint</h1>
+  <p>Status: Ready</p>
+  <p>Address Families: IPv4 (10.0.2.10:80), IPv6 ([2001:db8:2::10]:80)</p>
+
+
+</body></html>
+
+=== Browser Stderr ===
+[121492:121492:1029/223534.104798:ERROR:dbus/object_proxy.cc:572] Failed to call method: org.freedesktop.DBus.Properties.GetAll: object_path= /org/freedesktop/UPower/devices/DisplayDevice: org.freedesktop.DBus.Error.ServiceUnknown: The name org.freedesktop.UPower was not provided by any .service files
+[121529:121562:1029/223534.360604:ERROR:gpu/command_buffer/service/shared_image/shared_image_manager.cc:401] SharedImageManager::ProduceMemory: Trying to Produce a Memory representation from a non-existent mailbox.
+[121529:121562:1029/223534.360870:ERROR:gpu/command_buffer/service/shared_image/shared_image_manager.cc:401] SharedImageManager::ProduceMemory: Trying to Produce a Memory representation from a non-existent mailbox.
+[121529:121562:1029/223534.360955:ERROR:gpu/command_buffer/service/shared_image/shared_image_manager.cc:401] SharedImageManager::ProduceMemory: Trying to Produce a Memory representation from a non-existent mailbox.
+
