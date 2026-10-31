@@ -244,14 +244,15 @@ def bootstrap_median_ci(
 def compute_continuous_stats(
     values: List[float],
     confidence: float = 0.95,
-    seed: int = 42
+    seed: int = 42,
+    resamples: int = 1000
 ) -> Dict[str, Any]:
     """
     Computes comprehensive statistics for continuous measurement arrays:
     - Count of non-null observations
     - Median, p95, Q1, Q3, and IQR
-    - 95% Bootstrap Confidence Interval for Median
-    - Parametric Mean and Mean CI (using Student-t for small n)
+    - 95% Bootstrap Confidence Interval for Median (percentile bootstrap, B=resamples)
+    - Parametric Mean and Mean CI (using Student-t distribution for df=n-1)
     NEVER substitutes 0.0 for empty or unobserved measurements.
     """
     valid_nums = [float(v) for v in values if v is not None and not math.isnan(v)]
@@ -280,8 +281,8 @@ def compute_continuous_stats(
     q3 = compute_percentile(valid_nums, 0.75)
     iqr = round(q3 - q1, 4) if (q1 is not None and q3 is not None) else None
 
-    # Median CI
-    med_ci = bootstrap_median_ci(valid_nums, confidence=confidence, seed=seed)
+    # Median CI via percentile bootstrap
+    med_ci = bootstrap_median_ci(valid_nums, confidence=confidence, seed=seed, resamples=resamples)
 
     # Mean & Std
     mean_val = round(sum(valid_nums) / n, 4)
@@ -800,7 +801,8 @@ def aggregate_group_metrics(
     browser: str,
     scenario_id: str,
     confidence: float = 0.95,
-    seed: int = 42
+    seed: int = 42,
+    resamples: int = 1000
 ) -> Dict[str, Any]:
     """
     Computes all statistical metrics for a specific (browser, scenario_id) cohort:
@@ -846,25 +848,25 @@ def aggregate_group_metrics(
 
     # 3. Connection Setup Time
     setup_times = [t.connection_setup_time_ms for t in valid_live_trials if t.connection_setup_time_ms is not None]
-    setup_stats = compute_continuous_stats(setup_times, confidence=confidence, seed=seed)
+    setup_stats = compute_continuous_stats(setup_times, confidence=confidence, seed=seed, resamples=resamples)
 
     # 4. Fallback Delay (Connection Attempt Delay)
     cad_delays = [t.connection_attempt_delay_ms for t in valid_live_trials if t.connection_attempt_delay_ms is not None]
-    cad_stats = compute_continuous_stats(cad_delays, confidence=confidence, seed=seed)
+    cad_stats = compute_continuous_stats(cad_delays, confidence=confidence, seed=seed, resamples=resamples)
 
     # 5. DNS Latency (A, AAAA, Resolution Span)
     a_lats = [t.dns_latency_a_ms for t in valid_live_trials if t.dns_latency_a_ms is not None]
-    a_stats = compute_continuous_stats(a_lats, confidence=confidence, seed=seed)
+    a_stats = compute_continuous_stats(a_lats, confidence=confidence, seed=seed, resamples=resamples)
 
     aaaa_lats = [t.dns_latency_aaaa_ms for t in valid_live_trials if t.dns_latency_aaaa_ms is not None]
-    aaaa_stats = compute_continuous_stats(aaaa_lats, confidence=confidence, seed=seed)
+    aaaa_stats = compute_continuous_stats(aaaa_lats, confidence=confidence, seed=seed, resamples=resamples)
 
     res_spans = [t.dns_resolution_time_ms for t in valid_live_trials if t.dns_resolution_time_ms is not None]
-    res_stats = compute_continuous_stats(res_spans, confidence=confidence, seed=seed)
+    res_stats = compute_continuous_stats(res_spans, confidence=confidence, seed=seed, resamples=resamples)
 
     # 6. Browser Duration (Service Readiness / Page Load)
     browser_durations = [t.browser_duration_ms for t in valid_live_trials if t.browser_duration_ms is not None]
-    browser_stats = compute_continuous_stats(browser_durations, confidence=confidence, seed=seed)
+    browser_stats = compute_continuous_stats(browser_durations, confidence=confidence, seed=seed, resamples=resamples)
 
     return {
         "browser": browser,
@@ -1214,7 +1216,7 @@ def assess_rfc8305_conformance(
 
     assessments.append({
         "check_id": "RFC8305-SEC4-RESOLUTION-DELAY",
-        "rfc_section": "RFC 8305 Section 4",
+        "rfc_section": "RFC 8305 Section 3",
         "title": "Resolution Delay on Asynchronous A/AAAA DNS Arrival",
         "scenario_id": "S6",
         "status": status,
@@ -1223,7 +1225,7 @@ def assess_rfc8305_conformance(
         "sample_size": len(s6_trials),
         "evidence_summary": summary,
         "reasoning": (
-            "RFC 8305 Section 4 recommends a 50ms Resolution Delay when A arrives before AAAA. "
+            "RFC 8305 Section 3 recommends a 50ms Resolution Delay when A arrives before AAAA. "
             "If AAAA does not arrive within this window, the client SHOULD initiate IPv4. "
             "In the recorded single Chrome trial, the client waited for the late AAAA response (~515ms after query, "
             "~496ms after A response) before connecting over IPv6. This observed deviation documents specific trial behavior "
@@ -1285,7 +1287,8 @@ def generate_analysis_report(
     exclusions: List[ExclusionRecord],
     include_simulations: bool = False,
     confidence: float = 0.95,
-    seed: int = 42
+    seed: int = 42,
+    resamples: int = 1000
 ) -> Dict[str, Any]:
     """
     Constructs the structured, fully serializable analysis summary dictionary.
@@ -1343,7 +1346,8 @@ def generate_analysis_report(
                     browser=b,
                     scenario_id=sc,
                     confidence=confidence,
-                    seed=seed
+                    seed=seed,
+                    resamples=resamples
                 )
                 groups.append(g_metrics)
 
@@ -1367,7 +1371,10 @@ def generate_analysis_report(
         "scenarios": scenarios,
         "include_simulations": include_simulations,
         "confidence_level": confidence,
-        "bootstrap_seed": seed
+        "bootstrap_seed": seed,
+        "bootstrap_resamples": resamples,
+        "continuous_ci_method": f"median: percentile bootstrap (B={resamples}, seed={seed}); mean: parametric Student-t (df=n-1)",
+        "proportion_ci_method": "Wilson score interval"
     }
 
     return {
@@ -1748,6 +1755,12 @@ def parse_args(args: Optional[List[str]] = None) -> argparse.Namespace:
         default=42,
         help="Pseudo-random seed for deterministic bootstrap CI calculation (default: 42)"
     )
+    parser.add_argument(
+        "--resamples",
+        type=int,
+        default=1000,
+        help="Number of bootstrap resamples for median confidence intervals (default: 1000)"
+    )
     return parser.parse_args(args)
 
 
@@ -1783,7 +1796,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             exclusions=exclusions,
             include_simulations=args.include_simulations,
             confidence=args.confidence,
-            seed=args.seed
+            seed=args.seed,
+            resamples=args.resamples
         )
 
         # File outputs if requested

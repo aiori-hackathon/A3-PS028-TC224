@@ -278,6 +278,74 @@ class TestHappyEyeballsFallbackClassification(unittest.TestCase):
         self.assertFalse(res["fallback_occurred"])
         self.assertEqual(res["classification"], "DIRECT_IPV6")
 
+    def test_direct_ipv6_when_both_attempted_but_ipv6_wins_navigation(self):
+        """
+        When both IPv6 and IPv4 connections are established but IPv6 won HTTP navigation
+        (e.g., post-navigation favicon or speculative preconnect over IPv4),
+        classification MUST report DIRECT_IPV6 and fallback_occurred=False.
+        """
+        dissection = {
+            "ipv6": {"syn_count": 1, "connection_established": True, "http_observed": True, "first_syn_time": 10.0},
+            "ipv4": {"syn_count": 1, "connection_established": True, "http_observed": False, "first_syn_time": 10.3},
+            "connection_attempt_delay_ms": 300.0
+        }
+        http_outcome = {"status_code": 200, "success": True, "winning_address_family": "IPv6"}
+
+        res = run_trial.classify_fallback(dissection, http_outcome)
+        self.assertFalse(res["fallback_occurred"])
+        self.assertEqual(res["classification"], "DIRECT_IPV6")
+        self.assertIn("won HTTP navigation", res["reason"])
+        self.assertIn("Connection Attempt Delay: 300.0ms", res["reason"])
+
+    def test_direct_ipv6_when_both_attempted_and_main_flow_correlated_to_ipv6(self):
+        """
+        Regression test for S5 flow correlation:
+        When main_http_flow confirms the primary GET / request was served over IPv6,
+        even if an ancillary connection occurred on IPv4, classification must be DIRECT_IPV6.
+        """
+        dissection = {
+            "ipv6": {"syn_count": 1, "connection_established": True, "http_observed": True, "first_syn_time": 10.0},
+            "ipv4": {"syn_count": 1, "connection_established": True, "http_observed": True, "first_syn_time": 10.301},
+            "connection_attempt_delay_ms": 301.0,
+            "main_http_flow": {
+                "stream_id": "2",
+                "family": "IPv6",
+                "status_code": 200,
+                "request": ("GET", "/"),
+                "correlated": True
+            }
+        }
+        http_outcome = {"status_code": 200, "success": True, "winning_address_family": "IPv6"}
+
+        res = run_trial.classify_fallback(dissection, http_outcome)
+        self.assertFalse(res["fallback_occurred"])
+        self.assertEqual(res["classification"], "DIRECT_IPV6")
+        self.assertIn("Main GET / request correlated to IPv6 TCP flow", res["reason"])
+        self.assertIn("Connection Attempt Delay: 301.0ms", res["reason"])
+
+    def test_direct_ipv6_when_secondary_ipv4_attempt_fails_to_establish(self):
+        """
+        When primary IPv6 establishes and wins, and secondary IPv4 attempt is made
+        but fails to establish, classification must be DIRECT_IPV6.
+        """
+        dissection = {
+            "ipv6": {"syn_count": 1, "connection_established": True, "http_observed": True, "first_syn_time": 10.0},
+            "ipv4": {"syn_count": 1, "connection_established": False, "http_observed": False, "first_syn_time": 10.25},
+            "connection_attempt_delay_ms": 250.0,
+            "main_http_flow": {
+                "stream_id": "1",
+                "family": "IPv6",
+                "status_code": 200,
+                "correlated": True
+            }
+        }
+        http_outcome = {"status_code": 200, "success": True, "winning_address_family": "IPv6"}
+
+        res = run_trial.classify_fallback(dissection, http_outcome)
+        self.assertFalse(res["fallback_occurred"])
+        self.assertEqual(res["classification"], "DIRECT_IPV6")
+        self.assertIn("Secondary IPv4 connection attempt did not establish", res["reason"])
+
     def test_do_not_infer_fallback_from_http_200_alone_when_ipv6_not_attempted(self):
         """
         CRITICAL PS-028 REQUIREMENT:
@@ -1498,6 +1566,114 @@ class TestDNSObservationParsingRegression(unittest.TestCase):
         self.assertEqual(resp_a["qtype"], "A")
         self.assertEqual(resp_a["address"], "10.0.2.10")
         self.assertAlmostEqual(resp_a["timestamp"], 1793205291.355056, places=4)
+
+
+class TestDissectPcapFlowCorrelationRegression(unittest.TestCase):
+    """
+    Offline regression tests for correlating the main GET / HTTP request and TCP flow:
+    - Distinguishes main GET / request flow from ancillary requests (/favicon.ico).
+    - Accurately attributes winning address family to the primary navigation stream.
+    - Preserves fallback behavior when primary IPv6 is unestablished and IPv4 serves GET /.
+    - Works offline using synthetic tshark field streams.
+    """
+
+    def setUp(self):
+        self.temp_dir = Path(tempfile.mkdtemp(prefix="test_flow_corr_"))
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    @patch("shutil.which", return_value="/usr/bin/tshark")
+    @patch("subprocess.run")
+    def test_dissect_pcap_correlates_main_get_over_ipv6_with_ancillary_ipv4_favicon(self, mock_run, mock_which):
+        """
+        Verifies dissect_pcap correlates main GET / on IPv6 (stream 1, code 200)
+        and distinguishes it from an ancillary GET /favicon.ico on IPv4 (stream 2, code 404).
+        """
+        pcap_file = self.temp_dir / "s5_ancillary.pcap"
+        pcap_file.touch()
+
+        target_host = "trial-s5.he.test"
+        # 17 fields:
+        # frame.time_epoch, ip.src, ip.dst, ip6.src, ip6.dst, tcp.flags,
+        # tcp.srcport, tcp.dstport, dns.qry.name, dns.qry.type, dns.flags.response,
+        # dns.a, dns.aaaa, http.response.code, tcp.stream, http.request.method, http.request.uri
+        tshark_lines = [
+            # Stream 1: IPv6 SYN & SYN-ACK
+            f"10.00\t\t\t2001:db8:1::2\t2001:db8:2::10\t0x0002\t32800\t80\t\t\t\t\t\t\t1\t\t",
+            f"10.02\t\t\t2001:db8:2::10\t2001:db8:1::2\t0x0012\t80\t32800\t\t\t\t\t\t\t1\t\t",
+            # Stream 1: IPv6 GET / and 200 OK
+            f"10.03\t\t\t2001:db8:1::2\t2001:db8:2::10\t0x0018\t32800\t80\t\t\t\t\t\t\t1\tGET\t/",
+            f"10.05\t\t\t2001:db8:2::10\t2001:db8:1::2\t0x0018\t80\t32800\t\t\t\t\t\t200\t1\t\t",
+            # Stream 2: IPv4 SYN & SYN-ACK (speculative / ancillary)
+            f"10.31\t10.0.1.2\t10.0.2.10\t\t\t0x0002\t52132\t80\t\t\t\t\t\t\t2\t\t",
+            f"10.33\t10.0.2.10\t10.0.1.2\t\t\t0x0012\t80\t52132\t\t\t\t\t\t\t2\t\t",
+            # Stream 2: IPv4 GET /favicon.ico and 404 Not Found
+            f"10.35\t10.0.1.2\t10.0.2.10\t\t\t0x0018\t52132\t80\t\t\t\t\t\t\t2\tGET\t/favicon.ico",
+            f"10.37\t10.0.2.10\t10.0.1.2\t\t\t0x0018\t80\t52132\t\t\t\t\t\t404\t2\t\t",
+        ]
+        mock_proc = MagicMock()
+        mock_proc.stdout = "\n".join(tshark_lines) + "\n"
+        mock_run.return_value = mock_proc
+
+        dissection = run_trial.dissect_pcap(pcap_file, target_hostname=target_host)
+
+        # Primary navigation attributes must come from Stream 1 (IPv6, 200 OK)
+        self.assertEqual(dissection["http_status_code"], 200)
+        self.assertEqual(dissection["http_response_family"], "IPv6")
+        flow = dissection["main_http_flow"]
+        self.assertTrue(flow["correlated"])
+        self.assertEqual(flow["stream_id"], "1")
+        self.assertEqual(flow["family"], "IPv6")
+        self.assertEqual(flow["status_code"], 200)
+        self.assertEqual(flow["request"], ("GET", "/"))
+
+        # Both connections observed in network observations
+        self.assertTrue(dissection["ipv6"]["connection_established"])
+        self.assertTrue(dissection["ipv4"]["connection_established"])
+        self.assertAlmostEqual(dissection["connection_attempt_delay_ms"], 310.0, delta=1.0)
+
+    @patch("shutil.which", return_value="/usr/bin/tshark")
+    @patch("subprocess.run")
+    def test_dissect_pcap_correlates_main_get_over_ipv4_in_fallback_scenario(self, mock_run, mock_which):
+        """
+        Verifies dissect_pcap correlates main GET / on IPv4 (stream 2, code 200)
+        when IPv6 attempt fails (stream 1 SYN blackholed).
+        """
+        pcap_file = self.temp_dir / "s1_fallback.pcap"
+        pcap_file.touch()
+
+        target_host = "trial-s1.he.test"
+        tshark_lines = [
+            # Stream 1: IPv6 SYN only (blackholed)
+            f"10.00\t\t\t2001:db8:1::2\t2001:db8:2::10\t0x0002\t32800\t80\t\t\t\t\t\t\t1\t\t",
+            # Stream 2: IPv4 SYN & SYN-ACK after CAD
+            f"10.30\t10.0.1.2\t10.0.2.10\t\t\t0x0002\t52132\t80\t\t\t\t\t\t\t2\t\t",
+            f"10.32\t10.0.2.10\t10.0.1.2\t\t\t0x0012\t80\t52132\t\t\t\t\t\t\t2\t\t",
+            # Stream 2: IPv4 GET / and 200 OK
+            f"10.33\t10.0.1.2\t10.0.2.10\t\t\t0x0018\t52132\t80\t\t\t\t\t\t\t2\tGET\t/",
+            f"10.35\t10.0.2.10\t10.0.1.2\t\t\t0x0018\t80\t52132\t\t\t\t\t\t200\t2\t\t",
+        ]
+        mock_proc = MagicMock()
+        mock_proc.stdout = "\n".join(tshark_lines) + "\n"
+        mock_run.return_value = mock_proc
+
+        dissection = run_trial.dissect_pcap(pcap_file, target_hostname=target_host)
+
+        self.assertEqual(dissection["http_status_code"], 200)
+        self.assertEqual(dissection["http_response_family"], "IPv4")
+        flow = dissection["main_http_flow"]
+        self.assertTrue(flow["correlated"])
+        self.assertEqual(flow["stream_id"], "2")
+        self.assertEqual(flow["family"], "IPv4")
+        self.assertEqual(flow["status_code"], 200)
+        self.assertEqual(flow["request"], ("GET", "/"))
+
+        # Verify fallback classification with this dissection
+        http_outcome = {"status_code": 200, "success": True, "winning_address_family": "IPv4"}
+        cls_res = run_trial.classify_fallback(dissection, http_outcome)
+        self.assertTrue(cls_res["fallback_occurred"])
+        self.assertEqual(cls_res["classification"], "IPV6_TO_IPV4_FALLBACK")
 
 
 class TestTcpdumpDropStatisticsAndCaptureLoss(unittest.TestCase):
