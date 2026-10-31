@@ -1,0 +1,30 @@
+{
+  "attempt_number": 1,
+  "trial_id": "trial-20261029205442-aba6193c",
+  "execution_mode": "LIVE",
+  "is_simulation": false,
+  "timestamps": {
+    "start_time": "2026-10-29T20:54:42.092344+00:00",
+    "end_time": "2026-10-29T20:54:46.246842+00:00",
+    "duration_ms": 4154.51
+  },
+  "status": "FAILED",
+  "validity": "CLEANUP_FAILURE",
+  "evidence_paths": {
+    "trial_dir": "/home/indrani/projects/he-webtester/lab/campaigns/ps028-a10-live-20261030-01/trials/trial-20261029205442-aba6193c"
+  },
+  "capture_metadata": {},
+  "http_outcome": {},
+  "network_observations": {},
+  "cleanup_status": {
+    "scenario_restored": false,
+    "baseline_verified": false,
+    "profile_cleaned": true,
+    "lock_released": true,
+    "errors": [
+      "Lab preflight failed: Baseline self-test failed: [Errno 32] Broken pipe; baseline check error: [Errno 32] Broken pipe",
+      "Post-trial self_test_baseline exception: [Errno 32] Broken pipe"
+    ]
+  },
+  "error_message": "CLEANUP OR BASELINE FAILURE: Lab preflight failed: Baseline self-test failed: [Errno 32] Broken pipe; baseline check error: [Errno 32] Broken pipe; Post-trial self_test_baseline exception: [Errno 32] Broken pipe"
+}

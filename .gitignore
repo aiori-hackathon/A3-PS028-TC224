@@ -14,3 +14,9 @@ lab/dns.pid
 lab/nginx.pid
 lab/.impair_state.json
 lab/dns_config.json.impair_bak
+lab/.trials_bak/
+lab/.trials_failed_chromium/
+lab/trials/
+lab/campaigns/campaign-20261028*
+lab/campaigns/*/.campaign.lock
+
