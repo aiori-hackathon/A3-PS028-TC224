@@ -1,11 +1,11 @@
 Happy Eyeballs: IPv4/IPv6 Fallback Measurement
 Team AlgoRhythm · AIORI Hackathon 3 · PS-028: Internet Measurement
-
+![280 valid live trials](https://img.shields.io/badge/valid%20live%20trials-280-168F83?style=flat-square) ![400 tests passed](https://img.shields.io/badge/recorded%20tests-400%20passed-2866B2?style=flat-square) ![Campaign completed](https://img.shields.io/badge/campaign-completed-168F83?style=flat-square)
 Submission detail	Value
 Campaign	`ps028-a10-live-20261030-01`
 Evidence and code baseline	Branch `a/lab-foundation` · commit `002c4453d35d6760760c6a14d2e98618b024f1f2`
-Final technical report :	`docs/PS028_Final_Experimental_Report.pdf`
-Team introduction	Watch on YouTube : https://youtu.be/5LLxlW9f6r4?si=GLugFBTO9NT8BzTI
+Final technical report	`docs/PS028_Final_Experimental_Report.pdf`
+Team introduction	Watch on YouTube
 Campaign evidence	`lab/campaigns/ps028-a10-live-20261030-01/`
 ---
 Contents
@@ -181,5 +181,17 @@ Happy Eyeballs WebTester source repository.
 Chromium NetLog documentation.
 Firefox networking and HTTP logging documentation.
 `tc-netem` manual.
+Submission checklist
+[x] Controlled dual-stack lab and six impaired scenarios plus healthy baseline.
+[x] Two pinned existing browser builds.
+[x] 20 valid repetitions per scenario/browser cell.
+[x] Trial records, PCAPs, logs, browser telemetry and checksum indexes preserved.
+[x] Primary HTTP navigation flow audited from all 280 PCAPs.
+[x] Offline analysis reproduced from portable evidence.
+[x] Recorded test run: 400 tests; final test-runner status `OK`.
+[ ] Add `docs/PS028_Final_Experimental_Report.pdf` to GitHub.
+[ ] Demonstrate the prototype and pseudocode to the mentor.
+[ ] Confirm the organizer's private-repository, collaborator and ownership requirements; the current repository is named `A3-PS028-TC224`, not `AlgoRhythm`.
+[ ] Check against the organizer's `Proposed-structure-hackathon.pdf` if it becomes available.
 ---
 Team AlgoRhythm · Measure. Compare. Improve.
