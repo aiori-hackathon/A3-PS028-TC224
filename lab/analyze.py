@@ -35,6 +35,7 @@ import csv
 import dataclasses
 import datetime
 import io
+import ipaddress
 import json
 import math
 import os
@@ -59,7 +60,7 @@ RFC8305_MIN_ATTEMPT_INTERVAL_MS = 10.0   # RFC 8305 §5 normative floor: "a subs
 RFC8305_MIN_CAD_MS = 100.0              # RFC 8305 §5 recommended minimum
 RFC8305_MAX_CAD_MS = 2000.0             # RFC 8305 §5 maximum permitted
 RFC8305_RECOMMENDED_CAD_MS = 250.0      # RFC 8305 §5 recommended default
-RFC8305_RECOMMENDED_RESOLUTION_DELAY_MS = 50.0  # RFC 8305 §4 recommended default
+RFC8305_RECOMMENDED_RESOLUTION_DELAY_MS = 50.0  # RFC 8305 §3 recommended default
 
 SCENARIO_NAMES: Dict[str, str] = {
     "S0": "healthy_baseline",
@@ -431,7 +432,9 @@ def validate_trial_record(data: Dict[str, Any], path: Path) -> Tuple[str, Option
     if classification == "INCONCLUSIVE":
         return "MEASUREMENT_FAILURE", f"Inconclusive network classification: {net_obs.get('classification_reason', '')}"
 
-    if classification == "CONNECTION_FAILED" and not data.get("http_outcome", {}).get("success", False):
+    raw_http = data.get("http_outcome")
+    http_dict = raw_http if isinstance(raw_http, dict) else {}
+    if classification == "CONNECTION_FAILED" and not http_dict.get("success", False):
         return "MEASUREMENT_FAILURE", f"Connection failed: {net_obs.get('classification_reason', '')}"
 
     return "VALID_LIVE", None
@@ -519,7 +522,8 @@ def load_trial_from_json(file_path: Path) -> TrialEvidence:
     browser_version = browser_dict.get("version") or "unknown"
     browser_duration = browser_dict.get("duration_ms")
 
-    http_dict = data.get("http_outcome", {})
+    raw_http = data.get("http_outcome")
+    http_dict = raw_http if isinstance(raw_http, dict) else {}
     http_status = http_dict.get("status_code")
     http_success = bool(http_dict.get("success", False))
     winning_family = http_dict.get("winning_address_family")
@@ -915,6 +919,416 @@ def aggregate_group_metrics(
 # Evidence-Based RFC 8305 Assessment Engine
 # ==============================================================================
 
+def _format_browser_label(name: str) -> str:
+    """Returns canonical human-readable browser label."""
+    nl = name.lower()
+    if "chrome" in nl:
+        return "Google Chrome"
+    if "firefox" in nl:
+        return "Firefox"
+    return name
+
+
+def _extract_and_validate_s6_attempt_timestamp(
+    net_obs: Dict[str, Any], a_ts: float, delta_ms: float, ipv4_attempt: bool, context: str
+) -> Tuple[Optional[float], Optional[Dict[str, Any]]]:
+    """Helper to safely extract and validate IPv4 attempt timestamp for S6 resolution delay."""
+    attempt_ts = None
+    for key in ("ipv4_attempt_timestamp", "ipv4_syn_timestamp", "ipv4_attempt_start_time"):
+        if key in net_obs and net_obs[key] is not None:
+            attempt_ts = net_obs[key]
+            break
+
+    if attempt_ts is None:
+        return None, {
+            "classification": "INDETERMINATE",
+            "reason": f"{context} with IPv4 attempt recorded but no timestamp proving when attempt began",
+            "a_to_aaaa_ms": delta_ms,
+            "ipv4_attempt": ipv4_attempt
+        }
+
+    if isinstance(attempt_ts, bool):
+        return None, {
+            "classification": "INDETERMINATE",
+            "reason": "Non-numeric IPv4 attempt timestamp (boolean)",
+            "a_to_aaaa_ms": delta_ms,
+            "ipv4_attempt": ipv4_attempt
+        }
+
+    try:
+        att_val = float(attempt_ts)
+    except (ValueError, TypeError):
+        return None, {
+            "classification": "INDETERMINATE",
+            "reason": "Non-numeric IPv4 attempt timestamp",
+            "a_to_aaaa_ms": delta_ms,
+            "ipv4_attempt": ipv4_attempt
+        }
+
+    if math.isnan(att_val) or math.isinf(att_val):
+        return None, {
+            "classification": "INDETERMINATE",
+            "reason": "Invalid (NaN or infinite) IPv4 attempt timestamp",
+            "a_to_aaaa_ms": delta_ms,
+            "ipv4_attempt": ipv4_attempt
+        }
+
+    if att_val < 0.0:
+        return None, {
+            "classification": "INDETERMINATE",
+            "reason": f"Negative IPv4 attempt timestamp ({att_val})",
+            "a_to_aaaa_ms": delta_ms,
+            "ipv4_attempt": ipv4_attempt
+        }
+
+    if att_val < a_ts:
+        return None, {
+            "classification": "INDETERMINATE",
+            "reason": f"Contradictory chronology: IPv4 attempt timestamp ({att_val}) precedes positive A response timestamp ({a_ts})",
+            "a_to_aaaa_ms": delta_ms,
+            "ipv4_attempt": ipv4_attempt
+        }
+
+    return att_val, None
+
+
+def classify_s6_resolution_delay_trial(trial: TrialEvidence) -> Dict[str, Any]:
+    """
+    Classifies an individual S6 trial under RFC 8305 Section 3 Resolution Delay criteria:
+    - Positive AAAA arriving before or simultaneously with positive A: no Resolution Delay deviation established (CONFORMANCE).
+    - Positive A first, followed by positive AAAA within 50 ms:
+        - If no IPv4 connection attempt recorded: observed CONFORMANCE.
+        - If IPv4 attempt started before positive AAAA response: recommendation-level DEVIATION.
+        - If IPv4 attempt started at or after positive AAAA response: observed CONFORMANCE.
+        - If IPv4 attempt recorded but timing cannot establish whether it began before or after AAAA: INDETERMINATE.
+    - Positive A first, followed by positive AAAA after 50 ms:
+        - If no IPv4 connection attempt recorded: observed DEVIATION.
+        - If IPv4 attempt recorded and valid timestamp <= 50 ms: observed CONFORMANCE.
+        - If IPv4 attempt recorded and valid timestamp > 50 ms: observed DEVIATION.
+        - If IPv4 attempt recorded but no timestamp proving when that attempt began: INDETERMINATE.
+    - Missing or invalid positive DNS response timestamps, invalid address families, missing/malformed attempt flags, malformed http_outcome, negative or contradictory timestamps/observations: INDETERMINATE.
+    """
+    if not isinstance(trial.raw_dict, dict):
+        return {
+            "classification": "INDETERMINATE",
+            "reason": "Missing raw trial data dictionary",
+            "a_to_aaaa_ms": None,
+            "ipv4_attempt": None
+        }
+
+    dns_obs = trial.raw_dict.get("dns_observations")
+    if not isinstance(dns_obs, dict):
+        return {
+            "classification": "INDETERMINATE",
+            "reason": "Missing dns_observations section",
+            "a_to_aaaa_ms": None,
+            "ipv4_attempt": None
+        }
+
+    responses = dns_obs.get("responses")
+    if not isinstance(responses, list):
+        return {
+            "classification": "INDETERMINATE",
+            "reason": "Missing DNS responses list",
+            "a_to_aaaa_ms": None,
+            "ipv4_attempt": None
+        }
+
+    # Identify target hostname under test if available
+    target_host = trial.raw_dict.get("target_hostname") or trial.raw_dict.get("hostname")
+    if not target_host and "target_url" in trial.raw_dict and trial.raw_dict["target_url"]:
+        from urllib.parse import urlparse
+        try:
+            parsed = urlparse(trial.raw_dict["target_url"])
+            target_host = parsed.hostname
+        except Exception:
+            pass
+    target_host_norm = target_host.strip().rstrip(".").lower() if isinstance(target_host, str) and target_host.strip() else None
+
+    a_timestamps: List[float] = []
+    aaaa_timestamps: List[float] = []
+    for r in responses:
+        if not isinstance(r, dict):
+            continue
+        # Strict target-host response matching:
+        # When a target hostname can be obtained from hostname or target_url, accept a DNS
+        # response for classification only when its qname is present and matches that target
+        # hostname after case normalization and trailing-dot normalization.
+        # A missing qname must not be accepted as a target-host response.
+        if target_host_norm:
+            rq = r.get("qname")
+            if not rq or not isinstance(rq, str):
+                continue
+            rq_norm = rq.strip().rstrip(".").lower()
+            if rq_norm != target_host_norm:
+                continue
+
+        qt = str(r.get("qtype", "")).upper()
+        addr = r.get("address")
+        ts = r.get("timestamp")
+        if not addr or not isinstance(addr, str) or ts is None or isinstance(ts, bool):
+            continue
+        try:
+            ts_val = float(ts)
+        except (ValueError, TypeError):
+            continue
+        if math.isnan(ts_val) or math.isinf(ts_val) or ts_val < 0.0:
+            continue
+
+        # Validate IP address family using standard ipaddress module:
+        # A positive A response must contain a valid IPv4 address;
+        # a positive AAAA response must contain a valid IPv6 address.
+        try:
+            ip_obj = ipaddress.ip_address(addr.strip())
+        except ValueError:
+            continue
+
+        if qt == "A" and ip_obj.version == 4:
+            a_timestamps.append(ts_val)
+        elif qt == "AAAA" and ip_obj.version == 6:
+            aaaa_timestamps.append(ts_val)
+
+    if not a_timestamps or not aaaa_timestamps:
+        return {
+            "classification": "INDETERMINATE",
+            "reason": "Missing or invalid positive A or AAAA DNS response timestamp",
+            "a_to_aaaa_ms": None,
+            "ipv4_attempt": None
+        }
+
+    a_ts = min(a_timestamps)
+    aaaa_ts = min(aaaa_timestamps)
+
+    net_obs = trial.raw_dict.get("network_observations")
+    if not isinstance(net_obs, dict):
+        return {
+            "classification": "INDETERMINATE",
+            "reason": "Missing network_observations section",
+            "a_to_aaaa_ms": None,
+            "ipv4_attempt": None
+        }
+
+    # Validate attempt flags: require actual boolean values
+    raw_v4_attempt = net_obs.get("ipv4_attempt")
+    if not isinstance(raw_v4_attempt, bool):
+        return {
+            "classification": "INDETERMINATE",
+            "reason": "Missing or non-boolean ipv4_attempt field",
+            "a_to_aaaa_ms": None,
+            "ipv4_attempt": None
+        }
+    ipv4_attempt = raw_v4_attempt
+
+    raw_v6_attempt = net_obs.get("ipv6_attempt")
+    if not isinstance(raw_v6_attempt, bool):
+        return {
+            "classification": "INDETERMINATE",
+            "reason": "Missing or non-boolean ipv6_attempt field",
+            "a_to_aaaa_ms": None,
+            "ipv4_attempt": ipv4_attempt
+        }
+    ipv6_attempt = raw_v6_attempt
+
+    # Validate success flags: require actual boolean values
+    raw_v4_success = net_obs.get("ipv4_success", False)
+    if not isinstance(raw_v4_success, bool):
+        return {
+            "classification": "INDETERMINATE",
+            "reason": "Non-boolean ipv4_success field",
+            "a_to_aaaa_ms": None,
+            "ipv4_attempt": ipv4_attempt
+        }
+    ipv4_success = raw_v4_success
+
+    raw_v6_success = net_obs.get("ipv6_success", False)
+    if not isinstance(raw_v6_success, bool):
+        return {
+            "classification": "INDETERMINATE",
+            "reason": "Non-boolean ipv6_success field",
+            "a_to_aaaa_ms": None,
+            "ipv4_attempt": ipv4_attempt
+        }
+    ipv6_success = raw_v6_success
+
+    # Consistency Check 1: ipv4_attempt is false but any supported IPv4 attempt timestamp field is populated
+    if not ipv4_attempt:
+        for key in ("ipv4_attempt_timestamp", "ipv4_syn_timestamp", "ipv4_attempt_start_time"):
+            if key in net_obs and net_obs[key] is not None:
+                return {
+                    "classification": "INDETERMINATE",
+                    "reason": f"Contradictory observations: {key} populated while ipv4_attempt is False",
+                    "a_to_aaaa_ms": None,
+                    "ipv4_attempt": ipv4_attempt
+                }
+
+    # Consistency Check 2: winning address family is present but is neither exactly IPv4 nor IPv6
+    raw_http = trial.raw_dict.get("http_outcome")
+    if "http_outcome" in trial.raw_dict and not isinstance(raw_http, dict):
+        return {
+            "classification": "INDETERMINATE",
+            "reason": f"Malformed http_outcome section: expected dict, got {type(raw_http).__name__}",
+            "a_to_aaaa_ms": None,
+            "ipv4_attempt": ipv4_attempt
+        }
+    http_dict = raw_http if isinstance(raw_http, dict) else {}
+    win_fam = trial.winning_address_family
+    if win_fam is None:
+        win_fam = http_dict.get("winning_address_family")
+
+    if win_fam is not None and win_fam not in ("IPv4", "IPv6"):
+        return {
+            "classification": "INDETERMINATE",
+            "reason": f"Invalid winning address family: {win_fam}",
+            "a_to_aaaa_ms": None,
+            "ipv4_attempt": ipv4_attempt
+        }
+
+    # Consistency Check 3: winning address family conflicts with its corresponding attempt or success flag
+    if win_fam == "IPv4":
+        if not ipv4_attempt:
+            return {
+                "classification": "INDETERMINATE",
+                "reason": "Contradictory observations: winning IPv4 without ipv4_attempt",
+                "a_to_aaaa_ms": None,
+                "ipv4_attempt": ipv4_attempt
+            }
+        if not ipv4_success:
+            return {
+                "classification": "INDETERMINATE",
+                "reason": "Contradictory observations: winning IPv4 with ipv4_success=False",
+                "a_to_aaaa_ms": None,
+                "ipv4_attempt": ipv4_attempt
+            }
+    elif win_fam == "IPv6":
+        if not ipv6_attempt:
+            return {
+                "classification": "INDETERMINATE",
+                "reason": "Contradictory observations: winning IPv6 without ipv6_attempt",
+                "a_to_aaaa_ms": None,
+                "ipv4_attempt": ipv4_attempt
+            }
+        if not ipv6_success:
+            return {
+                "classification": "INDETERMINATE",
+                "reason": "Contradictory observations: winning IPv6 with ipv6_success=False",
+                "a_to_aaaa_ms": None,
+                "ipv4_attempt": ipv4_attempt
+            }
+
+    # Consistency Check 4: winning family is absent while a successful-family flag claims success
+    if win_fam is None and (ipv4_success or ipv6_success):
+        return {
+            "classification": "INDETERMINATE",
+            "reason": "Contradictory observations: success flag is True but winning address family is absent",
+            "a_to_aaaa_ms": None,
+            "ipv4_attempt": ipv4_attempt
+        }
+
+    # General success without attempt contradictions
+    if ipv4_success and not ipv4_attempt:
+        return {
+            "classification": "INDETERMINATE",
+            "reason": "Contradictory observations: ipv4_success without ipv4_attempt",
+            "a_to_aaaa_ms": None,
+            "ipv4_attempt": ipv4_attempt
+        }
+    if ipv6_success and not ipv6_attempt:
+        return {
+            "classification": "INDETERMINATE",
+            "reason": "Contradictory observations: ipv6_success without ipv6_attempt",
+            "a_to_aaaa_ms": None,
+            "ipv4_attempt": ipv4_attempt
+        }
+
+    # Evaluate Resolution Delay condition
+    if aaaa_ts <= a_ts:
+        # Positive AAAA arriving before or simultaneously with positive A:
+        # no Resolution Delay deviation established
+        delta_raw_ms = (aaaa_ts - a_ts) * 1000.0
+        delta_ms = round(delta_raw_ms, 2)
+        return {
+            "classification": "CONFORMANCE",
+            "reason": "Positive AAAA arrived before or simultaneously with positive A; no Resolution Delay deviation established",
+            "a_to_aaaa_ms": delta_ms,
+            "ipv4_attempt": ipv4_attempt
+        }
+
+    delta_raw_ms = (aaaa_ts - a_ts) * 1000.0
+    delta_ms = round(delta_raw_ms, 2)
+
+    # Positive A first, followed by positive AAAA within 50 ms (0 - 50 ms inclusive)
+    # Do not round delta before making threshold decision
+    if delta_raw_ms <= RFC8305_RECOMMENDED_RESOLUTION_DELAY_MS:
+        if not ipv4_attempt:
+            return {
+                "classification": "CONFORMANCE",
+                "reason": f"Positive AAAA arrived {delta_ms}ms after positive A (<= 50ms recommended Resolution Delay) with no premature IPv4 connection attempt",
+                "a_to_aaaa_ms": delta_ms,
+                "ipv4_attempt": ipv4_attempt
+            }
+
+        # IPv4 attempt recorded: evaluate attempt chronology relative to AAAA arrival
+        context = f"Positive AAAA arrived {delta_ms}ms after positive A (<= 50ms)"
+        att_val, err_dict = _extract_and_validate_s6_attempt_timestamp(net_obs, a_ts, delta_ms, ipv4_attempt, context)
+        if err_dict is not None:
+            return err_dict
+
+        # Preserve exact, unrounded timestamp comparison:
+        # If IPv4 attempt started before positive AAAA response -> recommendation DEVIATION
+        if att_val < aaaa_ts:
+            att_delta_raw_ms = (att_val - a_ts) * 1000.0
+            att_delta_ms = round(att_delta_raw_ms, 2)
+            return {
+                "classification": "DEVIATION",
+                "reason": f"IPv4 attempt initiated at {att_delta_ms}ms after positive A, before positive AAAA response arrived ({delta_ms}ms after positive A)",
+                "a_to_aaaa_ms": delta_ms,
+                "ipv4_attempt": ipv4_attempt
+            }
+        else:
+            return {
+                "classification": "CONFORMANCE",
+                "reason": f"Positive AAAA arrived {delta_ms}ms after positive A (<= 50ms) and IPv4 attempt was not initiated before positive AAAA response",
+                "a_to_aaaa_ms": delta_ms,
+                "ipv4_attempt": ipv4_attempt
+            }
+
+    # Positive A first, followed by positive AAAA after 50 ms (> 50ms)
+    if not ipv4_attempt:
+        # Positive A first, followed by positive AAAA after 50 ms, with no IPv4 connection attempt recorded: observed deviation
+        return {
+            "classification": "DEVIATION",
+            "reason": f"Positive AAAA arrived {delta_ms}ms after positive A (> 50ms) with no IPv4 connection attempt",
+            "a_to_aaaa_ms": delta_ms,
+            "ipv4_attempt": ipv4_attempt
+        }
+
+    # Positive A first, followed by positive AAAA after 50 ms, with an IPv4 attempt recorded.
+    context = f"Positive AAAA arrived {delta_ms}ms after positive A (> 50ms)"
+    att_val, err_dict = _extract_and_validate_s6_attempt_timestamp(net_obs, a_ts, delta_ms, ipv4_attempt, context)
+    if err_dict is not None:
+        return err_dict
+
+    att_delta_raw_ms = (att_val - a_ts) * 1000.0
+    att_delta_ms = round(att_delta_raw_ms, 2)
+
+    # 0 - 50 ms inclusive: within recommendation. Greater than 50 ms: outside recommendation.
+    # Do not round measured delta before making threshold decision
+    if att_delta_raw_ms <= RFC8305_RECOMMENDED_RESOLUTION_DELAY_MS:
+        return {
+            "classification": "CONFORMANCE",
+            "reason": f"IPv4 attempt initiated at {att_delta_ms}ms after positive A (<= 50ms recommended Resolution Delay)",
+            "a_to_aaaa_ms": delta_ms,
+            "ipv4_attempt": ipv4_attempt
+        }
+    else:
+        return {
+            "classification": "DEVIATION",
+            "reason": f"IPv4 attempt initiated at {att_delta_ms}ms after positive A (> 50ms recommended Resolution Delay)",
+            "a_to_aaaa_ms": delta_ms,
+            "ipv4_attempt": ipv4_attempt
+        }
+
+
 def assess_rfc8305_conformance(
     valid_trials: List[TrialEvidence],
     browser: Optional[str] = None
@@ -925,7 +1339,7 @@ def assess_rfc8305_conformance(
     - Immediate Reset Fallback (RFC 8305 §5) -> S2
     - Connection Attempt Delay on SYN Timeout (RFC 8305 §5) -> S1
     - Latency-Driven Alternative Path Selection (RFC 8305 §5) -> S4 vs S3
-    - Resolution Delay on Asynchronous DNS (RFC 8305 §4) -> S6
+    - Resolution Delay on Asynchronous DNS (RFC 8305 §3) -> S6
     - Statefulness and Failure Caching (RFC 8305 §7) -> INDETERMINATE (profiles wiped per trial)
     - Non-TCP Transports / QUIC (RFC 8305 §8) -> INDETERMINATE (out of lab scope)
 
@@ -1141,25 +1555,203 @@ def assess_rfc8305_conformance(
     # Check 4: RFC 8305 §5 - Alternative Path Selection on Latency Imbalance
     s4_trials = by_sc["S4"]
     if s4_trials:
-        v4_wins = sum(1 for t in s4_trials if t.winning_address_family == "IPv4")
-        cad_vals = [t.connection_attempt_delay_ms for t in s4_trials if t.connection_attempt_delay_ms is not None]
-        med_cad = compute_percentile(sorted(cad_vals), 0.5) if cad_vals else None
+        v4_wins = [t for t in s4_trials if t.winning_address_family == "IPv4"]
+        v6_wins = [t for t in s4_trials if t.winning_address_family == "IPv6"]
+        unknown_wins = [t for t in s4_trials if t.winning_address_family not in ("IPv4", "IPv6")]
+        total_s4 = len(s4_trials)
 
-        if v4_wins == len(s4_trials) and cad_vals and all(RFC8305_MIN_ATTEMPT_INTERVAL_MS <= round(c, 2) <= RFC8305_MAX_CAD_MS for c in cad_vals):
-            status = "OBSERVED_CONFORMANCE"
+        cad_vals: List[float] = []
+        invalid_cad_count = 0
+        missing_cad_count = 0
+        trial_mand_statuses = []
+
+        for t in s4_trials:
+            raw_c = t.connection_attempt_delay_ms
+            net_obs = t.raw_dict.get("network_observations", {}) if isinstance(t.raw_dict, dict) else {}
+            v4_att = net_obs.get("ipv4_attempt")
+            fallback_occ = net_obs.get("fallback_occurred")
+
+            is_valid_cad = False
+            c_float = None
+            if raw_c is not None:
+                if not isinstance(raw_c, bool):
+                    try:
+                        val = float(raw_c)
+                        if not math.isnan(val) and not math.isinf(val) and val >= 0.0:
+                            is_valid_cad = True
+                            c_float = val
+                    except (ValueError, TypeError):
+                        pass
+
+            if is_valid_cad:
+                cad_vals.append(c_float)
+                if c_float < RFC8305_MIN_ATTEMPT_INTERVAL_MS:
+                    trial_mand_statuses.append("OBSERVED_DEVIATION")
+                else:
+                    trial_mand_statuses.append("OBSERVED_CONFORMANCE")
+            else:
+                # CAD is invalid or missing
+                if raw_c is not None:
+                    invalid_cad_count += 1
+                    trial_mand_statuses.append("INDETERMINATE")
+                else:
+                    if v4_att is True or fallback_occ is True or t.winning_address_family == "IPv4":
+                        missing_cad_count += 1
+                        trial_mand_statuses.append("INDETERMINATE")
+                    elif v4_att is False and (t.winning_address_family == "IPv6" or t.winning_address_family is None):
+                        trial_mand_statuses.append("NOT_APPLICABLE")
+                    else:
+                        missing_cad_count += 1
+                        trial_mand_statuses.append("INDETERMINATE")
+
+        cad_count = len(cad_vals)
+        cad_sub10_count = sum(1 for c in cad_vals if c < RFC8305_MIN_ATTEMPT_INTERVAL_MS)
+        cad_sub100_count = sum(1 for c in cad_vals if c < RFC8305_MIN_CAD_MS)
+        cad_rec_low_count = sum(1 for c in cad_vals if RFC8305_MIN_ATTEMPT_INTERVAL_MS <= c < RFC8305_MIN_CAD_MS)
+        cad_in_range_count = sum(1 for c in cad_vals if RFC8305_MIN_CAD_MS <= c <= RFC8305_MAX_CAD_MS)
+        cad_over2000_count = sum(1 for c in cad_vals if c > RFC8305_MAX_CAD_MS)
+        med_cad = compute_percentile(sorted(cad_vals), 0.5) if cad_vals else None
+        med_cad_str = f"{round(med_cad, 2):.2f}ms" if med_cad is not None else "N/A"
+
+        subsequent_attempts_indeterminate = sum(1 for s in trial_mand_statuses if s == "INDETERMINATE")
+        not_applicable_mand_count = sum(1 for s in trial_mand_statuses if s == "NOT_APPLICABLE")
+        applicable_measured_count = sum(1 for s in trial_mand_statuses if s in ("OBSERVED_CONFORMANCE", "OBSERVED_DEVIATION"))
+
+        # Aggregate mandatory status
+        if cad_sub10_count > 0:
+            mandatory_status = "OBSERVED_DEVIATION"
+        elif subsequent_attempts_indeterminate > 0:
+            mandatory_status = "INDETERMINATE"
+        elif applicable_measured_count > 0:
             mandatory_status = "OBSERVED_CONFORMANCE"
-            recommended_status = "OBSERVED_CONFORMANCE"
-            summary = (
-                f"Observed conformance in tested trial(s): IPv4 won in {v4_wins}/{len(s4_trials)} trials with median CAD {med_cad}ms "
-                f"when IPv6 RTT (600ms) exceeded CAD timer. Scoped to recorded trial(s); does not infer general client compliance."
+        else:
+            mandatory_status = "NOT_APPLICABLE"
+
+        # Build browser-specific breakdown
+        browser_counts = []
+        browsers_in_s4 = sorted(set(t.browser_name for t in s4_trials))
+        for b in browsers_in_s4:
+            b_trials = [t for t in s4_trials if t.browser_name == b]
+            b_v4 = sum(1 for t in b_trials if t.winning_address_family == "IPv4")
+            b_v6 = [t for t in b_trials if t.winning_address_family == "IPv6"]
+            b_unk = [t for t in b_trials if t.winning_address_family not in ("IPv4", "IPv6")]
+            b_cads = []
+            for t in b_trials:
+                raw_c = t.connection_attempt_delay_ms
+                if raw_c is not None and not isinstance(raw_c, bool):
+                    try:
+                        c_fl = float(raw_c)
+                        if not math.isnan(c_fl) and not math.isinf(c_fl) and c_fl >= 0.0:
+                            b_cads.append(c_fl)
+                    except (ValueError, TypeError):
+                        pass
+            b_med = compute_percentile(sorted(b_cads), 0.5) if b_cads else None
+            b_label = _format_browser_label(b)
+            cad_info = f"median CAD {round(b_med, 2):.2f}ms" if b_med is not None else "no CAD"
+            extra_info = []
+            if b_v6:
+                v6_ids = ", ".join(t.trial_id for t in b_v6)
+                extra_info.append(f"{len(b_v6)} IPv6 win: {v6_ids}")
+            if b_unk:
+                extra_info.append(f"{len(b_unk)} unknown outcome")
+            extra_str = f", {'; '.join(extra_info)}" if extra_info else ""
+            browser_counts.append(f"{b_label}: {b_v4}/{len(b_trials)} IPv4 wins ({cad_info}{extra_str})")
+
+        b_summary_str = "; ".join(browser_counts)
+
+        # Timing & Path selection evaluations
+        mandatory_violation = (cad_sub10_count > 0)
+        recommended_cad_low = (cad_rec_low_count > 0)
+        recommended_cad_high = (cad_over2000_count > 0)
+        has_v6_wins = (len(v6_wins) > 0)
+        has_unknown_wins = (len(unknown_wins) > 0)
+
+        # Recommended CAD distribution description
+        if cad_count > 0:
+            cad_dist_str = (
+                f"Measured CAD across {cad_count} fallback trial(s) (median {med_cad_str}): "
+                f"{cad_in_range_count}/{cad_count} in recommended range [{RFC8305_MIN_CAD_MS:.0f}ms, {RFC8305_MAX_CAD_MS:.0f}ms], "
+                f"{cad_sub100_count}/{cad_count} < 100ms, "
+                f"{cad_over2000_count}/{cad_count} > 2000ms."
             )
         else:
+            cad_dist_str = "No fallback CAD measured."
+
+        # Compile deviations
+        rec_deviations = []
+        if recommended_cad_low:
+            med_note = f" (median {med_cad_str} < 100ms)" if (med_cad is not None and med_cad < RFC8305_MIN_CAD_MS) else ""
+            rec_deviations.append(f"{cad_rec_low_count} trial(s) measured CAD < 100ms recommended floor{med_note}")
+        if recommended_cad_high:
+            med_note = f" (median {med_cad_str} > 2000ms)" if (med_cad is not None and med_cad > RFC8305_MAX_CAD_MS) else ""
+            rec_deviations.append(f"{cad_over2000_count} trial(s) measured CAD > 2000ms recommended upper bound{med_note}")
+        if has_v6_wins:
+            v6_ids_str = ", ".join(t.trial_id for t in v6_wins)
+            rec_deviations.append(f"{len(v6_wins)} trial(s) ({v6_ids_str}) completed over IPv6 without IPv4 fallback")
+
+        # Determine overall recommended_status and status
+        if mandatory_violation or rec_deviations:
             status = "OBSERVED_DEVIATION"
-            mandatory_status = "OBSERVED_DEVIATION" if (cad_vals and any(round(c, 2) < RFC8305_MIN_ATTEMPT_INTERVAL_MS for c in cad_vals)) else "OBSERVED_CONFORMANCE"
-            recommended_status = "OBSERVED_DEVIATION"
+            if rec_deviations:
+                recommended_status = "OBSERVED_DEVIATION"
+            elif has_unknown_wins or subsequent_attempts_indeterminate > 0:
+                recommended_status = "INDETERMINATE"
+            elif len(v4_wins) == total_s4 and cad_count > 0:
+                recommended_status = "OBSERVED_CONFORMANCE"
+            else:
+                recommended_status = "INDETERMINATE"
+        elif has_unknown_wins or subsequent_attempts_indeterminate > 0 or not cad_vals:
+            status = "INDETERMINATE"
+            recommended_status = "INDETERMINATE"
+        else:
+            status = "OBSERVED_CONFORMANCE"
+            recommended_status = "OBSERVED_CONFORMANCE"
+
+        # Construct evidence_summary
+        if status == "OBSERVED_DEVIATION":
+            if mandatory_status == "OBSERVED_DEVIATION":
+                mand_part = f"Subsequent connection attempt started in < 10ms ({cad_sub10_count} trial(s)), violating RFC 8305 §5 mandatory floor (mandatory_status=OBSERVED_DEVIATION)."
+            elif mandatory_status == "OBSERVED_CONFORMANCE":
+                na_note = f"; {not_applicable_mand_count} trial(s) without subsequent attempt evaluated as NOT_APPLICABLE" if not_applicable_mand_count > 0 else ""
+                mand_part = f"All {cad_count} measured CAD values satisfy mandatory 10ms floor (mandatory_status=OBSERVED_CONFORMANCE{na_note})."
+            else:
+                extra_notes = []
+                if invalid_cad_count > 0:
+                    extra_notes.append(f"{invalid_cad_count} invalid CAD measurement(s)")
+                if missing_cad_count > 0:
+                    extra_notes.append(f"{missing_cad_count} missing CAD measurement(s)")
+                notes_str = f" ({'; '.join(extra_notes)})" if extra_notes else ""
+                mand_part = f"Mandatory timing assessment is {mandatory_status}{notes_str}."
+
+            rec_part = f" {'; '.join(rec_deviations)}." if rec_deviations else ""
+            inv_str = f" ({invalid_cad_count} trial(s) had invalid CAD measurements)" if invalid_cad_count > 0 else ""
+            indet_rec_note = f" (recommendation_status=INDETERMINATE due to {len(unknown_wins)} unknown outcome(s))" if (recommended_status == "INDETERMINATE" and not rec_deviations) else ""
+            prefix = "Observed recommendation-level deviation in tested trial(s):" if rec_deviations else "Observed mandatory timing deviation in tested trial(s):"
             summary = (
-                f"Observed deviation in tested trial(s): IPv4 failed to win reliably or CAD violated timing bounds "
-                f"({v4_wins}/{len(s4_trials)} won, median CAD {med_cad}ms)."
+                f"{prefix} "
+                f"IPv4 won in {len(v4_wins)}/{total_s4} trials ({b_summary_str}){indet_rec_note}. "
+                f"{cad_dist_str}{inv_str} {mand_part}{rec_part} "
+                f"Scoped to recorded trial(s); does not infer general client non-conformance or a mandatory timing violation."
+            )
+        elif status == "INDETERMINATE":
+            indet_reasons = []
+            if invalid_cad_count > 0:
+                indet_reasons.append(f"{invalid_cad_count} trial(s) with invalid connection attempt delay measurements")
+            if missing_cad_count > 0:
+                indet_reasons.append(f"{missing_cad_count} fallback trial(s) missing connection attempt delay measurements")
+            if has_unknown_wins:
+                unk_ids = ", ".join(t.trial_id for t in unknown_wins)
+                indet_reasons.append(f"{len(unknown_wins)} trial(s) with unknown winning address family ({unk_ids})")
+            if not cad_vals and applicable_measured_count == 0:
+                indet_reasons.append("no connection attempt delay measurements available")
+            summary = f"Indeterminate: {'; '.join(indet_reasons)}."
+        else:
+            summary = (
+                f"Observed conformance in tested trial(s): IPv4 won in {len(v4_wins)}/{total_s4} trials ({b_summary_str}) "
+                f"with median CAD {med_cad_str} when IPv6 RTT (600ms) exceeded CAD timer. "
+                f"{cad_dist_str} All measured CAD values meet RFC 8305 §5 mandatory floor (>= 10ms) "
+                f"and fall within recommended range [{RFC8305_MIN_CAD_MS:.0f}ms, {RFC8305_MAX_CAD_MS:.0f}ms]. "
+                f"Scoped to recorded trial(s); does not infer general client compliance."
             )
     else:
         status = "INDETERMINATE"
@@ -1178,36 +1770,85 @@ def assess_rfc8305_conformance(
         "sample_size": len(s4_trials),
         "evidence_summary": summary,
         "reasoning": (
-            "When the primary address family RTT (600ms) significantly exceeds the CAD timer (~250-300ms), "
-            "the second connection attempt over IPv4 (20ms RTT) finishes setup first and wins."
+            "RFC 8305 Section 5 distinguishes mandatory inter-attempt spacing (subsequent attempts MUST NOT start "
+            "within 10ms of the previous attempt) from recommended CAD parameters (recommended default 250ms, range "
+            "100ms to 2000ms). Under high primary-path latency (600ms IPv6 RTT), the client is expected to initiate "
+            "an IPv4 connection attempt after the CAD timer, which finishes setup first over the low-latency path. "
+            "Trials where IPv4 wins within timing bounds conform to this recommendation. When a trial completes over "
+            "IPv6 without an IPv4 attempt under 600ms RTT, an observed recommendation-level deviation is recorded without "
+            "imputing a mandatory timing violation."
         )
     })
 
-    # Check 5: RFC 8305 §4 - Resolution Delay for Asynchronous DNS
+    # Check 5: RFC 8305 §3 - Resolution Delay on Asynchronous DNS
     s6_trials = by_sc["S6"]
     if s6_trials:
-        # Check if browser connected via IPv4 or waited for delayed AAAA
-        v6_wins = sum(1 for t in s6_trials if t.winning_address_family == "IPv6")
-        aaaa_lats = [t.dns_latency_aaaa_ms for t in s6_trials if t.dns_latency_aaaa_ms is not None]
-        med_aaaa = compute_percentile(sorted(aaaa_lats), 0.5) if aaaa_lats else None
+        s6_evaluations = [(t, classify_s6_resolution_delay_trial(t)) for t in s6_trials]
+        dev_trials = [t for t, res in s6_evaluations if res["classification"] == "DEVIATION"]
+        conf_trials = [t for t, res in s6_evaluations if res["classification"] == "CONFORMANCE"]
+        indet_trials = [t for t, res in s6_evaluations if res["classification"] == "INDETERMINATE"]
 
-        # Documented behavior: Chrome waited ~500ms for delayed AAAA and connected via IPv6
-        if v6_wins > 0:
+        # Browser breakdown
+        browser_summaries = []
+        browsers_in_s6 = sorted(set(t.browser_name for t in s6_trials))
+        for b in browsers_in_s6:
+            b_evals = [res for t, res in s6_evaluations if t.browser_name == b]
+            b_trials_count = len(b_evals)
+            b_dev = sum(1 for r in b_evals if r["classification"] == "DEVIATION")
+            b_conf = sum(1 for r in b_evals if r["classification"] == "CONFORMANCE")
+            b_indet = sum(1 for r in b_evals if r["classification"] == "INDETERMINATE")
+            b_delays = [r["a_to_aaaa_ms"] for r in b_evals if r["a_to_aaaa_ms"] is not None and r["a_to_aaaa_ms"] > 0]
+            b_delays.sort()
+            b_med = compute_percentile(b_delays, 0.5) if b_delays else None
+            b_v4_att = sum(1 for r in b_evals if r["ipv4_attempt"] is True)
+            b_label = _format_browser_label(b)
+            med_str = f"{round(b_med, 2):.2f}ms" if b_med is not None else "N/A"
+            browser_summaries.append(
+                f"{b_label}: {b_trials_count} trials ({b_dev} deviations, {b_conf} conforming, {b_indet} indeterminate; "
+                f"positive A-to-AAAA median {med_str}, {b_v4_att} IPv4 attempts)"
+            )
+
+        browser_str = "; ".join(browser_summaries)
+
+        # Conservative aggregate status:
+        # 1. If one or more confirmed deviations exist, overall status is OBSERVED_DEVIATION.
+        # 2. If no confirmed deviation exists but one or more trials are indeterminate, overall status is INDETERMINATE.
+        # 3. OBSERVED_CONFORMANCE only when all assessed trials have conformance evidence.
+        if dev_trials:
             status = "OBSERVED_DEVIATION"
+            mandatory_status = "NOT_APPLICABLE"
+            recommended_status = "OBSERVED_DEVIATION"
             summary = (
-                f"Observed deviation in recorded Chrome trial (trial-20261028171417-b2d83f2f): Browser waited ~{med_aaaa}ms "
-                f"for delayed AAAA response and connected over IPv6, rather than initiating IPv4 fallback after the RFC 8305 §4 "
-                f"recommended 50ms Resolution Delay. Conclusion is strictly scoped to this recorded Chrome trial and does not "
-                f"infer general browser non-conformance."
+                f"Observed recommendation-level deviation in tested trial(s): "
+                f"{len(dev_trials)}/{len(s6_trials)} trials with observed deviation, "
+                f"{len(conf_trials)}/{len(s6_trials)} conforming, "
+                f"{len(indet_trials)}/{len(s6_trials)} indeterminate. "
+                f"Sample: {len(s6_trials)} trial(s) ({browser_str}). "
+                f"Scoped to recorded trial(s); does not infer a mandatory MUST violation or general browser non-conformance."
+            )
+        elif indet_trials:
+            status = "INDETERMINATE"
+            mandatory_status = "NOT_APPLICABLE"
+            recommended_status = "INDETERMINATE"
+            summary = (
+                f"Indeterminate: Insufficient or missing positive DNS response/attempt evidence to assess Resolution Delay "
+                f"({len(indet_trials)}/{len(s6_trials)} trials indeterminate, "
+                f"{len(conf_trials)}/{len(s6_trials)} conforming, "
+                f"{len(dev_trials)}/{len(s6_trials)} deviations). "
+                f"Sample: {len(s6_trials)} trial(s) ({browser_str})."
             )
         else:
             status = "OBSERVED_CONFORMANCE"
+            mandatory_status = "NOT_APPLICABLE"
+            recommended_status = "OBSERVED_CONFORMANCE"
             summary = (
-                f"Observed conformance in tested trial(s): Client adhered to Resolution Delay, falling back to IPv4 "
-                f"before delayed AAAA arrived. Scoped to recorded trial(s); does not infer general browser compliance."
+                f"Observed conformance in tested trial(s): Client adhered to Resolution Delay recommendation "
+                f"({len(conf_trials)}/{len(s6_trials)} trials conforming, "
+                f"{len(dev_trials)}/{len(s6_trials)} deviations, "
+                f"{len(indet_trials)}/{len(s6_trials)} indeterminate). "
+                f"Sample: {len(s6_trials)} trial(s) ({browser_str}). "
+                f"Scoped to recorded trial(s); does not infer general client compliance."
             )
-        mandatory_status = "NOT_APPLICABLE"
-        recommended_status = status
     else:
         status = "INDETERMINATE"
         mandatory_status = "INDETERMINATE"
@@ -1215,7 +1856,7 @@ def assess_rfc8305_conformance(
         summary = "Indeterminate: No valid S6 delayed AAAA DNS trials available."
 
     assessments.append({
-        "check_id": "RFC8305-SEC4-RESOLUTION-DELAY",
+        "check_id": "RFC8305-SEC3-RESOLUTION-DELAY",
         "rfc_section": "RFC 8305 Section 3",
         "title": "Resolution Delay on Asynchronous A/AAAA DNS Arrival",
         "scenario_id": "S6",
@@ -1225,11 +1866,16 @@ def assess_rfc8305_conformance(
         "sample_size": len(s6_trials),
         "evidence_summary": summary,
         "reasoning": (
-            "RFC 8305 Section 3 recommends a 50ms Resolution Delay when A arrives before AAAA. "
-            "If AAAA does not arrive within this window, the client SHOULD initiate IPv4. "
-            "In the recorded single Chrome trial, the client waited for the late AAAA response (~515ms after query, "
-            "~496ms after A response) before connecting over IPv6. This observed deviation documents specific trial behavior "
-            "under lab conditions and is not an inference of general browser implementation characteristics."
+            "RFC 8305 Section 3 recommends a 50ms Resolution Delay when a positive A response arrives "
+            "before a positive AAAA response. If positive AAAA arrives within or exactly at 50ms, an IPv4 "
+            "connection attempt that starts before the positive AAAA response is an observed recommendation-level "
+            "deviation; if no IPv4 attempt starts before that positive AAAA response, the trial conforms to this "
+            "timing recommendation. If positive AAAA arrives more than 50ms after positive A, an IPv4 attempt "
+            "should have started within the 50ms window; no attempt, or an attempt starting after that window, "
+            "is an observed deviation. If an attempt is recorded but its timing cannot establish the relevant "
+            "chronology, classify the trial as indeterminate. This recommendation-level assessment documents "
+            "specific trial behavior under lab conditions and does not infer a mandatory MUST violation or "
+            "general browser non-conformance."
         )
     })
 

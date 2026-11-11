@@ -28,14 +28,25 @@ REPO_ROOT = SCRIPT_DIR.parent
 class TestPreflightExecution(unittest.TestCase):
     """Test non-destructive dependency preflight checks."""
 
-    def test_run_preflight_passes_on_current_system(self):
-        """Live preflight check on healthy system must return status PASS."""
-        report = preflight.run_preflight()
-        self.assertEqual(report["status"], "PASS")
-        self.assertEqual(len(report["failures"]["missing_required_binaries"]), 0)
-        self.assertEqual(len(report["failures"]["missing_packages"]), 0)
-        self.assertEqual(len(report["failures"]["missing_python"]), 0)
-        self.assertEqual(len(report["failures"]["invalid_configs"]), 0)
+    def test_run_preflight_passes_with_mocked_host_dependencies(self):
+        """Preflight check with mocked host binaries and packages must return status PASS."""
+        manifest = preflight.parse_system_packages_manifest()
+        fake_dpkg_stdout = "".join(
+            f"{pkg}\t{ver if ver != '*' else '1.0.0'}\tinstall ok installed\n"
+            for pkg, ver in manifest.items()
+        )
+        mock_proc = MagicMock()
+        mock_proc.stdout = fake_dpkg_stdout
+        mock_proc.returncode = 0
+
+        with patch("shutil.which", side_effect=lambda cmd: f"/usr/bin/{cmd}"), \
+             patch("subprocess.run", return_value=mock_proc):
+            report = preflight.run_preflight()
+            self.assertEqual(report["status"], "PASS")
+            self.assertEqual(len(report["failures"]["missing_required_binaries"]), 0)
+            self.assertEqual(len(report["failures"]["missing_packages"]), 0)
+            self.assertEqual(len(report["failures"]["missing_python"]), 0)
+            self.assertEqual(len(report["failures"]["invalid_configs"]), 0)
 
     def test_manifest_contains_all_study_guide_categories(self):
         """Manifest must include networking, DNS, nftables, Python, Nginx, and capture tools."""

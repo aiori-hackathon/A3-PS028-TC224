@@ -330,6 +330,39 @@ class TestEvidenceValidationRules(unittest.TestCase):
         self.assertTrue(is_valid)
         self.assertIn("Evidence verified", msg)
 
+    def test_validate_attempt_evidence_resolves_repo_relative_result_and_pcap_paths(self):
+        trial_dir = self.temp_dir / "lab" / "campaigns" / "relative-test" / "trials" / "trial-relative"
+        pcap_path = trial_dir / "capture.pcap"
+        pcap_sha = _create_dummy_pcap(pcap_path, packet_count=2)
+        result_path = trial_dir / "result.json"
+        result = {
+            "schema_version": run_trial.SCHEMA_VERSION,
+            "scenario_id": "S0",
+            "is_simulation": False,
+            "cleanup_status": {
+                "scenario_restored": True,
+                "baseline_verified": True,
+                "errors": [],
+            },
+            "capture_metadata": {
+                "pcap_path": "lab/campaigns/relative-test/trials/trial-relative/capture.pcap",
+                "pcap_sha256": pcap_sha,
+                "pcap_valid": True,
+                "packet_count": 2,
+            },
+        }
+        result_path.write_text(json.dumps(result), encoding="utf-8")
+
+        with patch.object(run_campaign, "REPO_ROOT", self.temp_dir):
+            is_valid, message, _ = run_campaign.validate_attempt_evidence(
+                "lab/campaigns/relative-test/trials/trial-relative/result.json",
+                expected_scenario="S0",
+                is_simulation=False,
+            )
+
+        self.assertTrue(is_valid, message)
+        self.assertIn("Evidence verified", message)
+
     def test_validate_attempt_evidence_rejects_missing_result_json(self):
         is_valid, msg, _ = run_campaign.validate_attempt_evidence(
             result_json_path=self.temp_dir / "nonexistent.json",
@@ -404,6 +437,48 @@ class TestEvidenceValidationRules(unittest.TestCase):
         )
         self.assertFalse(is_valid)
         self.assertIn("PCAP contains 0 packets", msg)
+
+
+class TestPortableEvidencePathResolution(unittest.TestCase):
+    """Repository-relative evidence metadata remains resolvable after checkout relocation."""
+
+    def test_repo_relative_paths_resolve_from_repository_root(self):
+        expected = (run_campaign.REPO_ROOT / "lab" / "scenarios.yaml").resolve()
+        self.assertEqual(
+            run_campaign._resolve_repo_relative_path("lab/scenarios.yaml"),
+            expected,
+        )
+
+    def test_absolute_external_paths_remain_absolute(self):
+        external = Path(tempfile.gettempdir()) / "ps028-external-evidence" / "result.json"
+        self.assertEqual(run_campaign._resolve_repo_relative_path(external), external)
+
+    def test_legacy_foreign_checkout_path_maps_to_current_checkout_when_present(self):
+        with tempfile.TemporaryDirectory(prefix="ps028_relocated_repo_") as temp_root:
+            relocated_root = Path(temp_root)
+            (relocated_root / "lab").mkdir(parents=True, exist_ok=True)
+            expected = relocated_root / "lab" / "scenarios.yaml"
+            expected.write_text("scenarios: {}\n", encoding="utf-8")
+            legacy = Path("/home/indrani/projects/he-webtester/lab/scenarios.yaml")
+            with patch.object(run_campaign, "REPO_ROOT", relocated_root):
+                self.assertEqual(run_campaign._resolve_repo_relative_path(legacy), expected.resolve())
+
+    def test_unrelated_external_checkout_name_is_not_remapped(self):
+        with tempfile.TemporaryDirectory(prefix="ps028_external_path_") as temp_root:
+            temp_root = Path(temp_root)
+            relocated_root = temp_root / "current-checkout"
+            relocated_file = relocated_root / "lab" / "scenarios.yaml"
+            relocated_file.parent.mkdir(parents=True)
+            relocated_file.write_text("scenarios: {}\n", encoding="utf-8")
+
+            external = (
+                temp_root / "external" / "he-webtester" / "lab" / "scenarios.yaml"
+            )
+            with patch.object(run_campaign, "REPO_ROOT", relocated_root):
+                self.assertEqual(
+                    run_campaign._resolve_repo_relative_path(external),
+                    external.resolve(),
+                )
 
 
 class TestSafeResume(unittest.TestCase):

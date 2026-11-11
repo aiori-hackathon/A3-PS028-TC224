@@ -40,7 +40,7 @@ import signal
 import sys
 import threading
 import time
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
@@ -73,6 +73,45 @@ DOCUMENTED_SCENARIO_MISMATCHES: Dict[str, Dict[str, str]] = {
         "policy": "Canonical lab/scenarios.yaml configuration preserved per PS-028 specification; evidence not relabeled."
     }
 }
+
+
+def _resolve_repo_relative_path(path: Union[str, Path]) -> Path:
+    """Resolve portable and legacy evidence paths against the current checkout.
+
+    New result JSON and campaign manifests use repository-relative paths for
+    project-owned evidence. Absolute paths from a previous checkout (including
+    the former ``he-webtester`` directory name) are remapped only when the
+    corresponding repository-relative file exists in this checkout. Absolute
+    paths outside a recognized checkout remain unchanged.
+    """
+    candidate = Path(path).expanduser()
+    if not candidate.is_absolute():
+        return (REPO_ROOT / candidate).resolve()
+
+    resolved = candidate.resolve(strict=False)
+    try:
+        resolved.relative_to(REPO_ROOT)
+        return resolved
+    except ValueError:
+        pass
+
+    recognized_checkout_names = {REPO_ROOT.name, "he-webtester"}
+    parts = resolved.parts
+    is_recognized_home_checkout = (
+        len(parts) >= 6
+        and parts[0] == "/"
+        and parts[1] == "home"
+        and bool(parts[2])
+        and parts[3] == "projects"
+        and parts[4] in recognized_checkout_names
+    )
+    if is_recognized_home_checkout:
+        suffix = Path(*parts[5:])
+        relocated = (REPO_ROOT / suffix).resolve()
+        if relocated.is_file() or relocated.is_dir():
+            return relocated
+
+    return resolved
 
 
 # ==============================================================================
@@ -377,6 +416,7 @@ def validate_attempt_evidence(
     - Strictly checks fallback classification adheres to A7 classification matrix.
     Returns: (is_valid, reason, result_dict)
     """
+    result_json_path = _resolve_repo_relative_path(result_json_path)
     if not result_json_path.is_file():
         return False, f"result.json missing at {result_json_path}", {}
 
@@ -403,7 +443,7 @@ def validate_attempt_evidence(
     pcap_str = data.get("capture_metadata", {}).get("pcap_path")
     if not pcap_str:
         return False, "capture_metadata missing pcap_path", data
-    pcap_path = Path(pcap_str)
+    pcap_path = _resolve_repo_relative_path(pcap_str)
     if not pcap_path.is_file():
         return False, f"PCAP file missing at {pcap_path}", data
 
@@ -610,7 +650,7 @@ def reconcile_manifest_for_resume(
                     break
 
             if valid_attempt:
-                res_path = Path(valid_attempt.evidence_paths.get("result_json", ""))
+                res_path = _resolve_repo_relative_path(valid_attempt.evidence_paths.get("result_json", ""))
                 is_valid, msg, _ = validate_attempt_evidence(
                     res_path,
                     slot.scenario_id,
@@ -1037,7 +1077,7 @@ def finalize_campaign_manifest(manifest_path: Path) -> CampaignManifest:
             if not valid_attempt:
                 all_done = False
                 break
-            res_path = Path(valid_attempt.evidence_paths.get("result_json", ""))
+            res_path = _resolve_repo_relative_path(valid_attempt.evidence_paths.get("result_json", ""))
             is_valid, _, _ = validate_attempt_evidence(res_path, slot.scenario_id, manifest.is_simulation)
             if not is_valid:
                 all_done = False

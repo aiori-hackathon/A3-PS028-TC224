@@ -30,11 +30,13 @@ Regression Tests for:
 """
 
 import argparse
+import contextlib
 import errno
 import fcntl
 import json
 import os
 from pathlib import Path
+import pwd
 import shutil
 import signal
 import struct
@@ -52,6 +54,8 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 import lab.concurrency as concurrency
+import lab.identity as identity
+from lab.identity import UserIdentity
 import lab.impair as impair
 import lab.preflight as preflight
 import lab.privileged_helper as priv_helper
@@ -198,6 +202,7 @@ class TestLockCoordinationAndDeadlockPrevention(unittest.TestCase):
         log_path = self.temp_dir / "tcpdump.log"
         # Lock not held: must fail closed on lock verification, NOT on unrecognized arguments
         self.lock_file.touch()
+        invoking_user = identity.resolve_invoking_identity().username
         res = subprocess.run(
             [
                 sys.executable,
@@ -209,7 +214,7 @@ class TestLockCoordinationAndDeadlockPrevention(unittest.TestCase):
                 "--log-file", str(log_path),
                 "--netns", "ps028-cl",
                 "--interface", "any",
-                "--owner-user", "indrani",
+                "--owner-user", invoking_user,
                 "--readiness-timeout", "1.0",
             ],
             capture_output=True,
@@ -227,6 +232,7 @@ class TestLockCoordinationAndDeadlockPrevention(unittest.TestCase):
         """
         pcap_path = self.temp_dir / "capture.pcap"
         log_path = self.temp_dir / "tcpdump.log"
+        invoking_user = identity.resolve_invoking_identity().username
 
         with concurrency.acquire_lab_lock(lock_path=self.lock_file):
             res = subprocess.run(
@@ -240,7 +246,7 @@ class TestLockCoordinationAndDeadlockPrevention(unittest.TestCase):
                     "--log-file", str(log_path),
                     "--netns", "ps028-cl",
                     "--interface", "any",
-                    "--owner-user", "indrani",
+                    "--owner-user", invoking_user,
                     "--readiness-timeout", "0.5",
                 ],
                 capture_output=True,
@@ -485,8 +491,12 @@ class TestSnapBrowserNamespaceMountsAndLaunch(unittest.TestCase):
 
     def test_get_invoking_uid_gid_sudo_environment(self):
         """Invoking identity under sudo must extract SUDO_UID and SUDO_GID."""
+        mock_pw = pwd.struct_passwd((
+            "sudo_user", "x", 1002, 1003, "Sudo User", "/home/sudo_user", "/bin/bash"
+        ))
         with patch("os.getuid", return_value=0), \
-             patch.dict(os.environ, {"SUDO_UID": "1002", "SUDO_GID": "1003"}):
+             patch.dict(os.environ, {"SUDO_UID": "1002", "SUDO_GID": "1003", "SUDO_USER": "sudo_user"}), \
+             patch("pwd.getpwuid", return_value=mock_pw):
             uid, gid = priv_helper.get_invoking_uid_gid()
             self.assertEqual(uid, 1002)
             self.assertEqual(gid, 1003)
@@ -1247,6 +1257,32 @@ class TestCaptureLifecycleAndSafety(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
+    @contextlib.contextmanager
+    def _mock_capture_owner(
+        self,
+        username="capture_test_user",
+        uid=23017,
+        gid=23018,
+        home_path=Path("/tmp/ps028-test-home/capture_test_user")
+    ):
+        test_ident = UserIdentity(
+            uid=uid,
+            gid=gid,
+            username=username,
+            home_dir=home_path,
+            shell="/bin/bash"
+        )
+        mock_pw = pwd.struct_passwd((
+            username, "x", uid, gid, username, str(home_path), "/bin/bash"
+        ))
+        with patch("lab.privileged_helper.identity.resolve_invoking_identity", return_value=test_ident), \
+             patch("lab.privileged_helper.identity.resolve_user_by_name", return_value=test_ident), \
+             patch("pwd.getpwnam", return_value=mock_pw), \
+             patch("pwd.getpwuid", return_value=mock_pw), \
+             patch("os.getgrouplist", return_value=[gid]), \
+             patch("os.chown"):
+            yield test_ident
+
     @patch("subprocess.run")
     def test_detached_sudo_failure_evidence(self, mock_run):
         """
@@ -1351,15 +1387,16 @@ class TestCaptureLifecycleAndSafety(unittest.TestCase):
 
         mock_popen.side_effect = _popen_side
 
-        res = priv_helper.start_capture_privileged(
-            output_pcap=self.pcap_file,
-            log_file=self.log_file,
-            netns="ps028-cl",
-            owner_user="indrani"
-        )
+        with self._mock_capture_owner(username="capture_test_user"):
+            res = priv_helper.start_capture_privileged(
+                output_pcap=self.pcap_file,
+                log_file=self.log_file,
+                netns="ps028-cl",
+                owner_user="capture_test_user"
+            )
         cmd_called = mock_popen.call_args[0][0]
         self.assertIn("-Z", cmd_called)
-        self.assertIn("indrani", cmd_called)
+        self.assertIn("capture_test_user", cmd_called)
         self.assertIn("-B", cmd_called)
         self.assertIn("8192", cmd_called)
         self.assertIn("ps028-cl-rt", cmd_called)
@@ -1386,15 +1423,16 @@ class TestCaptureLifecycleAndSafety(unittest.TestCase):
 
         mock_popen.side_effect = _popen_side
 
-        res = priv_helper.start_capture_privileged(
-            output_pcap=self.pcap_file,
-            log_file=self.log_file,
-            netns="ps028-cl",
-            interface="any",
-            bpf_filter="port 80",
-            buffer_size_kb=4096,
-            owner_user="indrani"
-        )
+        with self._mock_capture_owner(username="capture_test_user"):
+            res = priv_helper.start_capture_privileged(
+                output_pcap=self.pcap_file,
+                log_file=self.log_file,
+                netns="ps028-cl",
+                interface="any",
+                bpf_filter="port 80",
+                buffer_size_kb=4096,
+                owner_user="capture_test_user"
+            )
         cmd_called = mock_popen.call_args[0][0]
         self.assertIn("-B", cmd_called)
         self.assertIn("4096", cmd_called)
@@ -1456,12 +1494,13 @@ class TestCaptureLifecycleAndSafety(unittest.TestCase):
 
         mock_popen.side_effect = _popen_side
 
-        res = priv_helper.start_capture_privileged(
-            output_pcap=self.pcap_file,
-            log_file=self.log_file,
-            netns="ps028-cl",
-            owner_user="indrani"
-        )
+        with self._mock_capture_owner(username="capture_test_user"):
+            res = priv_helper.start_capture_privileged(
+                output_pcap=self.pcap_file,
+                log_file=self.log_file,
+                netns="ps028-cl",
+                owner_user="capture_test_user"
+            )
 
         # Must be a dict and must NOT contain _proc or any Popen object
         self.assertIsInstance(res, dict)
@@ -1509,46 +1548,47 @@ class TestCaptureLifecycleAndSafety(unittest.TestCase):
 
         mock_popen.side_effect = _popen_side
 
-        res = priv_helper.start_capture_privileged(
-            output_pcap=self.pcap_file,
-            log_file=self.log_file,
-            netns="ps028-cl",
-            owner_user="indrani"
-        )
-        pid_file = self.pcap_file.with_suffix(".pid")
-        self.assertTrue(pid_file.is_file())
+        with self._mock_capture_owner(username="capture_test_user"):
+            res = priv_helper.start_capture_privileged(
+                output_pcap=self.pcap_file,
+                log_file=self.log_file,
+                netns="ps028-cl",
+                owner_user="capture_test_user"
+            )
+            pid_file = self.pcap_file.with_suffix(".pid")
+            self.assertTrue(pid_file.is_file())
 
-        # Round-trip JSON serialization
-        handle_json = json.dumps(res)
-        deserialized_handle = json.loads(handle_json)
+            # Round-trip JSON serialization
+            handle_json = json.dumps(res)
+            deserialized_handle = json.loads(handle_json)
 
-        # Write valid PCAP to simulate capture finalization
-        header = struct.pack("<IHHIIII", 0xa1b2c3d4, 2, 4, 0, 0, 65535, 1)
-        pkt_hdr = struct.pack("<IIII", 1000, 0, 10, 10)
-        self.pcap_file.write_bytes(header + pkt_hdr + b"1234567890")
+            # Write valid PCAP to simulate capture finalization
+            header = struct.pack("<IHHIIII", 0xa1b2c3d4, 2, 4, 0, 0, 65535, 1)
+            pkt_hdr = struct.pack("<IIII", 1000, 0, 10, 10)
+            self.pcap_file.write_bytes(header + pkt_hdr + b"1234567890")
 
-        alive_state = {"alive": True}
-        def _mock_kill(p, sig):
-            if sig == signal.SIGINT:
-                alive_state["alive"] = False
-        mock_kill.side_effect = _mock_kill
+            alive_state = {"alive": True}
+            def _mock_kill(p, sig):
+                if sig == signal.SIGINT:
+                    alive_state["alive"] = False
+            mock_kill.side_effect = _mock_kill
 
-        with patch("lab.run_trial.is_safe_capture_process", return_value=True):
-            with patch("lab.run_trial._is_pid_alive", side_effect=lambda p: alive_state["alive"]):
-                stop_res = priv_helper.stop_capture_privileged(
-                    pid=deserialized_handle["parent_pid"],
-                    pcap_path=Path(deserialized_handle["pcap_path"]),
-                    timeout=1.0,
-                    verify_pcap=True
-                )
+            with patch("lab.run_trial.is_safe_capture_process", return_value=True):
+                with patch("lab.run_trial._is_pid_alive", side_effect=lambda p: alive_state["alive"]):
+                    stop_res = priv_helper.stop_capture_privileged(
+                        pid=deserialized_handle["parent_pid"],
+                        pcap_path=Path(deserialized_handle["pcap_path"]),
+                        timeout=1.0,
+                        verify_pcap=True
+                    )
 
-        self.assertEqual(stop_res["status"], "OK")
-        self.assertTrue(stop_res["pcap_valid"])
-        self.assertIn("sha256", stop_res)
-        self.assertGreater(len(stop_res["sha256"]), 0)
-        self.assertEqual(stop_res["packet_count"], 1)
-        # PID file must be cleaned up
-        self.assertFalse(pid_file.exists())
+            self.assertEqual(stop_res["status"], "OK")
+            self.assertTrue(stop_res["pcap_valid"])
+            self.assertIn("sha256", stop_res)
+            self.assertGreater(len(stop_res["sha256"]), 0)
+            self.assertEqual(stop_res["packet_count"], 1)
+            # PID file must be cleaned up
+            self.assertFalse(pid_file.exists())
 
     @patch("subprocess.Popen")
     @patch("os.geteuid", return_value=0)
@@ -1993,16 +2033,17 @@ class TestTruthfulCleanupAndFailStopSafety(unittest.TestCase):
             }
         }
 
-        runner = run_campaign.CampaignRunner(
-            scenarios=["S0", "S1"],
-            browsers=["chromium"],
-            repetitions=1,
-            output_dir=self.temp_dir,
-            is_simulation=False
-        )
+        with patch("lab.run_campaign.run_trial.find_browser_runtime", return_value=("chromium", "/usr/bin/chromium", "Chromium 124.0.0.0")):
+            runner = run_campaign.CampaignRunner(
+                scenarios=["S0", "S1"],
+                browsers=["chromium"],
+                repetitions=1,
+                output_dir=self.temp_dir,
+                is_simulation=False
+            )
 
-        with self.assertRaises(run_campaign.CampaignHaltedError) as ctx:
-            runner.run()
+            with self.assertRaises(run_campaign.CampaignHaltedError) as ctx:
+                runner.run()
 
         self.assertIn("FAIL-STOP", str(ctx.exception))
         # Only slot 1 (S0) was attempted; S1 was NOT executed

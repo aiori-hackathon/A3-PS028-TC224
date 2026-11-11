@@ -4,14 +4,14 @@
 **Manifest Status:** `COMPLETED`
 **Completion Timestamp:** `2026-10-29T22:57:12.728189+00:00`
 **Audited Date:** 2026-10-30
-**Laboratory Testbed:** `~/projects/he-webtester`
+**Historical campaign checkout (execution-time path):** `~/projects/he-webtester`
 **Document Classification:** Final Technical Validation Report (Work Package A10)
 
 ---
 
 ## 1. Executive Summary
 
-This report documents the final experimental validation of the PS-028 Happy Eyeballs measurement campaign (`ps028-a10-live-20261030-01`), executed within the isolated dual-stack Linux network namespace testbed of `~/projects/he-webtester`. The campaign evaluated the connection establishment and fallback dynamics of modern production web browsers under systematic physical-layer, transport-layer, and DNS impairments conforming to RFC 8305 (Happy Eyeballs Version 2).
+This report documents the final experimental validation of the PS-028 Happy Eyeballs measurement campaign (`ps028-a10-live-20261030-01`), executed within the isolated dual-stack Linux network namespace testbed in the original campaign checkout at `~/projects/he-webtester`. That checkout path is retained as historical execution provenance; it is not a required path for a later checkout or reproduction. The campaign evaluated the connection establishment and fallback dynamics of modern production web browsers under systematic physical-layer, transport-layer, and DNS impairments conforming to RFC 8305 (Happy Eyeballs Version 2).
 
 The measurement matrix comprised **280 planned cells** covering 7 scenarios (S0â€“S6), 2 browser runtimes (**Google Chrome 156.0.8078.73** and **Mozilla Firefox 159.0**), and 20 sequential repetitions per cell. A total of **282 execution attempts** were recorded:
 - **280 attempts** achieved `VALID_LIVE` status with verified PCAP captures, valid cryptographic checksums, positive packet counts, zero packet drops, and HTTP 200 responses.
@@ -19,7 +19,7 @@ The measurement matrix comprised **280 planned cells** covering 7 scenarios (S0â
 
 Overall connection classification under the canonical PS-028 packet-based rule yielded **154 `DIRECT_IPV6`** connections (55.00%) and **126 `IPV6_TO_IPV4_FALLBACK`** connections (45.00%). Both browsers exhibited 100% IPv6 preference under healthy baseline conditions (S0) and successfully fell back to IPv4 under IPv6 SYN blackholing (S1) and IPv6 TCP RST rejection (S2). However, under delayed DNS AAAA resolution (S6), both Chrome and Firefox waited ~500ms for delayed AAAA responses rather than triggering an IPv4 fallback after the RFC 8305 recommended 50ms Resolution Delay (Section 3), subsequently connecting directly over IPv6. In Scenario S5 (50% SYN loss), 33 trials connected over IPv6 (including 5 trials with post-navigation ancillary or speculative IPv4 traffic) and 7 trials fell back to IPv4.
 
-All 280 valid trial PCAPs and result records were independently audited and verified against the finalized manifest. The testbed baseline state was validated clean, and the entire lab test suite of **400 tests** passes without errors.
+All 280 valid trial PCAPs and result records were independently audited and verified against the finalized manifest. The testbed baseline state was validated clean. At the time this report was prepared, the lab test suite comprised **400 tests** and passed without errors; the expanded suite subsequently reached **523 passing tests** in the WSL validation on 2026-11-11.
 
 ---
 
@@ -143,14 +143,16 @@ An Nginx HTTP measurement server runs in namespace `ps028-sv`, listening on both
 
 ### Browser Runtimes
 
-| Runtime | Binary Executable Path | Version String | Execution Architecture |
+| Runtime | Binary Executable Path (original campaign host) | Version String | Execution Architecture |
 | :--- | :--- | :--- | :--- |
 | **Google Chrome** | `/usr/bin/google-chrome` | `Google Chrome 156.0.8078.73` | Headless (`--headless=new`) with `--dump-dom` |
 | **Mozilla Firefox** | `/home/indrani/opt/firefox-measurement/firefox` | `Mozilla Firefox 159.0` | Headless (`--headless`) standalone binary |
 
+> **Historical provenance and portability:** The Firefox executable path and the `indrani` account/UID recorded in this report describe the original October campaign host. They are historical environment details, not required paths, usernames, or UIDs on reproduction machines. The runner resolves the local unprivileged identity from the system passwd database. Set `FIREFOX_BIN` to the standalone Firefox executable installed on the reproduction host.
+
 ### Execution Isolation
 To ensure experimental independence and prevent cross-trial state contamination:
-1. **Unprivileged Process Context:** Browsers are executed inside the `ps028-cl` namespace under target non-root user UID/GID (`indrani`, UID 1000) using `setpriv --reuid=1000 --regid=1000 --init-groups`.
+1. **Unprivileged Process Context:** On the original campaign host, browsers were executed inside the `ps028-cl` namespace as the non-root account `indrani` (UID 1000) using `setpriv --reuid=1000 --regid=1000 --init-groups`. On reproduction hosts, the runner resolves the local unprivileged UID/GID from the system passwd database; UID 1000 and the username `indrani` are not required.
 2. **Ephemeral Profiles:** Every trial allocates a freshly generated, isolated temporary profile directory (`--user-data-dir` for Chrome; `--profile` for Firefox). Profile paths are completely unlinked and removed immediately following trial execution.
 3. **Cache Elimination:** Hardened command-line flags disable background networking, component updates, domain reliability, crash reporting, session restore, predictive prefetching, and disk caching.
 
@@ -200,9 +202,11 @@ Executed in headless mode with rigorous state isolation and performance telemetr
 #### Mozilla Firefox Execution Flags & Environment
 Executed in headless mode with internal socket and HTTP telemetry:
 ```bash
+# Set this to the standalone Firefox executable on this host.
+: "${FIREFOX_BIN:?Export FIREFOX_BIN to the standalone Firefox executable}"
 MOZ_LOG="sync,timestamp,nsHttp:5,nsSocketTransport:5" \
 MOZ_LOG_FILE="{trial_dir}/browser_telemetry.log" \
-/home/indrani/opt/firefox-measurement/firefox \
+"$FIREFOX_BIN" \
   --headless \
   -no-remote \
   -profile {ephemeral_profile_dir} \
@@ -538,9 +542,9 @@ The campaign manifest permanently records two documented mismatches between earl
    sudo python3 lab/impair.py self-test-baseline
    ```
 
-2. **Execute Full Test Suite (400 tests):**
+2. **Execute Full Lab Test Suite (test count depends on checkout):**
    ```bash
-   python3 -m unittest discover -s lab
+   PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s lab -p "test_*.py"
    ```
 
 3. **Re-Run Statistical Analysis on Campaign Evidence:**

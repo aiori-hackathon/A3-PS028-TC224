@@ -35,7 +35,6 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import pwd
 import re
 import shutil
 import signal
@@ -55,6 +54,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 import lab.concurrency as concurrency
+import lab.identity as identity
 import lab.impair as impair
 import lab.teardown as teardown
 
@@ -79,6 +79,34 @@ DEFAULT_BPF_FILTER = (
     "(host 10.0.2.10 and tcp port 80) or "
     "(host 2001:db8:2::10 and tcp port 80)"
 )
+
+def _serialize_evidence_path(path: Optional[Union[str, Path]]) -> Optional[str]:
+    """Serialize project-owned evidence paths independently of the checkout location.
+
+    Files inside this repository are recorded as POSIX paths relative to REPO_ROOT.
+    Paths deliberately written outside the repository remain absolute because no
+    portable project-relative location can be inferred for them. This function only
+    changes JSON metadata; filesystem operations continue to use the original Path.
+    """
+    if path is None:
+        return None
+
+    raw_path = os.fspath(path)
+    if not raw_path:
+        return None
+
+    candidate = Path(raw_path).expanduser()
+    try:
+        resolved = candidate.resolve(strict=False)
+    except (OSError, RuntimeError):
+        resolved = Path(os.path.abspath(os.fspath(candidate)))
+
+    try:
+        relative = resolved.relative_to(REPO_ROOT)
+    except ValueError:
+        return str(resolved)
+    return relative.as_posix()
+
 
 ALLOWED_SCENARIOS = ["S0", "S1", "S2", "S3", "S4", "S5", "S6"]
 
@@ -130,9 +158,10 @@ def is_snap_browser(executable_path: Union[str, Path]) -> bool:
 def get_invoking_uid_gid() -> Tuple[int, int]:
     """
     Returns the invoking user's UID and GID.
+    Authoritatively backed by the Linux passwd database via lab.identity.
     """
-    import lab.privileged_helper as priv_helper
-    return priv_helper.get_invoking_uid_gid()
+    ident = identity.resolve_invoking_identity()
+    return ident.uid, ident.gid
 
 
 def is_mount_present(*args, **kwargs) -> bool:
@@ -787,7 +816,8 @@ def start_packet_capture(
         return None
 
     import lab.privileged_helper as priv_helper
-    normal_user = os.environ.get("SUDO_USER") or os.environ.get("USER") or "indrani"
+    ident = identity.resolve_invoking_identity()
+    normal_user = ident.username
 
     if caller_holds_lock is None:
         caller_holds_lock = concurrency.is_lock_held_by_current_thread(lock_file)
@@ -953,8 +983,8 @@ def stop_packet_capture(
             stop_args.extend(["--pcap", str(pcap_path)])
         if not verify_pcap:
             stop_args.append("--no-verify-pcap")
-        normal_user = os.environ.get("SUDO_USER") or os.environ.get("USER") or "indrani"
-        stop_args.extend(["--owner-user", normal_user])
+        ident = identity.resolve_invoking_identity()
+        stop_args.extend(["--owner-user", ident.username])
 
         try:
             res = priv_helper.run_helper_action(
@@ -974,11 +1004,13 @@ def stop_packet_capture(
     # When running as root with CaptureProcess or capture handle dict, call stop_capture_privileged
     if os.geteuid() == 0 and isinstance(proc, (CaptureProcess, dict)):
         import lab.privileged_helper as priv_helper
+        ident = identity.resolve_invoking_identity()
         try:
             res = priv_helper.stop_capture_privileged(
                 pid=target_pid,
                 pcap_path=pcap_path,
                 timeout=timeout,
+                owner_user=ident.username,
                 verify_pcap=verify_pcap,
                 caller_holds_lock=caller_holds_lock,
                 lock_file=lock_file
@@ -1605,14 +1637,100 @@ def parse_dns_response_flag(flag_val: Any) -> bool:
     return False
 
 
+def _parse_int_safe(val: Any) -> Optional[int]:
+    """Safely parse integer from string or number, handling commas or empty values."""
+    if val is None or val == "":
+        return None
+    try:
+        if isinstance(val, (int, float)):
+            return int(val)
+        val_str = str(val).split(",")[0].strip()
+        return int(val_str)
+    except (ValueError, TypeError):
+        return None
+
+
+def _compute_rcv_nxt(sinfo: Dict[str, Any]) -> Optional[int]:
+    """
+    Computes the contiguous receive sequence number (RCV.NXT) for the server stream
+    from the client's perspective per RFC 9293 and RFC 5961 Section 3.2.
+
+    Base sequence:
+        rcv_nxt_base = (server_isn + 1 + server_syn_data_len) & 0xFFFFFFFF
+        Per RFC 7413, F-37, and F-40:
+        - In ESTABLISHED, use the server SYN-ACK data length actually acknowledged by
+          the client (server_syn_data_len_accepted).
+        - In SYNACK_RCVD (before client final ACK):
+          If server SYN-ACK data exists (server_syn_data_len > 0), its accepted length
+          cannot be established without client acknowledgement evidence, so exact
+          RCV.NXT validation is unavailable (returns None).
+          A zero-payload SYN-ACK uses the unambiguous server ISN + 1 base.
+
+    Sequence progression:
+        Tracks received server segments (payload bytes and FIN). Segments are mapped to
+        relative 32-bit sequence offsets from rcv_nxt_base. Overlapping and
+        duplicate intervals are merged to avoid sequence inflation. Contiguous
+        bytes are computed starting strictly at sequence offset 0.
+        Gaps (out-of-order delivery) prevent RCV.NXT from advancing until filled.
+        Per RFC 9293 / F-38, RST-bearing segments never consume sequence space and
+        are never included in server_segments.
+    """
+    server_isn = sinfo.get("server_isn")
+    if server_isn is None:
+        return None
+
+    if "server_syn_data_len_accepted" in sinfo and sinfo["server_syn_data_len_accepted"] is not None:
+        server_syn_data_len = sinfo["server_syn_data_len_accepted"]
+    else:
+        # Before client final ACK (e.g. in SYNACK_RCVD):
+        # Per F-40, if server SYN-ACK data exists but accepted length cannot be
+        # established by client acknowledgement, exact RCV.NXT validation is unavailable.
+        if sinfo.get("server_syn_data_len", 0) > 0:
+            return None
+        server_syn_data_len = 0
+    rcv_nxt_base = (server_isn + 1 + server_syn_data_len) & 0xFFFFFFFF
+
+    raw_segments = sinfo.get("server_segments", [])
+    if not raw_segments:
+        return rcv_nxt_base
+
+    intervals = []
+    for raw_s, seg_l in raw_segments:
+        if seg_l <= 0 or raw_s is None:
+            continue
+        offset = (raw_s - rcv_nxt_base) & 0xFFFFFFFF
+        # Forward sequence progression within half of the 32-bit sequence space
+        if offset < 0x80000000:
+            intervals.append((offset, offset + seg_l))
+
+    if not intervals:
+        return rcv_nxt_base
+
+    intervals.sort(key=lambda iv: iv[0])
+    merged = []
+    for start, end in intervals:
+        if not merged:
+            merged.append([start, end])
+        else:
+            if start <= merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], end)
+            else:
+                merged.append([start, end])
+
+    # Contiguous sequence progression strictly starting from offset 0
+    contiguous = merged[0][1] if merged[0][0] == 0 else 0
+    return (rcv_nxt_base + contiguous) & 0xFFFFFFFF
+
+
 def dissect_pcap(pcap_path: Path, target_hostname: str) -> Dict[str, Any]:
     """
     Dissects a PCAP capture using tshark, extracting:
     - DNS queries and answers for target_hostname
     - IPv6 TCP connection attempts (SYN packets to 2001:db8:2::10:80)
     - IPv4 TCP connection attempts (SYN packets to 10.0.2.10:80)
-    - Connection handshake completions (SYN-ACK / ACK)
+    - Connection handshake completions (SYN -> SYN-ACK -> matching client final ACK)
     - Observed HTTP response codes
+    - Per-stream TCP handshake tracking and main HTTP flow correlation
     """
     result: Dict[str, Any] = {
         "dns": {
@@ -1622,18 +1740,26 @@ def dissect_pcap(pcap_path: Path, target_hostname: str) -> Dict[str, Any]:
         "ipv6": {
             "syn_count": 0,
             "first_syn_time": None,
+            "first_syn_frame": None,
             "syn_ack_received": False,
             "syn_ack_time": None,
+            "server_rst_received": False,
+            "client_rst_sent": False,
             "rst_received": False,
+            "tcp_handshake_completed": False,
             "connection_established": False,
             "http_observed": False
         },
         "ipv4": {
             "syn_count": 0,
             "first_syn_time": None,
+            "first_syn_frame": None,
             "syn_ack_received": False,
             "syn_ack_time": None,
+            "server_rst_received": False,
+            "client_rst_sent": False,
             "rst_received": False,
+            "tcp_handshake_completed": False,
             "connection_established": False,
             "http_observed": False
         },
@@ -1641,25 +1767,27 @@ def dissect_pcap(pcap_path: Path, target_hostname: str) -> Dict[str, Any]:
         "connection_setup_time_ms": None,
         "http_status_code": None,
         "http_response_family": None,
+        "diagnostic_raw_pcap_http_code": None,
         "main_http_flow": {
             "stream_id": None,
             "family": None,
             "status_code": None,
             "request": None,
             "correlated": False,
+            "tcp_handshake_completed": False,
         },
+        "tcp_streams": {},
     }
 
     tshark = shutil.which("tshark")
     if not tshark or not pcap_path.is_file():
-        # Fallback binary inspection if tshark is absent
+        # Fallback binary inspection if tshark is absent (diagnostic only)
         if pcap_path.is_file():
             try:
                 raw_data = pcap_path.read_bytes()
                 m = re.search(rb"HTTP/1\.[01]\s+(\d{3})", raw_data)
                 if m:
-                    result["http_status_code"] = int(m.group(1))
-                    result["main_http_flow"]["status_code"] = result["http_status_code"]
+                    result["diagnostic_raw_pcap_http_code"] = int(m.group(1))
             except Exception:
                 pass
         return result
@@ -1675,9 +1803,15 @@ def dissect_pcap(pcap_path: Path, target_hostname: str) -> Dict[str, Any]:
         "http.response.code",
         "tcp.stream",
         "http.request.method",
-        "http.request.uri"
+        "http.request.uri",
+        "tcp.seq_raw",
+        "tcp.ack_raw",
+        "frame.number",
+        "tcp.len",
+        "http.response_in",
+        "http.request_in",
     ]
-    cmd = [tshark, "-r", str(pcap_path), "-T", "fields"]
+    cmd = [tshark, "-2", "-r", str(pcap_path), "-T", "fields"]
     for f in fields:
         cmd.extend(["-e", f])
 
@@ -1699,57 +1833,167 @@ def dissect_pcap(pcap_path: Path, target_hostname: str) -> Dict[str, Any]:
 
         (t_epoch_str, ip_src, ip_dst, ip6_src, ip6_dst, tcp_flags_str,
          tcp_sport_str, tcp_dport_str, dns_qname, dns_qtype, dns_resp_flag,
-         dns_a, dns_aaaa, http_code, tcp_stream, http_method, http_uri) = parts[:17]
+         dns_a, dns_aaaa, http_code, tcp_stream, http_method, http_uri,
+         tcp_seq_raw_str, tcp_ack_raw_str, frame_num_str, tcp_len_str,
+         http_response_in_str, http_request_in_str) = parts[:23]
 
         try:
             t_epoch = float(t_epoch_str) if t_epoch_str else None
         except ValueError:
             t_epoch = None
 
-        # Determine packet address family with respect to server endpoints
-        pkt_family = None
-        if ip6_dst == SERVER_IPV6 or ip6_src == SERVER_IPV6:
-            pkt_family = "IPv6"
-        elif ip_dst == SERVER_IPV4 or ip_src == SERVER_IPV4:
-            pkt_family = "IPv4"
+        frame_num = _parse_int_safe(frame_num_str)
+        raw_seq = _parse_int_safe(tcp_seq_raw_str)
+        raw_ack = _parse_int_safe(tcp_ack_raw_str)
+        sport = _parse_int_safe(tcp_sport_str)
+        dport = _parse_int_safe(tcp_dport_str)
+        tcp_len = _parse_int_safe(tcp_len_str) or 0
+        resp_in = _parse_int_safe(http_response_in_str)
+        req_in = _parse_int_safe(http_request_in_str)
 
-        # Stream-level tracking for HTTP flow correlation
-        if tcp_stream:
-            if tcp_stream not in streams:
-                streams[tcp_stream] = {
+        # Determine packet address family and direction with respect to server endpoints
+        pkt_family = None
+        dir_to_server = False
+        client_ip = None
+        server_ip = None
+        client_port = None
+        server_port = None
+
+        if ip6_dst == SERVER_IPV6:
+            pkt_family = "IPv6"
+            dir_to_server = True
+            client_ip = ip6_src
+            server_ip = ip6_dst
+            client_port = sport
+            server_port = dport
+        elif ip6_src == SERVER_IPV6:
+            pkt_family = "IPv6"
+            dir_to_server = False
+            client_ip = ip6_dst
+            server_ip = ip6_src
+            client_port = dport
+            server_port = sport
+        elif ip_dst == SERVER_IPV4:
+            pkt_family = "IPv4"
+            dir_to_server = True
+            client_ip = ip_src
+            server_ip = ip_dst
+            client_port = sport
+            server_port = dport
+        elif ip_src == SERVER_IPV4:
+            pkt_family = "IPv4"
+            dir_to_server = False
+            client_ip = ip_dst
+            server_ip = ip_src
+            client_port = dport
+            server_port = sport
+
+        # Stream-level tracking for HTTP flow correlation and handshake validation
+        if pkt_family:
+            sid = tcp_stream.strip() if tcp_stream else f"{pkt_family}:{client_ip}:{client_port}->{server_ip}:{server_port}"
+            if sid not in streams:
+                streams[sid] = {
+                    "stream_id": sid,
                     "family": pkt_family,
                     "main_get": False,
+                    "main_request": None,
+                    "main_response_code": None,
+                    "main_response_frame": None,
+                    "main_response_time": None,
+                    "http_requests": [],
+                    "http_responses": [],
                     "response_code": None,
                     "first_request": None,
                     "first_time": t_epoch,
+                    "client_endpoint": (client_ip, client_port),
+                    "server_endpoint": (server_ip, server_port),
+                    "client_isn": None,
+                    "syn_data_len": 0,
+                    "server_isn": None,
+                    "server_syn_data_len": 0,
+                    "server_bytes_sent": 0,
+                    "server_segments": [],
+                    "requests_by_frame": {},
+                    "responses_by_frame": {},
+                    "syn_ack_received": False,
+                    "tcp_handshake_completed": False,
+                    "handshake_state": "INIT",  # INIT -> SYN_SENT -> SYNACK_RCVD -> ESTABLISHED (or MIDSTREAM / INVALID / RESET / CLOSED_BY_RESET)
+                    "syn_frame": None,
+                    "syn_time": None,
+                    "syn_ack_frame": None,
+                    "syn_ack_time": None,
+                    "final_ack_frame": None,
+                    "final_ack_time": None,
+                    "final_ack_data_len": 0,
+                    "server_ack_received": None,
+                    "syn_data_accepted": 0,
+                    "syn_ack_variants": [],
+                    "server_syn_data_len_accepted": None,
+                    "zero_payload_syn_retry": False,
+                    "zero_payload_synack_retry": False,
+                    "bare_syn_retry": False,
+                    "server_rst_received": False,
+                    "client_rst_sent": False,
+                    "rst_received": False,
+                    "server_rst_validated": False,
+                    "anomalies": [],
                 }
-            if pkt_family and not streams[tcp_stream]["family"]:
-                streams[tcp_stream]["family"] = pkt_family
+            sinfo = streams[sid]
+            if not sinfo["family"]:
+                sinfo["family"] = pkt_family
+
+            if not dir_to_server and tcp_len > 0:
+                sinfo["server_bytes_sent"] = sinfo.get("server_bytes_sent", 0) + tcp_len
 
             if http_method:
                 m_str = http_method.strip().upper()
                 u_str = (http_uri or "").strip()
-                if not streams[tcp_stream]["first_request"]:
-                    streams[tcp_stream]["first_request"] = (m_str, u_str)
-                # Correlate main GET navigation request vs ancillary requests (/favicon.ico, etc.)
-                if m_str == "GET" and (u_str in ("/", "/index.html") or (u_str.startswith("/") and not u_str.startswith("/favicon"))):
-                    streams[tcp_stream]["main_get"] = True
+                req_entry = {
+                    "method": m_str,
+                    "uri": u_str,
+                    "frame": frame_num,
+                    "time": t_epoch,
+                    "response_in": resp_in,
+                }
+                if not sinfo["first_request"]:
+                    sinfo["first_request"] = (m_str, u_str)
+                sinfo["http_requests"].append((m_str, u_str, frame_num, t_epoch))
+                if frame_num is not None:
+                    sinfo["requests_by_frame"][frame_num] = req_entry
 
             if http_code:
                 try:
                     code_val = int(http_code.split(",")[0].strip())
-                    if streams[tcp_stream]["response_code"] is None:
-                        streams[tcp_stream]["response_code"] = code_val
+                    resp_entry = {
+                        "code": code_val,
+                        "frame": frame_num,
+                        "time": t_epoch,
+                        "request_in": req_in,
+                    }
+                    sinfo["http_responses"].append((code_val, frame_num, t_epoch))
+                    if frame_num is not None:
+                        sinfo["responses_by_frame"][frame_num] = resp_entry
+                    if sinfo["response_code"] is None:
+                        sinfo["response_code"] = code_val
                 except ValueError:
                     pass
 
-        # Record first HTTP response as fallback
-        if http_code and fallback_http_code is None and pkt_family:
-            try:
-                fallback_http_code = int(http_code.split(",")[0].strip())
-                fallback_http_family = pkt_family
-            except ValueError:
-                pass
+            # Record first non-ancillary HTTP response as fallback
+            if http_code and fallback_http_code is None:
+                is_ancillary = False
+                if sinfo.get("first_request"):
+                    req_uri = sinfo["first_request"][1]
+                    if req_uri.startswith("/favicon"):
+                        is_ancillary = True
+                elif http_uri and http_uri.strip().startswith("/favicon"):
+                    is_ancillary = True
+
+                if not is_ancillary:
+                    try:
+                        fallback_http_code = int(http_code.split(",")[0].strip())
+                        fallback_http_family = pkt_family
+                    except ValueError:
+                        pass
 
         # 1. DNS parsing
         if dns_qname:
@@ -1773,54 +2017,353 @@ def dissect_pcap(pcap_path: Path, target_hostname: str) -> Dict[str, Any]:
                         "timestamp": t_epoch
                     })
 
-        # 2. TCP parsing
-        if tcp_flags_str:
+        # 2. TCP parsing & Handshake State Tracking
+        if tcp_flags_str and pkt_family:
             try:
-                flags = int(tcp_flags_str, 16)
-            except ValueError:
+                flags = int(tcp_flags_str.split(",")[0].strip(), 16)
+            except (ValueError, TypeError):
                 flags = 0
 
-            is_syn = bool(flags & 0x02) and not bool(flags & 0x10)
-            is_synack = bool(flags & 0x12 == 0x12)
-            is_rst = bool(flags & 0x04)
-            is_ack = bool(flags & 0x10) and not bool(flags & 0x02)
+            syn_flag = bool(flags & 0x02)
+            ack_flag = bool(flags & 0x10)
+            rst_flag = bool(flags & 0x04)
+            fin_flag = bool(flags & 0x01)
 
-            # IPv6 traffic
-            if ip6_dst == SERVER_IPV6 or ip6_src == SERVER_IPV6:
-                if is_syn and ip6_dst == SERVER_IPV6:
-                    result["ipv6"]["syn_count"] += 1
-                    if result["ipv6"]["first_syn_time"] is None:
-                        result["ipv6"]["first_syn_time"] = t_epoch
-                elif is_synack and ip6_src == SERVER_IPV6:
-                    result["ipv6"]["syn_ack_received"] = True
-                    result["ipv6"]["syn_ack_time"] = t_epoch
-                    result["ipv6"]["connection_established"] = True
-                elif is_rst and ip6_src == SERVER_IPV6:
-                    result["ipv6"]["rst_received"] = True
+            fam_key = pkt_family.lower()
+            sinfo = streams[sid]
+            expected_client = sinfo["client_endpoint"]
+            expected_server = sinfo["server_endpoint"]
 
-                if http_code:
-                    result["ipv6"]["http_observed"] = True
+            # Track server sequence progression (data payload + FIN)
+            # Per RFC 9293 / F-38: Segments carrying RST never consume sequence space
+            # and must not be appended to server_segments.
+            if not dir_to_server and not syn_flag and not rst_flag:
+                seg_len = tcp_len + (1 if fin_flag else 0)
+                if seg_len > 0 and raw_seq is not None:
+                    sinfo["server_segments"].append((raw_seq, seg_len))
 
-            # IPv4 traffic
-            if ip_dst == SERVER_IPV4 or ip_src == SERVER_IPV4:
-                if is_syn and ip_dst == SERVER_IPV4:
-                    result["ipv4"]["syn_count"] += 1
-                    if result["ipv4"]["first_syn_time"] is None:
-                        result["ipv4"]["first_syn_time"] = t_epoch
-                elif is_synack and ip_src == SERVER_IPV4:
-                    result["ipv4"]["syn_ack_received"] = True
-                    result["ipv4"]["syn_ack_time"] = t_epoch
-                    result["ipv4"]["connection_established"] = True
-                elif is_rst and ip_src == SERVER_IPV4:
-                    result["ipv4"]["rst_received"] = True
+            # 1. Client SYN:
+            # SYN set, ACK not set, RST not set, client -> server
+            if syn_flag and not ack_flag and not rst_flag and dir_to_server:
+                result[fam_key]["syn_count"] += 1
+                if result[fam_key]["first_syn_time"] is None:
+                    result[fam_key]["first_syn_time"] = t_epoch
+                if result[fam_key]["first_syn_frame"] is None:
+                    result[fam_key]["first_syn_frame"] = frame_num
+                    result[fam_key]["first_syn_time"] = t_epoch
 
-                if http_code:
-                    result["ipv4"]["http_observed"] = True
+                if sinfo["handshake_state"] == "INIT":
+                    sinfo["client_endpoint"] = (client_ip, client_port)
+                    sinfo["server_endpoint"] = (server_ip, server_port)
+                    sinfo["client_isn"] = raw_seq
+                    sinfo["syn_data_len"] = tcp_len
+                    sinfo["syn_frame"] = frame_num
+                    sinfo["syn_time"] = t_epoch
+                    sinfo["handshake_state"] = "SYN_SENT"
+                elif sinfo["handshake_state"] == "SYN_SENT":
+                    # Retransmitted SYN: verify ISN and payload length
+                    # F-41 / RFC 7413 §4.2.2: Retransmission observed with tcp_len == 0 following a data-bearing
+                    # SYN (syn_data_len > 0). Documented accurately as a zero-payload SYN retransmission.
+                    # Note: The parser checks tcp_len == 0 without asserting removal of TCP Fast Open options.
+                    isn_match = (raw_seq is not None and raw_seq == sinfo["client_isn"])
+                    len_match = (tcp_len == sinfo["syn_data_len"])
+                    zero_payload_syn_retry = (tcp_len == 0 and sinfo["syn_data_len"] > 0)
+                    if isn_match and (len_match or zero_payload_syn_retry):
+                        if zero_payload_syn_retry:
+                            sinfo["zero_payload_syn_retry"] = True
+                            sinfo["bare_syn_retry"] = True
+                    else:
+                        sinfo["handshake_state"] = "INVALID"
+                        if not isn_match:
+                            sinfo["anomalies"].append(f"CONFLICTING_SYN_ISN: original={sinfo['client_isn']}, received={raw_seq}")
+                        if not len_match and not zero_payload_syn_retry:
+                            sinfo["anomalies"].append(f"CONFLICTING_SYN_PAYLOAD_LEN: original={sinfo['syn_data_len']}, received={tcp_len}")
+                elif sinfo["handshake_state"] in ("SYNACK_RCVD", "ESTABLISHED", "CLOSED_BY_RESET", "CLOSED_BY_CLIENT_ABORT"):
+                    # Retransmitted SYN arriving after SYN-ACK or handshake completion
+                    isn_match = (raw_seq is not None and raw_seq == sinfo["client_isn"])
+                    len_match = (tcp_len == sinfo["syn_data_len"])
+                    zero_payload_syn_retry = (tcp_len == 0 and sinfo["syn_data_len"] > 0)
+                    if isn_match and (len_match or zero_payload_syn_retry):
+                        if zero_payload_syn_retry:
+                            sinfo["zero_payload_syn_retry"] = True
+                            sinfo["bare_syn_retry"] = True
+                    else:
+                        if not isn_match:
+                            sinfo["anomalies"].append(f"CONFLICTING_LATE_SYN_ISN: original={sinfo['client_isn']}, received={raw_seq}")
+                        if not len_match and not zero_payload_syn_retry:
+                            sinfo["anomalies"].append(f"CONFLICTING_LATE_SYN_PAYLOAD_LEN: original={sinfo['syn_data_len']}, received={tcp_len}")
+                        if not sinfo["tcp_handshake_completed"]:
+                            sinfo["handshake_state"] = "INVALID"
 
-    # Correlate main GET / request and its TCP flow to determine winning HTTP response and family
+            # 2. Server SYN-ACK:
+            # SYN and ACK set, RST not set, server -> client
+            elif syn_flag and ack_flag and not rst_flag and not dir_to_server:
+                endpoint_match = (
+                    expected_client == (client_ip, client_port) and
+                    expected_server == (server_ip, server_port)
+                )
+                # RFC 9293 §3.5.3 acceptable ACK semantics (F-35): SND.UNA < SEG.ACK <= SND.NXT
+                # SND.UNA = client_isn. Min acceptable ACK acknowledging SYN is client_isn + 1.
+                # SND.NXT = (client_isn + 1 + syn_data_len) & 0xFFFFFFFF.
+                min_ack = ((sinfo["client_isn"] + 1) & 0xFFFFFFFF) if sinfo["client_isn"] is not None else None
+                syn_data_len = sinfo.get("syn_data_len", 0)
+                ack_match = False
+                ack_offset = None
+                if min_ack is not None and raw_ack is not None:
+                    ack_offset = (raw_ack - min_ack) & 0xFFFFFFFF
+                    if ack_offset < 0x80000000 and ack_offset <= syn_data_len:
+                        ack_match = True
+
+                if endpoint_match and ack_match:
+                    if sinfo["handshake_state"] == "SYN_SENT":
+                        sinfo["server_isn"] = raw_seq
+                        sinfo["server_syn_data_len"] = tcp_len
+                        sinfo["server_ack_received"] = raw_ack
+                        sinfo["syn_data_accepted"] = ack_offset
+                        sinfo["syn_ack_frame"] = frame_num
+                        sinfo["syn_ack_time"] = t_epoch
+                        sinfo["syn_ack_received"] = True
+                        sinfo["handshake_state"] = "SYNACK_RCVD"
+                        sinfo["syn_ack_variants"] = [{"seq": raw_seq, "ack": raw_ack, "len": tcp_len, "frame": frame_num}]
+
+                        result[fam_key]["syn_ack_received"] = True
+                        if result[fam_key]["syn_ack_time"] is None:
+                            result[fam_key]["syn_ack_time"] = t_epoch
+                    elif sinfo["handshake_state"] == "SYNACK_RCVD":
+                        # Retransmitted SYN-ACK: verify server ISN and payload length
+                        # F-41 / RFC 7413: Retransmission observed with tcp_len == 0 following a data-bearing
+                        # SYN-ACK (server_syn_data_len > 0). Documented accurately as a zero-payload SYN-ACK retransmission.
+                        # Note: The parser checks tcp_len == 0 without asserting removal of TCP Fast Open options.
+                        isn_match = (raw_seq is not None and raw_seq == sinfo["server_isn"])
+                        len_match = (tcp_len == sinfo["server_syn_data_len"])
+                        zero_payload_synack_retry = (tcp_len == 0 and sinfo["server_syn_data_len"] > 0)
+                        if isn_match and (len_match or zero_payload_synack_retry):
+                            if zero_payload_synack_retry:
+                                sinfo["zero_payload_synack_retry"] = True
+                            sinfo["syn_ack_variants"].append({"seq": raw_seq, "ack": raw_ack, "len": tcp_len, "frame": frame_num})
+                            if ack_offset is not None and ack_offset <= syn_data_len:
+                                sinfo["server_ack_received"] = raw_ack
+                                sinfo["syn_data_accepted"] = ack_offset
+                        else:
+                            # Conflicting server ISN or length! Never overwrite, mark invalid
+                            sinfo["handshake_state"] = "INVALID"
+                            if not isn_match:
+                                sinfo["anomalies"].append(
+                                    f"CONFLICTING_SYNACK_SERVER_ISN: original={sinfo['server_isn']}, received={raw_seq}"
+                                )
+                            if not len_match and not zero_payload_synack_retry:
+                                sinfo["anomalies"].append(
+                                    f"CONFLICTING_SYNACK_PAYLOAD_LEN: original={sinfo['server_syn_data_len']}, received={tcp_len}"
+                                )
+                    elif sinfo["handshake_state"] in ("ESTABLISHED", "CLOSED_BY_RESET", "CLOSED_BY_CLIENT_ABORT"):
+                        # Late SYN-ACK after handshake established
+                        isn_match = (raw_seq is not None and raw_seq == sinfo["server_isn"])
+                        len_match = (tcp_len == sinfo["server_syn_data_len"])
+                        zero_payload_synack_retry = (tcp_len == 0 and sinfo["server_syn_data_len"] > 0)
+                        if isn_match and (len_match or zero_payload_synack_retry):
+                            if zero_payload_synack_retry:
+                                sinfo["zero_payload_synack_retry"] = True
+                            sinfo["syn_ack_variants"].append({"seq": raw_seq, "ack": raw_ack, "len": tcp_len, "frame": frame_num})
+                        else:
+                            if not isn_match:
+                                sinfo["anomalies"].append(
+                                    f"CONFLICTING_LATE_SYNACK_SERVER_ISN: original={sinfo['server_isn']}, received={raw_seq}"
+                                )
+                            if not len_match and not zero_payload_synack_retry:
+                                sinfo["anomalies"].append(
+                                    f"CONFLICTING_LATE_SYNACK_PAYLOAD_LEN: original={sinfo['server_syn_data_len']}, received={tcp_len}"
+                                )
+                    else:
+                        sinfo["handshake_state"] = "INVALID"
+                        sinfo["anomalies"].append(f"UNEXPECTED_SYNACK_IN_STATE_{sinfo['handshake_state']}")
+                else:
+                    if sinfo["handshake_state"] == "SYN_SENT":
+                        sinfo["handshake_state"] = "INVALID"
+                    sinfo["anomalies"].append(
+                        f"INVALID_SYNACK: endpoint_match={endpoint_match}, ack_match={ack_match}"
+                    )
+
+            # 3. Client Final ACK / Established ACK:
+            # ACK set, SYN and RST not set, client -> server
+            elif ack_flag and not syn_flag and not rst_flag and dir_to_server:
+                endpoint_match = (
+                    expected_client == (client_ip, client_port) and
+                    expected_server == (server_ip, server_port)
+                )
+                if sinfo["handshake_state"] == "SYNACK_RCVD" and endpoint_match:
+                    # Validate client's sequence number against the sequence position actually acknowledged by server SYN-ACK
+                    expected_seq = sinfo.get("server_ack_received")
+                    if expected_seq is None and sinfo.get("client_isn") is not None:
+                        expected_seq = (sinfo["client_isn"] + 1 + sinfo.get("syn_data_accepted", 0)) & 0xFFFFFFFF
+
+                    # Validate client's ACK number against server sequence space:
+                    # Server sent server_isn (consuming 1 seq) plus server_syn_data_len bytes
+                    min_server_ack = ((sinfo["server_isn"] + 1) & 0xFFFFFFFF) if sinfo["server_isn"] is not None else None
+                    server_syn_data_len = sinfo.get("server_syn_data_len", 0)
+
+                    seq_match = (expected_seq is not None and raw_seq is not None and raw_seq == expected_seq)
+                    ack_match = False
+                    srv_ack_offset = None
+                    if min_server_ack is not None and raw_ack is not None:
+                        srv_ack_offset = (raw_ack - min_server_ack) & 0xFFFFFFFF
+                        if srv_ack_offset < 0x80000000 and srv_ack_offset <= server_syn_data_len:
+                            ack_match = True
+
+                    if seq_match and ack_match:
+                        sinfo["tcp_handshake_completed"] = True
+                        sinfo["handshake_state"] = "ESTABLISHED"
+                        sinfo["final_ack_frame"] = frame_num
+                        sinfo["final_ack_time"] = t_epoch
+                        sinfo["final_ack_data_len"] = tcp_len
+                        sinfo["server_syn_data_len_accepted"] = srv_ack_offset
+
+                        # Family level: at least one qualifying stream completed handshake
+                        result[fam_key]["tcp_handshake_completed"] = True
+                        result[fam_key]["connection_established"] = True
+                    else:
+                        sinfo["anomalies"].append(
+                            f"MISMATCHED_FINAL_ACK: seq_match={seq_match} (raw={raw_seq}, exp={expected_seq}), "
+                            f"ack_match={ack_match} (raw={raw_ack}, min_srv={min_server_ack}, max_srv={(min_server_ack + server_syn_data_len) & 0xFFFFFFFF if min_server_ack is not None else None})"
+                        )
+                elif sinfo["handshake_state"] == "INIT":
+                    sinfo["handshake_state"] = "MIDSTREAM"
+                    sinfo["anomalies"].append("MIDSTREAM_TRAFFIC_OBSERVED")
+                elif sinfo["handshake_state"] in ("ESTABLISHED", "CLOSED_BY_RESET", "CLOSED_BY_CLIENT_ABORT"):
+                    pass
+
+            # 4. RST handling
+            if rst_flag:
+                if not dir_to_server:
+                    # Server -> Client RST
+                    # Policy: RFC 5961 Section 3.2 Exact-RCV.NXT RST Validation Policy & RFC 9293 §3.5.3 (F-38, F-39)
+                    # - In SYN-SENT: An incoming RST is acceptable if SND.UNA < SEG.ACK <= SND.NXT
+                    #   Acceptable ACK range: [client_isn + 1, client_isn + 1 + syn_data_len]
+                    #   An RST without ACK, or with ACK outside this range, is unvalidated.
+                    # - In synchronized states (SYNACK_RCVD, ESTABLISHED, CLOSED_BY_RESET):
+                    #   The RST sequence number must match RCV.NXT exactly. RCV.NXT progresses contiguously
+                    #   from server ISN (+1 for SYN, + accepted SYN payload) through contiguous data and FIN bytes.
+                    #   Overlapping or retransmitted segments are merged and do not advance RCV.NXT twice.
+                    #   Out-of-order segments leave a gap and do not advance RCV.NXT until preceding segments arrive.
+                    #   RST-bearing segments are never included in server_segments (F-38).
+                    # - When capture evidence is insufficient (e.g. server ISN missing), the RST is retained
+                    #   as an unvalidated observation, prior connection state is preserved, and an anomaly is logged.
+                    rst_valid = False
+                    if sinfo["handshake_state"] == "SYN_SENT":
+                        min_ack = ((sinfo["client_isn"] + 1) & 0xFFFFFFFF) if sinfo["client_isn"] is not None else None
+                        syn_data_len = sinfo.get("syn_data_len", 0)
+                        if ack_flag and raw_ack is not None and min_ack is not None:
+                            ack_offset = (raw_ack - min_ack) & 0xFFFFFFFF
+                            if ack_offset < 0x80000000 and ack_offset <= syn_data_len:
+                                rst_valid = True
+                            else:
+                                sinfo["anomalies"].append(
+                                    f"UNVALIDATED_SERVER_RST_IN_SYN_SENT: ack_flag={ack_flag}, raw_ack={raw_ack}, min_ack={min_ack}, syn_data_len={syn_data_len}, raw_seq={raw_seq}"
+                                )
+                        else:
+                            sinfo["anomalies"].append(
+                                f"UNVALIDATED_SERVER_RST_IN_SYN_SENT: ack_flag={ack_flag}, raw_ack={raw_ack}, min_ack={min_ack}, raw_seq={raw_seq}"
+                            )
+                    elif sinfo["handshake_state"] in ("SYNACK_RCVD", "ESTABLISHED", "CLOSED_BY_RESET"):
+                        expected_seq = _compute_rcv_nxt(sinfo)
+                        if expected_seq is not None and raw_seq is not None:
+                            if raw_seq == expected_seq:
+                                rst_valid = True
+                            else:
+                                sinfo["anomalies"].append(
+                                    f"UNVALIDATED_SERVER_RST_IN_{sinfo['handshake_state']}: raw_seq={raw_seq}, expected_seq={expected_seq}"
+                                )
+                        else:
+                            sinfo["anomalies"].append(
+                                f"UNVALIDATED_SERVER_RST_INSUFFICIENT_EVIDENCE: raw_seq={raw_seq}, server_isn={sinfo['server_isn']}"
+                            )
+                    else:
+                        rst_valid = False
+                        sinfo["anomalies"].append(f"UNVALIDATED_SERVER_RST_IN_STATE_{sinfo['handshake_state']}")
+
+                    sinfo["server_rst_received"] = True
+                    sinfo["rst_received"] = True
+                    sinfo["server_rst_validated"] = rst_valid
+                    result[fam_key]["server_rst_received"] = True
+                    result[fam_key]["rst_received"] = True
+
+                    # Only transition connection state if RST is VALIDATED!
+                    if rst_valid:
+                        if sinfo["tcp_handshake_completed"]:
+                            sinfo["handshake_state"] = "CLOSED_BY_RESET"
+                        else:
+                            sinfo["handshake_state"] = "RESET"
+                    # If unvalidated: retain the RST observation as unvalidated and preserve previous connection state.
+                else:
+                    # Client -> Server RST (client emitted reset)
+                    # Do not treat an emitted client RST as proof that the server accepted the reset.
+                    result[fam_key]["client_rst_sent"] = True
+                    sinfo["client_rst_sent"] = True
+                    if sinfo["tcp_handshake_completed"]:
+                        sinfo["handshake_state"] = "CLOSED_BY_CLIENT_ABORT"
+                    else:
+                        sinfo["handshake_state"] = "CLIENT_ABORT"
+                    # Preserve historical handshake completion!
+
+            # HTTP observed
+            if http_code:
+                result[fam_key]["http_observed"] = True
+
+    # Correlate HTTP request-response transactions on each stream via frame references (RFC/Wireshark http.response_in / http.request_in)
+    for sid, sinfo in streams.items():
+        reqs = sinfo.get("http_requests", [])
+        root_req = None
+        for (m_str, u_str, fnum, t_ep) in reqs:
+            u_clean = u_str.split("?")[0].rstrip("/")
+            is_root = (
+                u_str in ("/", "/index.html") or
+                u_clean == "" or
+                u_str in (
+                    f"http://{hostname_clean}/",
+                    f"http://{hostname_clean}/index.html",
+                    f"http://{hostname_clean}:80/",
+                    f"http://{hostname_clean}:80/index.html",
+                )
+            )
+            if m_str == "GET" and is_root:
+                root_req = sinfo.get("requests_by_frame", {}).get(fnum) or {
+                    "method": m_str, "uri": u_str, "frame": fnum, "time": t_ep, "response_in": None
+                }
+                sinfo["main_get"] = True
+                sinfo["main_request"] = (m_str, u_str)
+                sinfo["main_request_frame"] = fnum
+                break
+
+        if root_req is not None:
+            root_frame = root_req.get("frame")
+            target_resp_frame = root_req.get("response_in")
+
+            matched_resp = None
+            # If root request has explicit response_in, look up that response frame
+            if target_resp_frame is not None and target_resp_frame in sinfo.get("responses_by_frame", {}):
+                matched_resp = sinfo["responses_by_frame"][target_resp_frame]
+            # Alternatively, find response whose request_in matches root_frame
+            elif root_frame is not None:
+                for resp_f, resp_data in sinfo.get("responses_by_frame", {}).items():
+                    if resp_data.get("request_in") == root_frame:
+                        matched_resp = resp_data
+                        break
+
+            if matched_resp is not None:
+                sinfo["main_response_code"] = matched_resp["code"]
+                sinfo["main_response_frame"] = matched_resp["frame"]
+                sinfo["main_response_time"] = matched_resp["time"]
+            else:
+                # Frame-reference correlation unavailable: leave root response status None.
+                # Per PS-028: never infer correlation from list index or stream membership alone.
+                sinfo["main_response_code"] = None
+        else:
+            sinfo["main_get"] = False
+            sinfo["main_response_code"] = None
+
+    # Identify primary HTTP navigation flow
     main_stream_id = None
     for sid, sinfo in streams.items():
-        if sinfo["main_get"] and sinfo["response_code"] is not None:
+        if sinfo["main_get"] and sinfo["main_response_code"] is not None:
             main_stream_id = sid
             break
     if main_stream_id is None:
@@ -1830,37 +2373,42 @@ def dissect_pcap(pcap_path: Path, target_hostname: str) -> Dict[str, Any]:
                 break
 
     if main_stream_id is not None:
-        result["http_status_code"] = streams[main_stream_id]["response_code"]
-        result["http_response_family"] = streams[main_stream_id]["family"]
+        msinfo = streams[main_stream_id]
+        result["http_status_code"] = msinfo["main_response_code"]
+        result["http_response_family"] = msinfo["family"]
         result["main_http_flow"] = {
             "stream_id": main_stream_id,
-            "family": streams[main_stream_id]["family"],
-            "status_code": streams[main_stream_id]["response_code"],
-            "request": streams[main_stream_id]["first_request"],
+            "family": msinfo["family"],
+            "status_code": msinfo["main_response_code"],
+            "request": msinfo.get("main_request"),
             "correlated": True,
+            "tcp_handshake_completed": bool(msinfo.get("tcp_handshake_completed", False)),
         }
-    elif fallback_http_code is not None or fallback_http_family is not None:
-        result["http_status_code"] = fallback_http_code
-        result["http_response_family"] = fallback_http_family
+    else:
+        result["http_status_code"] = None
+        result["http_response_family"] = None
+        result["diagnostic_fallback_http_code"] = fallback_http_code
+        result["diagnostic_fallback_http_family"] = fallback_http_family
         result["main_http_flow"] = {
             "stream_id": None,
-            "family": fallback_http_family,
-            "status_code": fallback_http_code,
+            "family": None,
+            "status_code": None,
             "request": None,
             "correlated": False,
+            "tcp_handshake_completed": False,
         }
 
-    # Binary fallback inspection for HTTP response status code in raw PCAP data
-    if result["http_status_code"] is None and pcap_path.is_file():
+    # Binary fallback inspection for HTTP response status code in raw PCAP data (diagnostic only)
+    if pcap_path.is_file():
         try:
             raw_data = pcap_path.read_bytes()
             match = re.search(rb"HTTP/1\.[01]\s+(\d{3})", raw_data)
             if match:
-                result["http_status_code"] = int(match.group(1))
-                if result["main_http_flow"]["status_code"] is None:
-                    result["main_http_flow"]["status_code"] = result["http_status_code"]
+                result["diagnostic_raw_pcap_http_code"] = int(match.group(1))
         except Exception:
             pass
+
+    result["tcp_streams"] = streams
 
     # Compute Happy Eyeballs Connection Attempt Delay (CAD)
     v6_syn = result["ipv6"]["first_syn_time"]
@@ -1912,59 +2460,173 @@ def classify_fallback(
             "ipv4_attempt": False,
             "ipv6_success": False,
             "ipv4_success": False,
+            "telemetry_diagnostic_conclusion": None,
         }
 
     ipv6_attempt = dissection["ipv6"]["syn_count"] > 0
     ipv4_attempt = dissection["ipv4"]["syn_count"] > 0
 
-    ipv4_conn_ok = dissection["ipv4"]["connection_established"] or dissection["ipv4"]["http_observed"]
-    ipv6_conn_ok = dissection["ipv6"]["connection_established"] or dissection["ipv6"]["http_observed"]
+    # Diagnostic family handshake status
+    ipv4_handshake = dissection["ipv4"]["connection_established"]
+    ipv6_handshake = dissection["ipv6"]["connection_established"]
 
-    # Incorporate HTTP outcome only when supported by packet connection evidence
     http_success = http_outcome.get("success", False)
     winning_family = http_outcome.get("winning_address_family")
 
-    if winning_family == "IPv4" and http_success and dissection["ipv4"]["connection_established"]:
-        ipv4_conn_ok = True
-    elif winning_family == "IPv6" and http_success and dissection["ipv6"]["connection_established"]:
-        ipv6_conn_ok = True
+    # Record browser telemetry diagnostic separately per F-34
+    telemetry_diagnostic = None
+    if http_success and winning_family:
+        telemetry_diagnostic = f"Browser reported navigation success on {winning_family} (status {http_outcome.get('status_code')})"
+    elif http_outcome.get("status_code") is not None:
+        telemetry_diagnostic = f"Browser reported HTTP status {http_outcome.get('status_code')} on {winning_family}"
+
+    main_flow = dissection.get("main_http_flow") or {}
+    main_flow_fam = main_flow.get("family")
+    main_flow_correlated = bool(main_flow.get("correlated", False))
+    main_flow_handshake = bool(main_flow.get("tcp_handshake_completed", False))
+
+    # Requirement 3: Contradiction detection only when PCAP flow is genuinely correlated
+    if winning_family and main_flow_correlated and main_flow_fam and winning_family != main_flow_fam:
+        return {
+            "fallback_occurred": False,
+            "classification": "INCONCLUSIVE",
+            "reason": (
+                f"Contradictory evidence: Browser telemetry reported winning address family {winning_family}, "
+                f"but correlated PCAP primary navigation flow was on {main_flow_fam}."
+            ),
+            "ipv6_attempt": ipv6_attempt,
+            "ipv4_attempt": ipv4_attempt,
+            "ipv6_success": ipv6_handshake,
+            "ipv4_success": ipv4_handshake,
+            "telemetry_diagnostic_conclusion": telemetry_diagnostic,
+        }
+
+    # F-34: Explicit uncorrelated evidence policy
+    # When main_flow_correlated is False:
+    # Family-level handshake and browser telemetry cannot prove navigation connection.
+    # Classify the packet-level result as INCONCLUSIVE when HTTP success is reported.
+    if not main_flow_correlated:
+        if http_success:
+            return {
+                "fallback_occurred": False,
+                "classification": "INCONCLUSIVE",
+                "reason": (
+                    "Primary HTTP navigation flow is uncorrelated in packet capture. "
+                    "Per PS-028 specification, family-level handshake and browser telemetry alone "
+                    "cannot prove navigation connection."
+                ),
+                "ipv6_attempt": ipv6_attempt,
+                "ipv4_attempt": ipv4_attempt,
+                "ipv6_success": False,
+                "ipv4_success": False,
+                "telemetry_diagnostic_conclusion": telemetry_diagnostic,
+            }
+
+    # Requirement 2 & 4: Primary navigation HTTP evidence
+    # When main_flow_correlated is true, require HTTP response status to come from that correlated PCAP flow.
+    # Do not fill a missing PCAP response status using http_outcome["status_code"].
+    if main_flow_correlated:
+        main_flow_status = main_flow.get("status_code")
+        main_flow_http_ok = (main_flow_status is not None and 200 <= main_flow_status < 400)
+        ipv6_conn_ok = bool(main_flow_fam == "IPv6" and main_flow_handshake and main_flow_http_ok)
+        ipv4_conn_ok = bool(main_flow_fam == "IPv4" and main_flow_handshake and main_flow_http_ok)
+    else:
+        ipv4_conn_ok = False
+        ipv6_conn_ok = False
 
     fallback_occurred = False
     classification = "INCONCLUSIVE"
     reason = "Insufficient evidence to classify connection behavior"
 
-    main_flow = dissection.get("main_http_flow") or {}
-    main_flow_fam = main_flow.get("family")
+    cad = dissection.get("connection_attempt_delay_ms")
+    cad_desc = f" (Connection Attempt Delay: {cad}ms)" if cad is not None else ""
+    loss_note = f" (Note: {capture_loss_message})" if capture_loss and capture_loss_message else ""
 
-    if ipv6_attempt and ipv4_attempt and ipv4_conn_ok:
-        cad = dissection.get("connection_attempt_delay_ms")
-        cad_desc = f" (Connection Attempt Delay: {cad}ms)" if cad is not None else ""
-        loss_note = f" (Note: {capture_loss_message})" if capture_loss and capture_loss_message else ""
-        if (winning_family == "IPv6" or main_flow_fam == "IPv6") and ipv6_conn_ok:
+    if ipv6_attempt and ipv4_attempt:
+        v6_syn = dissection.get("ipv6", {}).get("first_syn_time")
+        v4_syn = dissection.get("ipv4", {}).get("first_syn_time")
+
+        if ipv6_conn_ok:
             fallback_occurred = False
             classification = "DIRECT_IPV6"
-            reason = (
-                f"Direct IPv6 connection established and won HTTP navigation{cad_desc}. "
-                f"Main GET / request correlated to IPv6 TCP flow. "
-                f"Post-navigation ancillary request or speculative IPv4 connection attempt "
-                f"was observed but did not displace IPv6.{loss_note}"
-            )
+            if ipv4_handshake:
+                reason = (
+                    f"Direct IPv6 connection established and won HTTP navigation{cad_desc}. "
+                    f"Main GET / request correlated to IPv6 TCP flow. "
+                    f"Post-navigation ancillary request or speculative IPv4 connection attempt "
+                    f"was observed but did not displace IPv6.{loss_note}"
+                )
+            else:
+                reason = (
+                    f"Direct IPv6 connection established and won HTTP navigation{cad_desc}. "
+                    f"Secondary IPv4 connection attempt did not establish."
+                )
+        elif ipv4_conn_ok:
+            # Fallback chronology (RFC 8305 / PS-028)
+            # Require strict timestamp ordering (v6_syn < v4_syn).
+            # When timestamps are equal, resolve using capture frame numbers (v6_frame < v4_frame).
+            # If chronology remains ambiguous or evidence is missing, classify as INCONCLUSIVE.
+            v6_frame = dissection.get("ipv6", {}).get("first_syn_frame")
+            v4_frame = dissection.get("ipv4", {}).get("first_syn_frame")
+            if v6_syn is not None and v4_syn is not None:
+                if v6_syn < v4_syn:
+                    fallback_occurred = True
+                    classification = "IPV6_TO_IPV4_FALLBACK"
+                    reason = (
+                        f"Observed initial IPv6 connection attempt, followed by IPv4 attempt "
+                        f"and successful IPv4 connection{cad_desc}.{loss_note}"
+                    )
+                elif v4_syn < v6_syn:
+                    fallback_occurred = False
+                    classification = "DIRECT_IPV4"
+                    reason = (
+                        f"Direct IPv4 connection established, but IPv4 attempt preceded IPv6 attempt "
+                        f"(IPv4 SYN at {v4_syn}s, IPv6 SYN at {v6_syn}s). Not an IPv6-to-IPv4 fallback."
+                    )
+                else:
+                    # Timestamps are equal (v6_syn == v4_syn)
+                    if v6_frame is not None and v4_frame is not None:
+                        if v6_frame < v4_frame:
+                            fallback_occurred = True
+                            classification = "IPV6_TO_IPV4_FALLBACK"
+                            reason = (
+                                f"Observed initial IPv6 connection attempt, followed by IPv4 attempt "
+                                f"resolved by capture frame sequence (IPv6 frame {v6_frame} preceded IPv4 frame {v4_frame} at identical timestamp {v6_syn}s) "
+                                f"and successful IPv4 connection{cad_desc}.{loss_note}"
+                            )
+                        elif v4_frame < v6_frame:
+                            fallback_occurred = False
+                            classification = "DIRECT_IPV4"
+                            reason = (
+                                f"Direct IPv4 connection established, but IPv4 attempt preceded IPv6 attempt "
+                                f"by capture frame sequence (IPv4 frame {v4_frame} preceded IPv6 frame {v6_frame} at identical timestamp {v4_syn}s). "
+                                f"Not an IPv6-to-IPv4 fallback."
+                            )
+                        else:
+                            fallback_occurred = False
+                            classification = "INCONCLUSIVE"
+                            reason = "Both IPv6 and IPv4 attempts observed with identical timestamps and identical frame numbers."
+                    else:
+                        fallback_occurred = False
+                        classification = "INCONCLUSIVE"
+                        reason = "Both IPv6 and IPv4 attempts observed with identical timestamps, but missing capture frame numbers to establish fallback order."
+            else:
+                fallback_occurred = False
+                classification = "INCONCLUSIVE"
+                reason = (
+                    "Both IPv6 and IPv4 attempts observed, but SYN timing chronology cannot be established "
+                    "to confirm Happy Eyeballs fallback order."
+                )
         else:
-            fallback_occurred = True
-            classification = "IPV6_TO_IPV4_FALLBACK"
-            reason = (
-                f"Observed initial IPv6 connection attempt, followed by IPv4 attempt "
-                f"and successful IPv4 connection{cad_desc}.{loss_note}"
-            )
-    elif ipv6_conn_ok and ipv4_attempt and not ipv4_conn_ok:
-        cad = dissection.get("connection_attempt_delay_ms")
-        cad_desc = f" (Connection Attempt Delay: {cad}ms)" if cad is not None else ""
-        fallback_occurred = False
-        classification = "DIRECT_IPV6"
-        reason = (
-            f"Direct IPv6 connection established and won HTTP navigation{cad_desc}. "
-            f"Secondary IPv4 connection attempt did not establish."
-        )
+            if http_success:
+                fallback_occurred = False
+                classification = "INCONCLUSIVE"
+                reason = "HTTP navigation reported success but neither family established a verified connection handshake."
+            else:
+                fallback_occurred = False
+                classification = "CONNECTION_FAILED"
+                reason = "Neither IPv6 nor IPv4 primary navigation connection succeeded (ancillary HTTP response does not constitute navigation completion)."
+
     elif ipv6_conn_ok and not ipv4_attempt:
         if capture_loss:
             # Per PS-028: Incomplete capture due to dropped packets cannot conclusively confirm no IPv4 attempt
@@ -1978,6 +2640,7 @@ def classify_fallback(
             fallback_occurred = False
             classification = "DIRECT_IPV6"
             reason = "Direct IPv6 connection established successfully without IPv4 fallback."
+
     elif ipv4_conn_ok and not ipv6_attempt:
         if capture_loss:
             fallback_occurred = False
@@ -1994,6 +2657,27 @@ def classify_fallback(
                 "Direct IPv4 connection established without prior IPv6 attempt. "
                 "Per PS-028 specification, fallback is not inferred from HTTP 200 alone."
             )
+
+    elif ipv6_attempt and not ipv4_attempt and not ipv6_conn_ok:
+        if http_success:
+            fallback_occurred = False
+            classification = "INCONCLUSIVE"
+            reason = "HTTP execution succeeded but IPv6 connection was not established and no IPv4 attempt was made."
+        else:
+            fallback_occurred = False
+            classification = "CONNECTION_FAILED"
+            reason = "Direct IPv6 connection attempt failed."
+
+    elif ipv4_attempt and not ipv6_attempt and not ipv4_conn_ok:
+        if http_success:
+            fallback_occurred = False
+            classification = "INCONCLUSIVE"
+            reason = "HTTP execution succeeded but IPv4 connection was not established and no IPv6 attempt was made."
+        else:
+            fallback_occurred = False
+            classification = "CONNECTION_FAILED"
+            reason = "Direct IPv4 connection attempt failed."
+
     elif not ipv4_conn_ok and not ipv6_conn_ok:
         if http_success:
             fallback_occurred = False
@@ -2019,7 +2703,56 @@ def classify_fallback(
         "ipv4_attempt": ipv4_attempt,
         "ipv6_success": ipv6_conn_ok,
         "ipv4_success": ipv4_conn_ok,
+        "telemetry_diagnostic_conclusion": telemetry_diagnostic,
     }
+
+
+def update_http_outcome_from_dissection(
+    http_outcome: Dict[str, Any],
+    dissection: Dict[str, Any],
+    browser_result: Optional[Dict[str, Any]] = None,
+    is_simulation: bool = False
+) -> Dict[str, Any]:
+    """
+    Updates http_outcome dictionary using packet dissection evidence and browser telemetry.
+    Priority is given to correlated primary navigation flow in packet capture.
+    When primary flow is uncorrelated, raw/ancillary packet status codes cannot promote success.
+    """
+    if browser_result is None:
+        browser_result = {}
+
+    observed_http_code = dissection.get("http_status_code")
+    main_flow = dissection.get("main_http_flow") or {}
+    main_flow_correlated = bool(main_flow.get("correlated", False))
+
+    if main_flow_correlated and observed_http_code is not None:
+        http_outcome["status_code"] = observed_http_code
+        http_outcome["success"] = (200 <= observed_http_code < 400)
+        if not http_outcome.get("winning_address_family") and dissection.get("http_response_family"):
+            http_outcome["winning_address_family"] = dissection["http_response_family"]
+            http_outcome["winning_ip"] = (
+                SERVER_IPV6 if dissection["http_response_family"] == "IPv6" else SERVER_IPV4
+            )
+        http_outcome["main_http_flow"] = main_flow
+    elif http_outcome.get("status_code") is not None:
+        # Corroborated by reliable browser-side HTTP status collection
+        b_code = http_outcome["status_code"]
+        http_outcome["success"] = (200 <= b_code < 400)
+        if not http_outcome.get("winning_address_family") and browser_result.get("winning_family"):
+            http_outcome["winning_address_family"] = browser_result["winning_family"]
+            http_outcome["winning_ip"] = (
+                SERVER_IPV6 if browser_result["winning_family"] == "IPv6" else SERVER_IPV4
+            )
+        if main_flow:
+            http_outcome["main_http_flow"] = main_flow
+    else:
+        if not is_simulation:
+            http_outcome["status_code"] = None
+            http_outcome["success"] = False
+            http_outcome["winning_address_family"] = None
+            http_outcome["winning_ip"] = None
+
+    return http_outcome
 
 
 # ------------------------------------------------------------------------------
@@ -2029,78 +2762,68 @@ def classify_fallback(
 def get_browser_uid_gid(target_user: Optional[str] = None) -> Tuple[int, int]:
     """
     Determines the unprivileged UID and GID for executing the browser process.
+    Backed strictly by the system passwd database via lab.identity.
     Never returns root (UID 0).
     """
-    if target_user:
-        try:
-            pw = pwd.getpwnam(target_user)
-            if pw.pw_uid != 0:
-                return pw.pw_uid, pw.pw_gid
-        except (KeyError, ImportError):
-            pass
-
-    # If calling process is not root, return current process UID and GID
-    current_uid = os.getuid()
-    current_gid = os.getgid()
-    if current_uid != 0:
-        return current_uid, current_gid
-
-    # Running as root: inspect SUDO_UID / SUDO_GID
-    sudo_uid = os.environ.get("SUDO_UID")
-    sudo_gid = os.environ.get("SUDO_GID")
-    if sudo_uid is not None and sudo_gid is not None:
-        try:
-            s_uid, s_gid = int(sudo_uid), int(sudo_gid)
-            if s_uid != 0:
-                return s_uid, s_gid
-        except ValueError:
-            pass
-
-    sudo_user = os.environ.get("SUDO_USER")
-    if sudo_user and sudo_user != "root":
-        try:
-            pw = pwd.getpwnam(sudo_user)
-            if pw.pw_uid != 0:
-                return pw.pw_uid, pw.pw_gid
-        except (KeyError, ImportError):
-            pass
-
-    user_env = os.environ.get("USER") or os.environ.get("LOGNAME")
-    if user_env and user_env != "root":
-        try:
-            pw = pwd.getpwnam(user_env)
-            if pw.pw_uid != 0:
-                return pw.pw_uid, pw.pw_gid
-        except (KeyError, ImportError):
-            pass
-
-    # Inspect repo file ownership
     try:
-        st = Path(__file__).stat()
-        if st.st_uid != 0:
-            return st.st_uid, st.st_gid
-    except OSError:
-        pass
+        if target_user:
+            ident = identity.resolve_user_by_name(target_user)
+        else:
+            ident = identity.resolve_invoking_identity()
+        return ident.uid, ident.gid
+    except identity.IdentityResolutionError as exc:
+        raise BrowserPreflightError(
+            f"Cannot execute browser: {exc}"
+        ) from exc
 
-    # Fallback to standard UID 1000
-    try:
-        pw = pwd.getpwuid(1000)
-        if pw.pw_uid != 0:
-            return pw.pw_uid, pw.pw_gid
-    except (KeyError, ImportError):
-        pass
 
-    # Fallback to nobody if available
-    try:
-        pw = pwd.getpwnam("nobody")
-        if pw.pw_uid != 0:
-            return pw.pw_uid, pw.pw_gid
-    except (KeyError, ImportError):
-        pass
+STANDARD_SYSTEM_PATH_DIRS = (
+    "/usr/local/sbin",
+    "/usr/local/bin",
+    "/usr/sbin",
+    "/usr/bin",
+    "/sbin",
+    "/bin",
+)
 
-    raise BrowserPreflightError(
-        "Cannot execute browser as root: no unprivileged user available in environment"
-    )
+
+def sanitize_browser_path(raw_path: Optional[str]) -> str:
+    """
+    Constructs a clean, ordered, and deduplicated Linux PATH for the unprivileged browser.
+    1. Preserves valid, absolute Linux executable directories from the source PATH.
+    2. Preserves their original order.
+    3. Removes Windows-mounted WSL drive paths, particularly /mnt/c/..., /mnt/d/...,
+       and equivalent /mnt/<drive-letter> entries.
+    4. Does not indiscriminately remove all /mnt paths; legitimate Linux mounts
+       (e.g., /mnt/storage, /mnt/share, /mnt/data) are preserved.
+    5. Rejects relative and empty PATH entries.
+    6. Avoids duplicate directories.
+    7. Ensures standard Linux system directories are present in the resulting PATH:
+       /usr/local/sbin, /usr/local/bin, /usr/sbin, /usr/bin, /sbin, /bin.
+    """
+    standard_dirs = list(STANDARD_SYSTEM_PATH_DIRS)
+    wsl_drive_pattern = re.compile(r"^/mnt/[a-zA-Z](?:/.*)?$")
+    seen = set()
+    cleaned_entries: List[str] = []
+
+    if raw_path:
+        for entry in raw_path.split(":"):
+            entry = entry.strip()
+            if not entry or not os.path.isabs(entry):
+                continue
+            normalized = os.path.normpath(entry)
+            if wsl_drive_pattern.match(normalized):
+                continue
+            if normalized not in seen:
+                seen.add(normalized)
+                cleaned_entries.append(normalized)
+
+    for s_dir in standard_dirs:
+        if s_dir not in seen:
+            seen.add(s_dir)
+            cleaned_entries.append(s_dir)
+
+    return ":".join(cleaned_entries)
 
 
 def get_browser_env(
@@ -2121,14 +2844,15 @@ def get_browser_env(
         raise BrowserPreflightError("Cannot generate browser environment for root user (UID 0)")
 
     try:
-        pw = pwd.getpwuid(target_uid)
-        user_name = pw.pw_name
-        user_home = pw.pw_dir
-        user_shell = pw.pw_shell or "/bin/bash"
-    except (KeyError, ImportError, AttributeError):
-        user_name = "indrani"
-        user_home = f"/home/{user_name}"
-        user_shell = "/bin/bash"
+        ident = identity.resolve_user_by_uid(target_uid)
+    except identity.IdentityResolutionError as exc:
+        raise BrowserPreflightError(
+            f"Cannot generate browser environment for UID {target_uid}: {exc}"
+        ) from exc
+
+    user_name = ident.username
+    user_home = str(ident.home_dir)
+    user_shell = ident.shell
 
     source_env = base_env if base_env is not None else os.environ
 
@@ -2137,7 +2861,7 @@ def get_browser_env(
         "USER": user_name,
         "LOGNAME": user_name,
         "SHELL": user_shell,
-        "PATH": source_env.get("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"),
+        "PATH": sanitize_browser_path(source_env.get("PATH")),
         "XDG_CONFIG_HOME": str(Path(user_home) / ".config"),
         "XDG_CACHE_HOME": str(Path(user_home) / ".cache"),
         "XDG_DATA_HOME": str(Path(user_home) / ".local" / "share"),
@@ -2283,9 +3007,12 @@ def verify_browser_paths_writable(
         xdg_config = Path(env["HOME"]) / ".config"
     else:
         try:
-            user_home = Path(pwd.getpwuid(target_uid).pw_dir)
-        except Exception:
-            user_home = Path("/home/indrani")
+            ident = identity.resolve_user_by_uid(target_uid)
+            user_home = ident.home_dir
+        except identity.IdentityResolutionError as exc:
+            raise BrowserPreflightError(
+                f"Failed to resolve home directory for UID {target_uid}: {exc}"
+            ) from exc
         xdg_config = user_home / ".config"
 
     b_family = "chromium" if "chromium" in browser_name.lower() else "google-chrome"
@@ -2412,9 +3139,12 @@ def run_browser(
             cmd.extend(["setpriv", f"--reuid={target_uid}", f"--regid={target_gid}", "--init-groups"])
         else:
             try:
-                user_name = pwd.getpwuid(target_uid).pw_name
-            except Exception:
-                user_name = "indrani"
+                ident = identity.resolve_user_by_uid(target_uid)
+                user_name = ident.username
+            except identity.IdentityResolutionError as exc:
+                raise BrowserPreflightError(
+                    f"Failed to resolve username for UID {target_uid}: {exc}"
+                ) from exc
             cmd.extend(["sudo", "-u", user_name, "--"])
 
         cmd.extend(["env", "-i"])
@@ -2646,8 +3376,11 @@ def generate_simulated_trial(
     ip6_hdr_synack = struct.pack("!IHBB", 0x60000000, 20, 6, 64) + ip6_sv + ip6_cl
     tcp_synack_v6 = struct.pack("!HHIIBBHHH", 80, 50000, 2000, 1001, (5 << 4), 0x12, 65535, 0, 0)
 
-    # IPv6 RST
-    tcp_rst_v6 = struct.pack("!HHIIBBHHH", 80, 50000, 0, 1001, (5 << 4), 0x04, 0, 0, 0)
+    # IPv6 Client Final ACK
+    tcp_ack_v6 = struct.pack("!HHIIBBHHH", 50000, 80, 1001, 2001, (5 << 4), 0x10, 65535, 0, 0)
+
+    # IPv6 RST (with ACK set and raw_ack acknowledging the client SYN: 1000 + 1 = 1001)
+    tcp_rst_v6 = struct.pack("!HHIIBBHHH", 80, 50000, 0, 1001, (5 << 4), 0x14, 0, 0, 0)
 
     # IPv4 SYN
     ip4_hdr_syn = struct.pack("!BBHHHBBH4s4s", 0x45, 0, 40, 1, 0, 64, 6, 0, ip4_cl, ip4_sv)
@@ -2657,11 +3390,16 @@ def generate_simulated_trial(
     ip4_hdr_synack = struct.pack("!BBHHHBBH4s4s", 0x45, 0, 40, 2, 0, 64, 6, 0, ip4_sv, ip4_cl)
     tcp_synack_v4 = struct.pack("!HHIIBBHHH", 80, 50001, 4000, 3001, (5 << 4), 0x12, 65535, 0, 0)
 
+    # IPv4 Client Final ACK
+    ip4_hdr_ack = struct.pack("!BBHHHBBH4s4s", 0x45, 0, 40, 3, 0, 64, 6, 0, ip4_cl, ip4_sv)
+    tcp_ack_v4 = struct.pack("!HHIIBBHHH", 50001, 80, 3001, 4001, (5 << 4), 0x10, 65535, 0, 0)
+
     sc = scenario_id.upper()
     if sc == "S0":
         # Healthy baseline: IPv6 wins immediately
         add_pkt(eth_v6 + ip6_hdr_syn + tcp_syn_v6, 10.0)
         add_pkt(eth_v6 + ip6_hdr_synack + tcp_synack_v6, 30.0)
+        add_pkt(eth_v6 + ip6_hdr_syn + tcp_ack_v6, 31.0)
         winning_fam = "IPv6"
         winning_ip = SERVER_IPV6
     elif sc == "S1":
@@ -2669,6 +3407,7 @@ def generate_simulated_trial(
         add_pkt(eth_v6 + ip6_hdr_syn + tcp_syn_v6, 10.0)
         add_pkt(eth_v4 + ip4_hdr_syn + tcp_syn_v4, 260.0)
         add_pkt(eth_v4 + ip4_hdr_synack + tcp_synack_v4, 280.0)
+        add_pkt(eth_v4 + ip4_hdr_ack + tcp_ack_v4, 281.0)
         winning_fam = "IPv4"
         winning_ip = SERVER_IPV4
     elif sc == "S2":
@@ -2677,12 +3416,14 @@ def generate_simulated_trial(
         add_pkt(eth_v6 + ip6_hdr_synack[:40] + tcp_rst_v6, 30.0)
         add_pkt(eth_v4 + ip4_hdr_syn + tcp_syn_v4, 32.0)
         add_pkt(eth_v4 + ip4_hdr_synack + tcp_synack_v4, 52.0)
+        add_pkt(eth_v4 + ip4_hdr_ack + tcp_ack_v4, 53.0)
         winning_fam = "IPv4"
         winning_ip = SERVER_IPV4
     elif sc == "S3":
         # IPv6 150ms: IPv6 completes in 150ms before IPv4 CAD (250ms)
         add_pkt(eth_v6 + ip6_hdr_syn + tcp_syn_v6, 10.0)
         add_pkt(eth_v6 + ip6_hdr_synack + tcp_synack_v6, 160.0)
+        add_pkt(eth_v6 + ip6_hdr_syn + tcp_ack_v6, 161.0)
         winning_fam = "IPv6"
         winning_ip = SERVER_IPV6
     elif sc == "S4":
@@ -2690,6 +3431,7 @@ def generate_simulated_trial(
         add_pkt(eth_v6 + ip6_hdr_syn + tcp_syn_v6, 10.0)
         add_pkt(eth_v4 + ip4_hdr_syn + tcp_syn_v4, 260.0)
         add_pkt(eth_v4 + ip4_hdr_synack + tcp_synack_v4, 280.0)
+        add_pkt(eth_v4 + ip4_hdr_ack + tcp_ack_v4, 281.0)
         winning_fam = "IPv4"
         winning_ip = SERVER_IPV4
     elif sc == "S5":
@@ -2697,12 +3439,14 @@ def generate_simulated_trial(
         add_pkt(eth_v6 + ip6_hdr_syn + tcp_syn_v6, 10.0)
         add_pkt(eth_v4 + ip4_hdr_syn + tcp_syn_v4, 260.0)
         add_pkt(eth_v4 + ip4_hdr_synack + tcp_synack_v4, 280.0)
+        add_pkt(eth_v4 + ip4_hdr_ack + tcp_ack_v4, 281.0)
         winning_fam = "IPv4"
         winning_ip = SERVER_IPV4
     elif sc == "S6":
         # AAAA delayed 500ms: A arrives at 0ms, IPv4 starts after ~50ms resolution delay
         add_pkt(eth_v4 + ip4_hdr_syn + tcp_syn_v4, 60.0)
         add_pkt(eth_v4 + ip4_hdr_synack + tcp_synack_v4, 80.0)
+        add_pkt(eth_v4 + ip4_hdr_ack + tcp_ack_v4, 81.0)
         winning_fam = "IPv4"
         winning_ip = SERVER_IPV4
     else:
@@ -2710,20 +3454,30 @@ def generate_simulated_trial(
         winning_ip = SERVER_IPV4
 
     # Add simulated HTTP GET request and 200 OK response for the winning family
+    http_req = f"GET / HTTP/1.1\r\nHost: {hostname}\r\n\r\n".encode("ascii")
+    html_body = b"<html><body>Measurement OK</body></html>"
     http_resp = (
-        b"HTTP/1.1 200 OK\r\n"
-        b"Content-Type: text/html\r\n"
-        b"Content-Length: 42\r\n"
-        b"\r\n"
-        b"<html><body>Measurement OK</body></html>"
-    )
+        f"HTTP/1.1 200 OK\r\n"
+        f"Content-Type: text/html\r\n"
+        f"Content-Length: {len(html_body)}\r\n"
+        f"\r\n"
+    ).encode("ascii") + html_body
     if winning_fam == "IPv6":
+        ip6_hdr_req = struct.pack("!IHBB", 0x60000000, 20 + len(http_req), 6, 64) + ip6_cl + ip6_sv
+        tcp_req_v6 = struct.pack("!HHIIBBHHH", 50000, 80, 1001, 2001, (5 << 4), 0x18, 65535, 0, 0)
+        add_pkt(eth_v6 + ip6_hdr_req + tcp_req_v6 + http_req, 32.0 if sc != "S3" else 162.0)
+
         ip6_hdr_resp = struct.pack("!IHBB", 0x60000000, 20 + len(http_resp), 6, 64) + ip6_sv + ip6_cl
-        tcp_resp_v6 = struct.pack("!HHIIBBHHH", 80, 50000, 2001, 1001, (5 << 4), 0x18, 65535, 0, 0)
+        tcp_resp_v6 = struct.pack("!HHIIBBHHH", 80, 50000, 2001, 1001 + len(http_req), (5 << 4), 0x18, 65535, 0, 0)
         add_pkt(eth_v6 + ip6_hdr_resp + tcp_resp_v6 + http_resp, 35.0 if sc != "S3" else 165.0)
     else:
-        ip4_hdr_resp = struct.pack("!BBHHHBBH4s4s", 0x45, 0, 40 + len(http_resp), 3, 0, 64, 6, 0, ip4_sv, ip4_cl)
-        tcp_resp_v4 = struct.pack("!HHIIBBHHH", 80, 50001, 4001, 3001, (5 << 4), 0x18, 65535, 0, 0)
+        req_time = 282.0 if sc in ("S1", "S4", "S5") else (54.0 if sc == "S2" else 82.0)
+        ip4_hdr_req = struct.pack("!BBHHHBBH4s4s", 0x45, 0, 40 + len(http_req), 4, 0, 64, 6, 0, ip4_cl, ip4_sv)
+        tcp_req_v4 = struct.pack("!HHIIBBHHH", 50001, 80, 3001, 4001, (5 << 4), 0x18, 65535, 0, 0)
+        add_pkt(eth_v4 + ip4_hdr_req + tcp_req_v4 + http_req, req_time)
+
+        ip4_hdr_resp = struct.pack("!BBHHHBBH4s4s", 0x45, 0, 40 + len(http_resp), 5, 0, 64, 6, 0, ip4_sv, ip4_cl)
+        tcp_resp_v4 = struct.pack("!HHIIBBHHH", 80, 50001, 4001, 3001 + len(http_req), (5 << 4), 0x18, 65535, 0, 0)
         resp_time = 285.0 if sc in ("S1", "S4", "S5") else (55.0 if sc == "S2" else 85.0)
         add_pkt(eth_v4 + ip4_hdr_resp + tcp_resp_v4 + http_resp, resp_time)
 
@@ -3057,32 +3811,12 @@ def run_trial(
         dissection = dissect_pcap(pcap_path, target_hostname=hostname)
 
         # Update HTTP outcome with evidence from packet dissection or browser instrumentation
-        observed_http_code = dissection.get("http_status_code")
-        if observed_http_code is not None:
-            http_outcome["status_code"] = observed_http_code
-            http_outcome["success"] = (200 <= observed_http_code < 400)
-            if dissection.get("http_response_family"):
-                http_outcome["winning_address_family"] = dissection["http_response_family"]
-                http_outcome["winning_ip"] = (
-                    SERVER_IPV6 if dissection["http_response_family"] == "IPv6" else SERVER_IPV4
-                )
-            if dissection.get("main_http_flow"):
-                http_outcome["main_http_flow"] = dissection["main_http_flow"]
-        elif http_outcome.get("status_code") is not None:
-            # Corroborated by reliable browser-side HTTP status collection
-            b_code = http_outcome["status_code"]
-            http_outcome["success"] = (200 <= b_code < 400)
-            if not http_outcome.get("winning_address_family") and browser_result.get("winning_family"):
-                http_outcome["winning_address_family"] = browser_result["winning_family"]
-                http_outcome["winning_ip"] = (
-                    SERVER_IPV6 if browser_result["winning_family"] == "IPv6" else SERVER_IPV4
-                )
-        else:
-            if not is_simulation:
-                http_outcome["status_code"] = None
-                http_outcome["success"] = False
-                http_outcome["winning_address_family"] = None
-                http_outcome["winning_ip"] = None
+        http_outcome = update_http_outcome_from_dissection(
+            http_outcome=http_outcome,
+            dissection=dissection,
+            browser_result=browser_result,
+            is_simulation=is_simulation
+        )
 
         # Treat invalid PCAP or zero-packet capture as an evidence/measurement failure
         is_measurement_failure = False
@@ -3111,7 +3845,10 @@ def run_trial(
                         "first_syn_time": None,
                         "syn_ack_received": False,
                         "syn_ack_time": None,
+                        "server_rst_received": False,
+                        "client_rst_sent": False,
                         "rst_received": False,
+                        "tcp_handshake_completed": False,
                         "connection_established": False,
                         "http_observed": False
                     },
@@ -3120,7 +3857,10 @@ def run_trial(
                         "first_syn_time": None,
                         "syn_ack_received": False,
                         "syn_ack_time": None,
+                        "server_rst_received": False,
+                        "client_rst_sent": False,
                         "rst_received": False,
+                        "tcp_handshake_completed": False,
                         "connection_established": False,
                         "http_observed": False
                     },
@@ -3128,6 +3868,16 @@ def run_trial(
                     "connection_setup_time_ms": None,
                     "http_status_code": None,
                     "http_response_family": None,
+                    "diagnostic_raw_pcap_http_code": None,
+                    "main_http_flow": {
+                        "stream_id": None,
+                        "family": None,
+                        "status_code": None,
+                        "request": None,
+                        "correlated": False,
+                        "tcp_handshake_completed": False,
+                    },
+                    "tcp_streams": {},
                 }
         elif not pcap_valid or pkt_count == 0:
             was_pcap_valid = pcap_valid
@@ -3148,7 +3898,10 @@ def run_trial(
                     "first_syn_time": None,
                     "syn_ack_received": False,
                     "syn_ack_time": None,
+                    "server_rst_received": False,
+                    "client_rst_sent": False,
                     "rst_received": False,
+                    "tcp_handshake_completed": False,
                     "connection_established": False,
                     "http_observed": False
                 },
@@ -3157,7 +3910,10 @@ def run_trial(
                     "first_syn_time": None,
                     "syn_ack_received": False,
                     "syn_ack_time": None,
+                    "server_rst_received": False,
+                    "client_rst_sent": False,
                     "rst_received": False,
+                    "tcp_handshake_completed": False,
                     "connection_established": False,
                     "http_observed": False
                 },
@@ -3165,6 +3921,16 @@ def run_trial(
                 "connection_setup_time_ms": None,
                 "http_status_code": None,
                 "http_response_family": None,
+                "diagnostic_raw_pcap_http_code": None,
+                "main_http_flow": {
+                    "stream_id": None,
+                    "family": None,
+                    "status_code": None,
+                    "request": None,
+                    "correlated": False,
+                    "tcp_handshake_completed": False,
+                },
+                "tcp_streams": {},
             }
 
         # 9. Classify Happy Eyeballs Fallback
@@ -3235,13 +4001,13 @@ def run_trial(
                 "classification_reason": classification["reason"],
             },
             "capture_metadata": {
-                "pcap_path": str(pcap_path),
+                "pcap_path": _serialize_evidence_path(pcap_path),
                 "pcap_sha256": pcap_sha256,
                 "pcap_size_bytes": pcap_size,
                 "pcap_valid": pcap_valid,
                 "packet_count": pkt_count,
                 "validation_message": pcap_msg,
-                "tcpdump_log_path": str(tcpdump_log),
+                "tcpdump_log_path": _serialize_evidence_path(tcpdump_log),
                 "packets_captured": drop_stats.get("packets_captured", pkt_count),
                 "packets_received_by_filter": drop_stats.get("packets_received_by_filter", pkt_count),
                 "packets_dropped_by_kernel": drop_stats.get("packets_dropped_by_kernel", 0),
@@ -3254,11 +4020,11 @@ def run_trial(
                 "buffer_size_kb": cap_buf_kb if not is_simulation else 0,
             },
             "evidence_paths": {
-                "trial_dir": str(tdir),
-                "result_json": str(result_json_path),
-                "capture_pcap": str(pcap_path),
-                "tcpdump_log": str(tcpdump_log),
-                "browser_log": str(browser_log)
+                "trial_dir": _serialize_evidence_path(tdir),
+                "result_json": _serialize_evidence_path(result_json_path),
+                "capture_pcap": _serialize_evidence_path(pcap_path),
+                "tcpdump_log": _serialize_evidence_path(tcpdump_log),
+                "browser_log": _serialize_evidence_path(browser_log)
             },
             "cleanup_status": {
                 "scenario_restored": scenario_restored,
@@ -3270,14 +4036,14 @@ def run_trial(
         }
 
         if (tdir / "netlog.json").is_file():
-            result["evidence_paths"]["browser_netlog"] = str(tdir / "netlog.json")
+            result["evidence_paths"]["browser_netlog"] = _serialize_evidence_path(tdir / "netlog.json")
         elif browser_result.get("netlog_path"):
-            result["evidence_paths"]["browser_netlog"] = browser_result["netlog_path"]
+            result["evidence_paths"]["browser_netlog"] = _serialize_evidence_path(browser_result["netlog_path"])
 
         if (tdir / "browser_telemetry.log").is_file():
-            result["evidence_paths"]["browser_telemetry"] = str(tdir / "browser_telemetry.log")
+            result["evidence_paths"]["browser_telemetry"] = _serialize_evidence_path(tdir / "browser_telemetry.log")
         elif browser_result.get("telemetry_path"):
-            result["evidence_paths"]["browser_telemetry"] = browser_result["telemetry_path"]
+            result["evidence_paths"]["browser_telemetry"] = _serialize_evidence_path(browser_result["telemetry_path"])
 
         # Persist versioned JSON result
         result_json_path.write_text(json.dumps(result, indent=2), encoding="utf-8")

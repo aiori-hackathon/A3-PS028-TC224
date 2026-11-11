@@ -33,6 +33,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 import lab.concurrency as concurrency
+import lab.identity as identity
 import lab.impair as impair
 import lab.run_trial as run_trial
 
@@ -100,51 +101,10 @@ def is_snap_browser(executable_path: Union[str, Path]) -> bool:
 def get_invoking_uid_gid() -> Tuple[int, int]:
     """
     Returns the invoking user's UID and GID.
-    If running under sudo (os.geteuid() == 0 or os.getuid() == 0),
-    checks SUDO_UID and SUDO_GID, then SUDO_USER.
-    Otherwise returns current process os.getuid() and os.getgid().
+    Authoritatively backed by the Linux passwd database via lab.identity.
     """
-    uid = os.getuid()
-    gid = os.getgid()
-    if uid == 0:
-        sudo_uid = os.environ.get("SUDO_UID")
-        sudo_gid = os.environ.get("SUDO_GID")
-        if sudo_uid is not None and sudo_gid is not None:
-            try:
-                return int(sudo_uid), int(sudo_gid)
-            except ValueError:
-                pass
-        sudo_user = os.environ.get("SUDO_USER")
-        if sudo_user and sudo_user != "root":
-            try:
-                import pwd
-                pw = pwd.getpwnam(sudo_user)
-                return pw.pw_uid, pw.pw_gid
-            except (KeyError, ImportError):
-                pass
-        user_env = os.environ.get("USER") or os.environ.get("LOGNAME")
-        if user_env and user_env != "root":
-            try:
-                import pwd
-                pw = pwd.getpwnam(user_env)
-                if pw.pw_uid != 0:
-                    return pw.pw_uid, pw.pw_gid
-            except (KeyError, ImportError):
-                pass
-        try:
-            st = Path(__file__).stat()
-            if st.st_uid != 0:
-                return st.st_uid, st.st_gid
-        except OSError:
-            pass
-        try:
-            import pwd
-            pw = pwd.getpwuid(1000)
-            if pw.pw_uid != 0:
-                return pw.pw_uid, pw.pw_gid
-        except (KeyError, ImportError):
-            pass
-    return uid, gid
+    ident = identity.resolve_invoking_identity()
+    return ident.uid, ident.gid
 
 
 def is_mount_present(
@@ -838,14 +798,16 @@ def launch_snap_browser_main(args: argparse.Namespace) -> None:
             sys.exit(73)
     else:
         try:
-            import pwd
-            user_name = pwd.getpwuid(target_uid).pw_name
-            os.initgroups(user_name, target_gid)
-        except Exception:
-            try:
-                os.setgroups([])
-            except OSError:
-                pass
+            ident = identity.resolve_user_by_uid(target_uid)
+            os.initgroups(ident.username, target_gid)
+        except identity.IdentityResolutionError as e:
+            sys.stderr.write(f"Failed to resolve target UID {target_uid} for browser: {e}\n")
+            sys.stderr.flush()
+            raise PrivilegedHelperError(f"Failed to resolve target UID {target_uid} for browser: {e}") from e
+        except OSError as e:
+            sys.stderr.write(f"Failed to initialize groups for {ident.username} (GID {target_gid}): {e}\n")
+            sys.stderr.flush()
+            raise PrivilegedHelperError(f"Failed to initialize groups for {ident.username}: {e}") from e
         try:
             os.setgid(target_gid)
             os.setuid(target_uid)
@@ -1395,6 +1357,65 @@ def _reap_capture_on_startup_failure(
             pass
 
 
+def _resolve_and_validate_capture_owner(
+    owner_user: Optional[str] = None,
+    owner_group: Optional[Union[str, int]] = None
+) -> Tuple[str, int]:
+    """
+    Derives the invoking unprivileged identity via identity.resolve_invoking_identity()
+    and strictly validates that any supplied owner_user and owner_group match or are
+    authorized for that invoking identity.
+
+    Returns:
+        Tuple[str, int]: (validated_username, validated_gid)
+
+    Raises:
+        PrivilegedHelperError: If resolution fails, or if supplied owner_user or owner_group is unauthorized.
+    """
+    try:
+        invoking_ident = identity.resolve_invoking_identity()
+    except identity.IdentityResolutionError as exc:
+        raise PrivilegedHelperError(
+            f"Cannot determine unprivileged capture owner: {exc}"
+        ) from exc
+
+    if owner_user is not None and owner_user != invoking_ident.username:
+        raise PrivilegedHelperError(
+            f"Supplied owner_user '{owner_user}' does not match invoking identity '{invoking_ident.username}'"
+        )
+
+    target_user = invoking_ident.username
+
+    if owner_group is not None:
+        try:
+            import grp
+            if isinstance(owner_group, int) or (isinstance(owner_group, str) and str(owner_group).isdigit()):
+                target_gid = int(owner_group)
+                grp.getgrgid(target_gid)
+            else:
+                target_gid = grp.getgrnam(str(owner_group)).gr_gid
+        except (KeyError, OverflowError, OSError) as exc:
+            raise PrivilegedHelperError(
+                f"Supplied owner_group '{owner_group}' cannot be resolved: {exc}"
+            ) from exc
+
+        try:
+            permitted_gids = set(os.getgrouplist(target_user, invoking_ident.gid))
+        except (KeyError, OverflowError, OSError) as exc:
+            raise PrivilegedHelperError(
+                f"Failed to resolve group membership for invoking identity '{target_user}': {exc}"
+            ) from exc
+        if target_gid not in permitted_gids:
+            raise PrivilegedHelperError(
+                f"Supplied owner_group '{owner_group}' (GID {target_gid}) is not authorized for "
+                f"invoking identity '{target_user}'"
+            )
+    else:
+        target_gid = invoking_ident.gid
+
+    return target_user, target_gid
+
+
 def start_capture_privileged(
     output_pcap: Path,
     log_file: Path,
@@ -1437,11 +1458,8 @@ def start_capture_privileged(
         ]
         if buffer_size_kb and buffer_size_kb > 0:
             cmd.extend(["-B", str(buffer_size_kb)])
-        target_user = owner_user or os.environ.get("SUDO_USER") or os.environ.get("USER") or "indrani"
-        if target_user:
-            cmd.extend(["-Z", target_user])
-        else:
-            cmd.extend(["-Z", "root"])
+        target_user, target_gid = _resolve_and_validate_capture_owner(owner_user, owner_group)
+        cmd.extend(["-Z", target_user])
 
         cmd.extend([
             "-w", str(output_pcap),
@@ -1502,8 +1520,8 @@ def start_capture_privileged(
 
             # Set file ownership if requested or running as root
             if target_user:
-                _chown_file(log_file, target_user, owner_group)
-                _chown_file(pid_file, target_user, owner_group)
+                _chown_file(log_file, target_user, target_gid)
+                _chown_file(pid_file, target_user, target_gid)
 
             # Close open log file handle in parent process
             try:
@@ -1694,14 +1712,16 @@ def stop_capture_privileged(
                 raise run_trial.CaptureShutdownError(f"tcpdump capture process {target_pids} failed to exit after escalation")
 
         # Step 5: Fix file ownership and permissions for normal user
-        target_user = owner_user or os.environ.get("SUDO_USER") or os.environ.get("USER") or "indrani"
+        target_user, target_gid = _resolve_and_validate_capture_owner(owner_user, owner_group)
+
         if pcap_file and pcap_file.is_file():
-            if target_user:
-                _chown_file(pcap_file, target_user, owner_group)
+            _chown_file(pcap_file, target_user, target_gid)
             try:
                 pcap_file.chmod(0o664)
-            except OSError:
-                pass
+            except OSError as exc:
+                raise PrivilegedHelperError(
+                    f"Failed to set permissions on capture file {pcap_file}: {exc}"
+                ) from exc
 
         # Step 6: Validate PCAP
         if verify_pcap and pcap_file:
@@ -1733,17 +1753,27 @@ def stop_capture_privileged(
         return {"status": "OK", "stopped": True}
 
 
-def _chown_file(path: Path, user: str, group: Optional[str] = None) -> None:
-    """Safely chowns file if running as root."""
+def _chown_file(path: Path, user: str, group: Optional[Union[str, int]] = None) -> None:
+    """Safely chowns file to validated user/group if running as root."""
     if os.geteuid() == 0 and path.exists():
         try:
-            import pwd
-            import grp
-            uid = pwd.getpwnam(user).pw_uid
-            gid = grp.getgrnam(group or user).gr_gid if group else pwd.getpwnam(user).pw_gid
+            ident = identity.resolve_user_by_name(user)
+            uid = ident.uid
+            if group is not None:
+                if isinstance(group, int):
+                    gid = group
+                elif isinstance(group, str) and group.isdigit():
+                    gid = int(group)
+                else:
+                    import grp
+                    gid = grp.getgrnam(str(group)).gr_gid
+            else:
+                gid = ident.gid
             os.chown(str(path), uid, gid)
-        except Exception:
-            pass
+        except (identity.IdentityResolutionError, KeyError, OSError) as exc:
+            raise PrivilegedHelperError(
+                f"Failed to change ownership of {path} to {user}: {exc}"
+            ) from exc
 
 
 # ==============================================================================

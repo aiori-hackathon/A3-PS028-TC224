@@ -11,7 +11,8 @@ The current tested environment is WSL2 Ubuntu 24.04 with Chrome (`google-chrome`
 Before beginning, make sure the repository is up to date and that you are in its root:
 
 ```bash
-cd ~/projects/he-webtester
+# Run this from anywhere inside your local clone:
+cd "$(git rev-parse --show-toplevel)"
 git status -sb
 ```
 
@@ -143,6 +144,8 @@ All seven recorded browser trials above had HTTP 200, a valid PCAP, and cleanup 
 
 ## 6. Evidence checklist for a handoff
 
+Newly generated `result.json` and campaign-manifest evidence paths are serialized relative to the repository root when the referenced file is inside the checkout. Paths intentionally located outside the repository remain absolute. Campaign resume/validation resolves repository-relative values against the current checkout root and can remap historical absolute paths from the former `he-webtester` checkout when the matching file exists in the current checkout. This resolution is read-only: existing historical campaign records and checksums are not rewritten.
+
 For each trial that is included in a report, preserve:
 
 1. Trial ID, scenario ID, browser name/version, date/time, and environment details.
@@ -236,6 +239,7 @@ python3 lab/run_campaign.py --help
 python3 lab/analyze.py --help
 
 # Run automated tests (simulation/unit tests; not a replacement for live trials)
+python3 -m unittest lab.test_campaign_pcap_regression  # authentic October 29 S0-S5 PCAPs; requires TShark and the recorded captures
 python3 lab/test_analyze.py
 python3 lab/test_run_campaign.py
 python3 lab/test_run_trial.py
