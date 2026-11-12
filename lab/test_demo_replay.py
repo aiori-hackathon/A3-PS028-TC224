@@ -153,6 +153,57 @@ class TestDemoReplayDeterministicUnit(unittest.TestCase):
             self.assertEqual(rec["status"], "FAIL")
             self.assertTrue(any("classification mismatch" in err for err in rec["errors"]))
 
+    def test_missing_rederived_primary_flow_pcap_digest_fails_closed(self):
+        """Correction A: Missing rederived primary flow pcap_sha256 digest must fail closed."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            fake_file = tmp_path / f"{self.trial_id}.json"
+            real_data = json.loads((REDERIVED_DIR / f"{self.trial_id}.json").read_text())
+            del real_data["primary_flow"]["pcap_sha256"]
+            fake_file.write_text(json.dumps(real_data), encoding="utf-8")
+            rec = replay_single_trial(
+                demo=self.valid_spec,
+                checksum_map=self.valid_checksum_map,
+                campaign_dir=CAMPAIGN_DIR,
+                rederived_dir=tmp_path,
+            )
+            self.assertEqual(rec["status"], "FAIL")
+            self.assertTrue(any("missing pcap_sha256 digest" in err for err in rec["errors"]))
+
+    def test_malformed_rederived_primary_flow_pcap_digest_fails_closed(self):
+        """Correction A: Malformed rederived primary flow pcap_sha256 digest must fail closed."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            fake_file = tmp_path / f"{self.trial_id}.json"
+            real_data = json.loads((REDERIVED_DIR / f"{self.trial_id}.json").read_text())
+            real_data["primary_flow"]["pcap_sha256"] = "malformed-not-64-hex"
+            fake_file.write_text(json.dumps(real_data), encoding="utf-8")
+            rec = replay_single_trial(
+                demo=self.valid_spec,
+                checksum_map=self.valid_checksum_map,
+                campaign_dir=CAMPAIGN_DIR,
+                rederived_dir=tmp_path,
+            )
+            self.assertEqual(rec["status"], "FAIL")
+            self.assertTrue(any("malformed pcap_sha256 digest" in err for err in rec["errors"]))
+
+    def test_mismatched_rederived_primary_flow_pcap_digest_fails_closed(self):
+        """Correction A: Valid-format but mismatched primary flow pcap_sha256 must fail closed."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            fake_file = tmp_path / f"{self.trial_id}.json"
+            real_data = json.loads((REDERIVED_DIR / f"{self.trial_id}.json").read_text())
+            real_data["primary_flow"]["pcap_sha256"] = "0" * 64
+            fake_file.write_text(json.dumps(real_data), encoding="utf-8")
+            rec = replay_single_trial(
+                demo=self.valid_spec,
+                checksum_map=self.valid_checksum_map,
+                campaign_dir=CAMPAIGN_DIR,
+                rederived_dir=tmp_path,
+            )
+            self.assertEqual(rec["status"], "FAIL")
+            self.assertTrue(any("primary flow PCAP digest mismatch" in err for err in rec["errors"]))
+
     @patch("lab.demo_replay.dissect_pcap")
     def test_missing_primary_flow_fails_closed(self, mock_dissect):
         """Blocker P0-A: Empty or missing primary flow must fail closed without fallback."""

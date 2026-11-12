@@ -263,6 +263,7 @@ function HappyEyeballsConnect(hostname, port):
 """
 
 TRIAL_ID_PATTERN = re.compile(r"trial-\d{14}-[0-9a-f]{8}")
+HEX64_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 
 
 def compute_sha256(file_path: Path) -> str:
@@ -458,12 +459,20 @@ def replay_single_trial(
 
     reder_pf = rederived_data.get("primary_flow")
     if not reder_pf or not isinstance(reder_pf, dict):
-        record["errors"].append("Rederived record missing primary_flow object")
+        record["errors"].append("Rederived record missing or malformed primary_flow object")
     else:
-        if reder_pf.get("pcap_sha256") and reder_pf.get("pcap_sha256") != actual_sha256:
+        reder_pcap_digest = reder_pf.get("pcap_sha256")
+        if not reder_pcap_digest or not isinstance(reder_pcap_digest, str):
+            record["errors"].append("Rederived primary flow missing pcap_sha256 digest")
+        elif not HEX64_RE.match(reder_pcap_digest):
             record["errors"].append(
-                f"Rederived primary flow PCAP digest mismatch: {reder_pf.get('pcap_sha256')} != {actual_sha256}"
+                f"Rederived primary flow has malformed pcap_sha256 digest: {reder_pcap_digest!r}"
             )
+        elif reder_pcap_digest.lower() != actual_sha256.lower():
+            record["errors"].append(
+                f"Rederived primary flow PCAP digest mismatch: {reder_pcap_digest.lower()} != {actual_sha256.lower()}"
+            )
+
         if reder_pf.get("family") != expected_family:
             record["errors"].append(
                 f"Rederived primary flow family mismatch: {reder_pf.get('family')} != {expected_family}"

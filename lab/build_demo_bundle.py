@@ -328,6 +328,51 @@ def parse_int_or_none(val: Any) -> Optional[int]:
         return None
 
 
+TRIAL_ID_PATTERN = re.compile(r"trial-\d{14}-[0-9a-f]{8}")
+HEX64_RE = re.compile(r"^[0-9a-fA-F]{64}$")
+
+
+def parse_canonical_checksum_manifest(checksum_file: Path) -> Dict[str, str]:
+    """
+    Parse campaign_dir/pcap_sha256_checksums.txt into a trial-ID-to-digest mapping.
+    Fails closed on missing file, malformed lines, non-64-hex digests, missing trial IDs,
+    or duplicate conflicting entries.
+    """
+    if not checksum_file.is_file():
+        raise FileNotFoundError(f"Canonical checksum manifest missing: {checksum_file}")
+
+    manifest: Dict[str, str] = {}
+    with open(checksum_file, "r", encoding="utf-8") as f:
+        for line_no, line in enumerate(f, start=1):
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split(maxsplit=1)
+            if len(parts) != 2:
+                raise ValueError(
+                    f"Malformed checksum line {line_no} in {checksum_file}: '{line}'"
+                )
+            digest, path_str = parts[0].strip().lower(), parts[1].strip()
+            if not HEX64_RE.match(digest):
+                raise ValueError(
+                    f"Malformed SHA-256 digest on line {line_no} in {checksum_file}: '{digest}'"
+                )
+            match = TRIAL_ID_PATTERN.search(path_str)
+            if not match:
+                raise ValueError(
+                    f"No trial ID found in checksum path on line {line_no} in {checksum_file}: '{path_str}'"
+                )
+            trial_id = match.group(0)
+            if trial_id in manifest and manifest[trial_id] != digest:
+                raise ValueError(
+                    f"Duplicate conflicting checksum entry for trial {trial_id} in {checksum_file}: "
+                    f"'{manifest[trial_id]}' vs '{digest}'"
+                )
+            manifest[trial_id] = digest
+
+    return manifest
+
+
 def compute_deterministic_cohort_statistics(
     trial_records: List[Dict[str, Any]],
     metric_keys: List[str],
@@ -540,9 +585,12 @@ def build_demonstration_bundle(
             f"Timeline events count mismatch: {total_events} != expected {EXPECTED_TIMELINE_EVENTS_COUNT}"
         )
 
-    # 6. Ingest RFC 8305 assessment checks
+    # Ingest RFC 8305 assessment checks
     with open(rfc8305_file, "r", encoding="utf-8") as f:
         rfc_rows = list(csv.DictReader(f))
+
+    # Parse canonical PCAP checksum manifest into trial_id -> digest mapping
+    manifest_checksums = parse_canonical_checksum_manifest(checksums_file)
 
     # 7. Process valid trials and exclusions separately
     valid_trials: List[Dict[str, Any]] = []
@@ -583,7 +631,26 @@ def build_demonstration_bundle(
                 f"Attempt {row.get('attempt_id')} has invalid validity '{validity}' or status '{status}' (must be VALID_LIVE and COMPLETED)"
             )
 
-        # Valid live trial: load rederived JSON
+        # 1. Require trial present in canonical checksum manifest
+        if tid not in manifest_checksums:
+            raise ValueError(
+                f"Valid live trial {tid} is missing from canonical checksum manifest {checksums_file}"
+            )
+        expected_manifest_digest = manifest_checksums[tid]
+
+        # 2. Require attempts ledger PCAP digest is present, valid format, and matches manifest
+        ledger_digest = row.get("pcap_sha256")
+        if not ledger_digest or not HEX64_RE.match(str(ledger_digest)):
+            raise ValueError(
+                f"Attempts ledger has missing or malformed pcap_sha256 for trial {tid}: '{ledger_digest}'"
+            )
+        if ledger_digest.lower() != expected_manifest_digest:
+            raise ValueError(
+                f"Attempts ledger PCAP digest mismatch for trial {tid}: "
+                f"'{ledger_digest}' != manifest '{expected_manifest_digest}'"
+            )
+
+        # 3. Valid live trial: load rederived JSON
         reder_file = rederived_dir / f"{tid}.json"
         if not reder_file.is_file():
             raise FileNotFoundError(f"Missing rederived JSON record: {reder_file}")
@@ -610,11 +677,30 @@ def build_demonstration_bundle(
             raise ValueError(
                 f"Browser mismatch for trial {tid}: attempts ledger has '{row['browser']}' but rederived has '{reder.get('browser_name')}'"
             )
-        rep = parse_int_or_none(row["repetition"])
-        if reder.get("repetition") is not None and reder.get("repetition") != rep:
+
+        # Validate browser version against canonical cohort specification
+        browser_name = row["browser"]
+        cohort_browser = CANONICAL_BROWSERS.get(browser_name)
+        if not cohort_browser:
+            raise ValueError(f"Unknown browser cohort '{browser_name}' for trial {tid}")
+        reder_bver = reder.get("browser_version")
+        if reder_bver != cohort_browser["display_name"] and reder_bver != cohort_browser["version"]:
             raise ValueError(
-                f"Repetition mismatch for trial {tid}: attempts ledger has '{rep}' but rederived has '{reder.get('repetition')}'"
+                f"Browser version mismatch for trial {tid}: rederived has '{reder_bver}', "
+                f"expected '{cohort_browser['display_name']}' or '{cohort_browser['version']}'"
             )
+
+        # Preserve repetition from attempts ledger; verify agreement if rederived supplies one
+        ledger_rep = parse_int_or_none(row.get("repetition"))
+        if ledger_rep is None or ledger_rep <= 0:
+            raise ValueError(f"Attempt {row.get('attempt_id')} has invalid repetition '{row.get('repetition')}'")
+        reder_rep = parse_int_or_none(reder.get("repetition"))
+        if reder_rep is not None and reder_rep != ledger_rep:
+            raise ValueError(
+                f"Repetition mismatch for trial {tid}: attempts ledger has '{ledger_rep}' but rederived has '{reder_rep}'"
+            )
+        rep = ledger_rep
+
         if reder.get("validity_category") != "VALID_LIVE":
             raise ValueError(
                 f"Validity category mismatch for trial {tid}: rederived has '{reder.get('validity_category')}' (expected 'VALID_LIVE')"
@@ -624,9 +710,53 @@ def build_demonstration_bundle(
         if not reder.get("classification"):
             raise ValueError(f"Trial {tid} is missing classification")
 
+        # Strict Primary Flow Evidence Validation
+        reder_pf = reder.get("primary_flow")
+        if not reder_pf or not isinstance(reder_pf, dict):
+            raise ValueError(f"Trial {tid} missing or malformed primary_flow evidence object")
+
+        pf_stream = reder_pf.get("stream_id")
+        if pf_stream is None or str(pf_stream).strip() == "":
+            raise ValueError(f"Trial {tid} primary_flow missing non-empty stream identifier")
+
+        pf_family = reder_pf.get("family")
+        if pf_family not in ("IPv4", "IPv6"):
+            raise ValueError(f"Trial {tid} primary_flow invalid family: '{pf_family}' (must be IPv4 or IPv6)")
+
+        if reder_pf.get("handshake_completed") is not True:
+            raise ValueError(f"Trial {tid} primary_flow TCP handshake not completed")
+
+        syn_fr = parse_int_or_none(reder_pf.get("syn_frame"))
+        if syn_fr is None or syn_fr <= 0:
+            raise ValueError(f"Trial {tid} primary_flow missing required positive syn_frame identifier")
+
+        final_ack_fr = parse_int_or_none(reder_pf.get("final_ack_frame"))
+        if final_ack_fr is None or final_ack_fr <= 0:
+            raise ValueError(f"Trial {tid} primary_flow missing required positive final_ack_frame identifier")
+
+        http_req_fr = parse_int_or_none(reder_pf.get("http_request_frame"))
+        if http_req_fr is None or http_req_fr <= 0:
+            raise ValueError(f"Trial {tid} primary_flow missing required positive http_request_frame identifier")
+
+        http_resp_fr = parse_int_or_none(reder_pf.get("http_response_frame"))
+        if http_resp_fr is None or http_resp_fr <= 0:
+            raise ValueError(f"Trial {tid} primary_flow missing required positive http_response_frame identifier")
+
+        http_status = parse_int_or_none(reder_pf.get("http_status_code"))
+        if http_status is None or http_status != 200:
+            raise ValueError(
+                f"Trial {tid} primary_flow missing valid successful HTTP status code (expected 200, got {http_status})"
+            )
+
+        reder_pcap_digest = reder_pf.get("pcap_sha256")
+        if not reder_pcap_digest or not HEX64_RE.match(str(reder_pcap_digest)):
+            raise ValueError(f"Trial {tid} primary_flow missing or malformed pcap_sha256 digest: '{reder_pcap_digest}'")
+        if str(reder_pcap_digest).lower() != expected_manifest_digest:
+            raise ValueError(
+                f"Trial {tid} primary_flow PCAP digest mismatch: '{reder_pcap_digest}' != manifest '{expected_manifest_digest}'"
+            )
+
         scen_id = reder.get("scenario_id")
-        browser_name = reder.get("browser_name")
-        rep = reder.get("repetition")
 
         # Canonical metric preservation: connection_attempt_delay_ms must be retained
         m_in = reder.get("metrics", {})
@@ -644,30 +774,30 @@ def build_demonstration_bundle(
 
         null_reasons_in = m_in.get("null_reasons", {})
 
-        pf_in = reder.get("primary_flow", {})
         primary_flow_obj = {
-            "stream_id": pf_in.get("stream_id"),
-            "family": pf_in.get("family"),
-            "winning_family": pf_in.get("winning_family"),
-            "client_endpoint": pf_in.get("client_endpoint"),
-            "server_endpoint": pf_in.get("server_endpoint"),
-            "syn_frame": parse_int_or_none(pf_in.get("syn_frame")),
-            "syn_time": parse_float_or_none(pf_in.get("syn_time")),
-            "syn_ack_frame": parse_int_or_none(pf_in.get("syn_ack_frame")),
-            "syn_ack_time": parse_float_or_none(pf_in.get("syn_ack_time")),
-            "final_ack_frame": parse_int_or_none(pf_in.get("final_ack_frame")),
-            "final_ack_time": parse_float_or_none(pf_in.get("final_ack_time")),
-            "handshake_completed": pf_in.get("handshake_completed") is True,
-            "http_request_frame": parse_int_or_none(pf_in.get("http_request_frame")),
-            "http_response_frame": parse_int_or_none(pf_in.get("http_response_frame")),
-            "http_status_code": parse_int_or_none(pf_in.get("http_status_code")),
+            "stream_id": pf_stream,
+            "family": pf_family,
+            "winning_family": reder_pf.get("winning_family"),
+            "client_endpoint": reder_pf.get("client_endpoint"),
+            "server_endpoint": reder_pf.get("server_endpoint"),
+            "pcap_sha256": expected_manifest_digest,
+            "syn_frame": syn_fr,
+            "syn_time": parse_float_or_none(reder_pf.get("syn_time")),
+            "syn_ack_frame": parse_int_or_none(reder_pf.get("syn_ack_frame")),
+            "syn_ack_time": parse_float_or_none(reder_pf.get("syn_ack_time")),
+            "final_ack_frame": final_ack_fr,
+            "final_ack_time": parse_float_or_none(reder_pf.get("final_ack_time")),
+            "handshake_completed": True,
+            "http_request_frame": http_req_fr,
+            "http_response_frame": http_resp_fr,
+            "http_status_code": http_status,
         }
 
         trial_obj: Dict[str, Any] = {
             "trial_id": tid,
             "scenario_id": scen_id,
             "browser": browser_name,
-            "browser_version": reder.get("browser_version"),
+            "browser_version": reder_bver,
             "repetition": rep,
             "execution_mode": "LIVE",
             "is_simulation": False,
@@ -675,7 +805,7 @@ def build_demonstration_bundle(
             "validity_category": "VALID_LIVE",
             "classification": reder.get("classification"),
             "classification_reason": reder.get("classification_reason"),
-            "pcap_sha256": row.get("pcap_sha256"),
+            "pcap_sha256": expected_manifest_digest,
             "pcap_relpath": f"trials/{tid}/capture.pcap",
             "metrics": {
                 "t_connect_ms": t_conn_val,
