@@ -11,7 +11,9 @@ __pycache__/
 .vscode/
 
 setup/hosts-staging.yml
-# PS-028 lab runtime artifacts
+# PS-028 Phase E runtime exports
+lab/derived/phase-e/exports/
+
 lab/.lab.lock
 lab/.verify_dns.lock
 lab/.resolv_installed_by_ps028
