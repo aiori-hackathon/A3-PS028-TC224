@@ -2,7 +2,7 @@
   "bundle_schema_version": "1.0.0",
   "campaign_id": "ps028-a10-live-20261030-01",
   "evidence_type": "HISTORICAL_LIVE",
-  "generator_commit": "8118c7d332ee00b721fae838a95c0ec0ef694250",
+  "generator_commit": "d7f9d0458af9970529c248e65c92dd449e31ed07",
   "generator_script": "lab/build_demo_bundle.py",
   "generator_version": "1.0.0",
   "input_files_sha256": {
