@@ -134,14 +134,12 @@ CANONICAL_BROWSERS = {
         "browser_id": "google-chrome",
         "name": "Google Chrome",
         "version": "156.0.8078.73",
-        "executable": "/usr/bin/google-chrome",
         "display_name": "Google Chrome 156.0.8078.73",
     },
     "firefox": {
         "browser_id": "firefox",
         "name": "Mozilla Firefox",
         "version": "159.0",
-        "executable": "/home/indrani/opt/firefox-measurement/firefox",
         "display_name": "Mozilla Firefox 159.0",
     },
 }
@@ -420,6 +418,7 @@ def build_demonstration_bundle(
 
     # Validate source paths
     manifest_file = campaign_dir / "campaign_manifest.json"
+    checksums_file = campaign_dir / "pcap_sha256_checksums.txt"
     attempts_file = phase_c_dir / "attempts.csv"
     conns_file = phase_c_dir / "connection_attempts.csv"
     s5_file = phase_c_dir / "s5_flow_dissection.csv"
@@ -430,6 +429,7 @@ def build_demonstration_bundle(
 
     required_files = [
         manifest_file,
+        checksums_file,
         attempts_file,
         conns_file,
         s5_file,
@@ -547,6 +547,7 @@ def build_demonstration_bundle(
     # 7. Process valid trials and exclusions separately
     valid_trials: List[Dict[str, Any]] = []
     exclusions: List[Dict[str, Any]] = []
+    rederived_digests: Dict[str, str] = {}
 
     cohort_trial_records: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
 
@@ -555,7 +556,11 @@ def build_demonstration_bundle(
         status = row["status"]
         validity = row["validity_category"]
 
-        if validity == "CLEANUP_FAILURE" or status != "COMPLETED":
+        if validity == "CLEANUP_FAILURE":
+            if status != "FAILED":
+                raise ValueError(
+                    f"Attempt {row.get('attempt_id')} has validity CLEANUP_FAILURE but unexpected status '{status}'"
+                )
             exclusions.append({
                 "attempt_id": row["attempt_id"],
                 "slot_id": row["slot_id"],
@@ -573,17 +578,51 @@ def build_demonstration_bundle(
             })
             continue
 
+        if validity != "VALID_LIVE" or status != "COMPLETED":
+            raise ValueError(
+                f"Attempt {row.get('attempt_id')} has invalid validity '{validity}' or status '{status}' (must be VALID_LIVE and COMPLETED)"
+            )
+
         # Valid live trial: load rederived JSON
         reder_file = rederived_dir / f"{tid}.json"
         if not reder_file.is_file():
             raise FileNotFoundError(f"Missing rederived JSON record: {reder_file}")
 
+        rederived_digests[reder_file.name] = compute_sha256(reder_file)
+
         with open(reder_file, "r", encoding="utf-8") as f:
             reder = json.load(f)
 
-        # Enforce execution mode invariants
+        # Enforce execution mode and trial identity invariants against attempts ledger
+        if reder.get("trial_id") != tid:
+            raise ValueError(
+                f"Trial ID mismatch for trial {tid}: rederived has '{reder.get('trial_id')}'"
+            )
+        if reder.get("campaign_id") != campaign_id:
+            raise ValueError(
+                f"Campaign ID mismatch for trial {tid}: rederived has '{reder.get('campaign_id')}'"
+            )
+        if reder.get("scenario_id") != row["scenario_id"]:
+            raise ValueError(
+                f"Scenario mismatch for trial {tid}: attempts ledger has '{row['scenario_id']}' but rederived has '{reder.get('scenario_id')}'"
+            )
+        if reder.get("browser_name") != row["browser"]:
+            raise ValueError(
+                f"Browser mismatch for trial {tid}: attempts ledger has '{row['browser']}' but rederived has '{reder.get('browser_name')}'"
+            )
+        rep = parse_int_or_none(row["repetition"])
+        if reder.get("repetition") is not None and reder.get("repetition") != rep:
+            raise ValueError(
+                f"Repetition mismatch for trial {tid}: attempts ledger has '{rep}' but rederived has '{reder.get('repetition')}'"
+            )
+        if reder.get("validity_category") != "VALID_LIVE":
+            raise ValueError(
+                f"Validity category mismatch for trial {tid}: rederived has '{reder.get('validity_category')}' (expected 'VALID_LIVE')"
+            )
         if reder.get("execution_mode") != "LIVE" or reder.get("is_simulation") is not False:
             raise ValueError(f"Trial {tid} is not authentic LIVE measurement")
+        if not reder.get("classification"):
+            raise ValueError(f"Trial {tid} is missing classification")
 
         scen_id = reder.get("scenario_id")
         browser_name = reder.get("browser_name")
@@ -648,8 +687,8 @@ def build_demonstration_bundle(
                 "dns_resolution_time_ms": res_time_val,
                 "dns_latency_a_ms": lat_a_val,
                 "dns_latency_aaaa_ms": lat_aaaa_val,
-                "retransmitted_syn_count_ipv6": retx_v6 if retx_v6 is not None else 0,
-                "retransmitted_syn_count_ipv4": retx_v4 if retx_v4 is not None else 0,
+                "retransmitted_syn_count_ipv6": retx_v6,  # Preserved as null when absent
+                "retransmitted_syn_count_ipv4": retx_v4,  # Preserved as null when absent
                 "null_reasons": null_reasons_in,
             },
             "primary_flow": primary_flow_obj,
@@ -665,6 +704,13 @@ def build_demonstration_bundle(
 
     # Reconciliation assertions
     if len(valid_trials) != EXPECTED_VALID_LIVE_COUNT:
+        raise ValueError(
+            f"Valid live trials mismatch: {len(valid_trials)} != {EXPECTED_VALID_LIVE_COUNT}"
+        )
+    if len(rederived_digests) != EXPECTED_VALID_LIVE_COUNT:
+        raise ValueError(
+            f"Rederived trial digests count mismatch: {len(rederived_digests)} != {EXPECTED_VALID_LIVE_COUNT}"
+        )
         raise ValueError(
             f"Valid live trials mismatch: {len(valid_trials)} != {EXPECTED_VALID_LIVE_COUNT}"
         )
@@ -755,6 +801,7 @@ def build_demonstration_bundle(
         "bundle_schema_version": BUNDLE_SCHEMA_VERSION,
         "evidence_type": "HISTORICAL_LIVE",
         "input_files_sha256": source_digests,
+        "rederived_trials_sha256": rederived_digests,
         "output_bundle_sha256": compute_sha256(bundle_file),
     }
 

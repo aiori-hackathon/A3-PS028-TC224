@@ -3,7 +3,7 @@
 - **Branch**: `regional/phase-e-demo-readiness` (branched from `regional/ps028-phase-cd` @ `b920ebc93f2e6aaae8396b7095b6cd3c8598ade5`)
 - **Base Branch**: `regional/p0-remediation` @ commit `7c6ab23c2a378bbc8556fcc15f5911f626502576`
 - **Last Updated**: 2026-11-12T13:14:00Z
-- **Current Status**: **PHASE C/D SEALED & VERIFIED; PHASE E DEMO-READINESS REMEDIATED (857 PASSING TESTS)**
+- **Current Status**: **PHASE C/D SEALED & VERIFIED; PHASE E DEMO-READINESS REMEDIATED (871 PASSING TESTS)**
 
 ---
 
@@ -85,26 +85,27 @@
   - [x] Generated machine-readable metric registry (`lab/derived/phase-e/metric_registry.json`) preserving canonical `connection_attempt_delay_ms` key
   - [x] Implemented safe demonstration export utility (`lab/demo_export.py`) with spreadsheet formula-injection defense and realpath containment checks
   - [x] Verified repository hygiene: updated `.gitignore`, corrected `README.md` metadata and video hyperlink text
-  - [x] Reconciled test snapshots across project history (857 total fresh passing tests)
-  - [x] Verified 100% offline clean test execution (857 passing tests total)
+  - [x] Reconciled test snapshots across project history (871 total fresh passing tests)
+  - [x] Verified 100% offline clean test execution (871 passing tests total)
 
 ---
 
 ## 2. Test Suite Counts & Reconciliation
 
-- **Class A (Deterministic Unit Tests in `lab/`)**: **764 passing** (0 errors, 0 failures, 0 skips) across 21 test modules
+- **Class A (Deterministic Unit Tests in `lab/`)**: **778 passing** (0 errors, 0 failures, 0 skips) across 22 test modules
 - **Class B (Synthetic & Fixture Tests in `tests/`)**: **93 passing** (0 errors, 0 failures, 0 skips) across 5 tiers
-- **Total Passing Automated Tests**: **857 tests (100% pass rate)**
+- **Total Passing Automated Tests**: **871 tests (100% pass rate)**
 
 ### Documented Test Count Reconciliation Across Project History
 - **67 Tests (`TEST_READY.md`)**: Initial E2E synthetic testing track baseline covering Tiers 1–4 prior to Batch C5.
 - **818 Tests (`docs/phase-cd/gates/batch_c5.md`)**: Sealed historical gate report snapshot (725 in `lab/` + 93 in `tests/`) prior to Batch D simulation tests. Historical gate reports are preserved without modification.
 - **824 Tests (`regional/ps028-phase-cd` HEAD)**: Phase C/D baseline (731 in `lab/` + 93 in `tests/`), incorporating Batch D research sweep tests (`lab/test_research_sweeps.py`, +6 tests).
-- **857 Tests (`regional/phase-e-demo-readiness`)**: Current Phase E demo-readiness test count incorporating new dedicated readiness test suites:
-  - `lab/test_demo_replay.py` (+15 tests)
-  - `lab/test_demo_bundle.py` (+9 tests)
-  - `lab/test_demo_export.py` (+9 tests)
-  - 731 + 33 = 764 in `lab/` + 93 in `tests/` = **857 total passing tests**.
+- **857 Tests (Initial Phase E PR #9 Submission)**: Pre-review Phase E baseline with `test_demo_replay` (15), `test_demo_bundle` (9), `test_demo_export` (9) (+33 tests in `lab/`).
+- **871 Tests (`regional/phase-e-demo-readiness` Batch 1 Review Corrections)**: Current Phase E demo-readiness test count incorporating expanded fail-closed, adversarial, and symlink security test suites:
+  - `lab/test_demo_replay.py` (20 tests, +5 fail-closed identity & primary-flow tests)
+  - `lab/test_demo_bundle.py` (16 tests, +7 lineage, provenance hashes, null retention, and RFC 8305 consistency tests)
+  - `lab/test_demo_export.py` (11 tests, +2 leading whitespace & symlink escape tests)
+  - 731 + 47 = 778 in `lab/` + 93 in `tests/` = **871 total passing tests**.
 
 ---
 

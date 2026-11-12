@@ -42,9 +42,10 @@ def sanitize_formula_injection(value: Any) -> Any:
     """
     Mitigate spreadsheet formula injection on untrusted strings.
     If value is already a numeric type (int, float), it is returned untouched.
-    If value is a string that represents a valid number (e.g. '-5.2', '+10', '0'),
+    If value is a string that represents a valid number (e.g. '-5.2', '+10', '0', '  -10.5'),
     it is preserved without string escaping.
-    Only non-numeric strings starting with formula trigger characters are escaped.
+    Non-numeric strings starting with formula trigger characters (or having leading
+    whitespace/control characters before a formula trigger) are escaped with a leading single quote (').
     """
     if value is None:
         return ""
@@ -57,13 +58,19 @@ def sanitize_formula_injection(value: Any) -> Any:
     if not s:
         return ""
 
-    # If it starts with a formula trigger character
-    if s[0] in FORMULA_TRIGGERS:
-        # Check if it is a legitimate number (e.g. "-10.5", "+3")
-        if NUMERIC_RE.match(s.strip()):
+    # Strip leading whitespace and control characters
+    s_stripped = s.lstrip(" \t\r\n\x00\x0b\x0c")
+    if s_stripped and s_stripped[0] in FORMULA_TRIGGERS:
+        # Check if it is a legitimate number (e.g. "-10.5", "+3", "  -42")
+        if NUMERIC_RE.match(s_stripped):
             return s
         # Untrusted formula string -> escape with leading single quote
         return f"'{s}"
+
+    # Also handle strings that begin with tab or carriage return even if s_stripped is empty
+    if s[0] in ("\t", "\r"):
+        if not NUMERIC_RE.match(s.strip()):
+            return f"'{s}"
 
     return s
 

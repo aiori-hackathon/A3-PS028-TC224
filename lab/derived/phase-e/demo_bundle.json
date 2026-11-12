@@ -3,14 +3,12 @@
     "firefox": {
       "browser_id": "firefox",
       "display_name": "Mozilla Firefox 159.0",
-      "executable": "/home/indrani/opt/firefox-measurement/firefox",
       "name": "Mozilla Firefox",
       "version": "159.0"
     },
     "google-chrome": {
       "browser_id": "google-chrome",
       "display_name": "Google Chrome 156.0.8078.73",
-      "executable": "/usr/bin/google-chrome",
       "name": "Google Chrome",
       "version": "156.0.8078.73"
     }

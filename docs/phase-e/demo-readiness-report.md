@@ -1,13 +1,13 @@
 # PS-028 Phase E Demo-Readiness Remediation & Verification Report
 
-- **Document Version**: `1.0.0`
+- **Document Version**: `1.1.0` (Incorporating Batch 1 Owner Review Corrections)
 - **Report Date**: 2026-11-12
 - **Lead Role**: Senior Internet Measurement Scientist, Network Protocol Engineer, Test Architect
 - **Working Branch**: `regional/phase-e-demo-readiness`
 - **Source Revision**: `regional/ps028-phase-cd` @ commit [`b920ebc93f2e6aaae8396b7095b6cd3c8598ade5`](https://github.com/aiori-hackathon/A3-PS028-TC224/commit/b920ebc93f2e6aaae8396b7095b6cd3c8598ade5)
 - **Consolidation Target**: `regional/p0-remediation` @ commit [`7c6ab23c2a378bbc8556fcc15f5911f626502576`](https://github.com/aiori-hackathon/A3-PS028-TC224/commit/7c6ab23c2a378bbc8556fcc15f5911f626502576)
 - **Historical Integrity Seal**: `lab/derived/phase-c/historical_integrity_before.sha256` (**705/705 Verified OK — 0 Failures**)
-- **Automated Test Results**: **857 Passing Tests** (0 Failures, 0 Errors, 0 Skips — 100% Pass Rate)
+- **Automated Test Results**: **871 Passing Tests** (0 Failures, 0 Errors, 0 Skips — 100% Pass Rate)
 
 ---
 
@@ -43,21 +43,23 @@ At preflight discovery (Stage 0), the repository was situated on `regional/ps028
 ## 3. Files Modified and Created
 
 ### Files Modified
-1. `lab/demo_replay.py`: Full fail-closed rewrite supporting 14 authentic cases (S0–S6 × Chrome/Firefox).
-2. `.gitignore`: Added `lab/derived/phase-e/exports/`.
-3. `README.md`: Added Phase C revision metadata, PR destination, fixed video link text, and refreshed test counts.
-4. `PHASE_CD_PROGRESS.md`: Updated Phase E milestones, documented test count reconciliation (857 tests).
-5. `TEST_READY.md`: Added Phase E test count evolution and reconciliation addendum.
+1. `lab/demo_replay.py`: Full fail-closed rewrite supporting 14 authentic cases (S0–S6 × Chrome/Firefox); requires rederived JSON records fail-closed with complete identity and primary-flow cross-validation.
+2. `lab/build_demo_bundle.py`: Deterministic data bundle builder; removes machine-specific paths from browser cohorts, records all 280 rederived trial hashes and checksum manifest in provenance sidecar, preserves null retransmissions, and enforces strict attempt validity/identity alignment.
+3. `lab/demo_export.py`: Security-hardened filtered CSV/JSON exporter; strengthens formula-injection defense for strings with leading whitespace/control characters and prevents symlink traversal.
+4. `.gitignore`: Added `lab/derived/phase-e/exports/`.
+5. `README.md`: Added Phase C revision metadata, PR destination, resolved RFC 8305 assessment warning note, fixed video link text, and refreshed test counts (871 tests).
+6. `PHASE_CD_PROGRESS.md`: Updated Phase E milestones, documented test count reconciliation (871 tests).
+7. `TEST_READY.md`: Added Phase E test count evolution and reconciliation addendum (871 tests).
 
 ### Files Created
-1. `lab/test_demo_replay.py`: 15 dedicated unit and acceptance tests for CLI replay engine.
+1. `lab/test_demo_replay.py`: 20 dedicated unit and acceptance tests for CLI replay engine (including 5 fail-closed rederived record validation tests).
 2. `lab/build_demo_bundle.py`: Deterministic data bundle builder.
 3. `lab/derived/phase-e/demo_bundle.json`: 9.7MB pre-compiled data bundle reconciling all 280 live trials.
-4. `lab/derived/phase-e/demo_bundle.json.provenance.json`: Sibling provenance sidecar with source input hashes.
+4. `lab/derived/phase-e/demo_bundle.json.provenance.json`: Sibling provenance sidecar with source input hashes (8 inputs + 280 rederived trial hashes).
 5. `lab/derived/phase-e/metric_registry.json`: Machine-readable metric specifications.
-6. `lab/test_demo_bundle.py`: 9 validation tests covering determinism, counts, and simulation exclusion.
+6. `lab/test_demo_bundle.py`: 16 validation tests covering determinism, counts, simulation exclusion, lineage, provenance digests, null retention, and RFC 8305 consistency.
 7. `lab/demo_export.py`: Security-hardened filtered CSV/JSON exporter.
-8. `lab/test_demo_export.py`: 9 tests verifying formula sanitization and path containment.
+8. `lab/test_demo_export.py`: 11 tests verifying formula sanitization (including leading whitespace/control chars), path containment, symlink escape rejection, and historical directory protection.
 9. `docs/phase-e/demo-readiness-report.md`: This comprehensive formal report.
 10. `docs/phase-e/README.md`: Demonstration data developer runbook.
 
@@ -156,19 +158,20 @@ sha256sum -c lab/derived/phase-c/historical_integrity_before.sha256 | grep -v ':
 
 ### Fresh Test Execution Results
 Executed on branch `regional/phase-e-demo-readiness` via Python 3.12:
-- **`lab/` Unit Test Suite**: **764 executed, 764 passed, 0 failed, 0 errored, 0 skipped** (32.8s).
-- **`tests/` E2E Test Suite**: **93 executed, 93 passed, 0 failed, 0 errored, 0 skipped** (0.35s).
-- **Total Passing Automated Tests**: **857 tests (100% pass rate)**.
+- **`lab/` Unit Test Suite**: **778 executed, 778 passed, 0 failed, 0 errored, 0 skipped** across 22 test modules (33.7s).
+- **`tests/` E2E Test Suite**: **93 executed, 93 passed, 0 failed, 0 errored, 0 skipped** across 5 tiers (0.35s).
+- **Total Passing Automated Tests**: **871 tests (100% pass rate)**.
 
 ### Historical Snapshot Reconciliation
 1. **67 Tests (`TEST_READY.md`)**: Initial E2E synthetic testing track baseline covering Tiers 1–4 prior to Batch C5.
 2. **818 Tests (`docs/phase-cd/gates/batch_c5.md`)**: Sealed historical gate report snapshot (725 in `lab/` + 93 in `tests/`) prior to Batch D simulation tests. Historical gate reports are preserved without modification.
 3. **824 Tests (`regional/ps028-phase-cd` HEAD)**: Phase C/D baseline (731 in `lab/` + 93 in `tests/`), incorporating Batch D research sweep tests (`lab/test_research_sweeps.py`, +6 tests).
-4. **857 Tests (`regional/phase-e-demo-readiness`)**: Current Phase E demo-readiness test count incorporating new dedicated readiness test suites:
-   - `lab/test_demo_replay.py` (+15 tests)
-   - `lab/test_demo_bundle.py` (+9 tests)
-   - `lab/test_demo_export.py` (+9 tests)
-   - $731 + 33 = 764$ in `lab/` + $93$ in `tests/` = **857 total passing tests**.
+4. **857 Tests (Initial Phase E PR #9 Submission)**: Pre-review Phase E baseline with `test_demo_replay` (15), `test_demo_bundle` (9), `test_demo_export` (9) (+33 tests in `lab/`).
+5. **871 Tests (`regional/phase-e-demo-readiness` Batch 1 Review Corrections)**: Current Phase E demo-readiness test count incorporating expanded fail-closed, adversarial, and symlink security test suites:
+   - `lab/test_demo_replay.py` (20 tests, +5 fail-closed identity & primary-flow tests)
+   - `lab/test_demo_bundle.py` (16 tests, +7 lineage, provenance digests, null retention, and RFC 8305 consistency tests)
+   - `lab/test_demo_export.py` (11 tests, +2 leading whitespace & symlink escape tests)
+   - $731 + 47 = 778$ in `lab/` + $93$ in `tests/` = **871 total passing tests**.
 
 ---
 
@@ -196,11 +199,13 @@ For the upcoming interactive demonstration phase, we recommend:
 - **Working Branch**: `regional/phase-e-demo-readiness`
 - **Source Base**: `b920ebc93f2e6aaae8396b7095b6cd3c8598ade5` (`regional/ps028-phase-cd`)
 - **Target Branch**: `regional/p0-remediation` (`7c6ab23c2a378bbc8556fcc15f5911f626502576`)
-- **Total Commits on Working Branch**: 4 clean, logically grouped commits:
+- **Total Commits on Working Branch**: 6 clean, logically grouped commits:
   1. `e6bf1ed`: `feat(phase-e): repair CLI replay engine, expand to 14 authentic cases, and add fail-closed tests`
   2. `c5715b2`: `feat(phase-e): implement deterministic demo bundle builder and metric registry`
   3. `3cfc49a`: `feat(phase-e): implement safe demonstration export utility with formula defense and path containment`
   4. `d4ed39f`: `docs(phase-e): update README baseline metadata, video link, and reconcile test count snapshots (857 tests)`
+  5. `9fd0f9f`: `docs(phase-e): publish comprehensive demo-readiness report and developer guide`
+  6. `fix(phase-e): incorporate Batch 1 owner review corrections for fail-closed replay, provenance lineage, export security, and RFC assessment`
 - **Pull Request Base**: Target branch is confirmed as `regional/p0-remediation`.
 - **Merge Gate**: In accordance with instructions, the pull request will **not** be merged autonomously. Final integration is reserved for explicit owner approval.
 

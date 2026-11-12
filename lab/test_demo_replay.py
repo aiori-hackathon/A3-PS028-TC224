@@ -73,6 +73,86 @@ class TestDemoReplayDeterministicUnit(unittest.TestCase):
         self.assertEqual(rec["status"], "FAIL")
         self.assertTrue(any("absent from canonical checksum manifest" in err for err in rec["errors"]))
 
+    def test_missing_rederived_record_fails_closed(self):
+        """Correction 1: Missing rederived JSON record must fail closed."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            empty_rederived = Path(tmpdir)
+            rec = replay_single_trial(
+                demo=self.valid_spec,
+                checksum_map=self.valid_checksum_map,
+                campaign_dir=CAMPAIGN_DIR,
+                rederived_dir=empty_rederived,
+            )
+            self.assertEqual(rec["status"], "FAIL")
+            self.assertTrue(any("Rederived result JSON record missing" in err for err in rec["errors"]))
+
+    def test_malformed_rederived_record_fails_closed(self):
+        """Correction 1: Malformed rederived JSON must fail closed."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            bad_file = tmp_path / f"{self.trial_id}.json"
+            bad_file.write_text("{this is not valid json", encoding="utf-8")
+            rec = replay_single_trial(
+                demo=self.valid_spec,
+                checksum_map=self.valid_checksum_map,
+                campaign_dir=CAMPAIGN_DIR,
+                rederived_dir=tmp_path,
+            )
+            self.assertEqual(rec["status"], "FAIL")
+            self.assertTrue(any("Rederived result JSON record malformed" in err for err in rec["errors"]))
+
+    def test_mismatched_rederived_trial_id_fails_closed(self):
+        """Correction 1: Mismatched trial_id in rederived record must fail closed."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            fake_file = tmp_path / f"{self.trial_id}.json"
+            # Read real file and corrupt trial_id
+            real_data = json.loads((REDERIVED_DIR / f"{self.trial_id}.json").read_text())
+            real_data["trial_id"] = "trial-wrong-id"
+            fake_file.write_text(json.dumps(real_data), encoding="utf-8")
+            rec = replay_single_trial(
+                demo=self.valid_spec,
+                checksum_map=self.valid_checksum_map,
+                campaign_dir=CAMPAIGN_DIR,
+                rederived_dir=tmp_path,
+            )
+            self.assertEqual(rec["status"], "FAIL")
+            self.assertTrue(any("Rederived trial_id mismatch" in err for err in rec["errors"]))
+
+    def test_mismatched_rederived_validity_category_fails_closed(self):
+        """Correction 1: Rederived record with validity != VALID_LIVE fails closed."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            fake_file = tmp_path / f"{self.trial_id}.json"
+            real_data = json.loads((REDERIVED_DIR / f"{self.trial_id}.json").read_text())
+            real_data["validity_category"] = "CORRUPTED_RECORD"
+            fake_file.write_text(json.dumps(real_data), encoding="utf-8")
+            rec = replay_single_trial(
+                demo=self.valid_spec,
+                checksum_map=self.valid_checksum_map,
+                campaign_dir=CAMPAIGN_DIR,
+                rederived_dir=tmp_path,
+            )
+            self.assertEqual(rec["status"], "FAIL")
+            self.assertTrue(any("validity category not VALID_LIVE" in err for err in rec["errors"]))
+
+    def test_mismatched_rederived_classification_fails_closed(self):
+        """Correction 1: Rederived record with unexpected classification fails closed."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            fake_file = tmp_path / f"{self.trial_id}.json"
+            real_data = json.loads((REDERIVED_DIR / f"{self.trial_id}.json").read_text())
+            real_data["classification"] = "CONNECTION_FAILED"
+            fake_file.write_text(json.dumps(real_data), encoding="utf-8")
+            rec = replay_single_trial(
+                demo=self.valid_spec,
+                checksum_map=self.valid_checksum_map,
+                campaign_dir=CAMPAIGN_DIR,
+                rederived_dir=tmp_path,
+            )
+            self.assertEqual(rec["status"], "FAIL")
+            self.assertTrue(any("classification mismatch" in err for err in rec["errors"]))
+
     @patch("lab.demo_replay.dissect_pcap")
     def test_missing_primary_flow_fails_closed(self, mock_dissect):
         """Blocker P0-A: Empty or missing primary flow must fail closed without fallback."""

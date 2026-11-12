@@ -375,7 +375,7 @@ def replay_single_trial(
         )
         return record
 
-    # 3. Cross-Check Against Authentic Result Records
+    # 3. Cross-Check Against Authentic Result Records & Require Rederived Record
     raw_result_file = campaign_dir / "trials" / trial_id / "result.json"
     if not raw_result_file.is_file():
         record["errors"].append(f"Raw result.json missing for trial: {raw_result_file}")
@@ -406,23 +406,74 @@ def replay_single_trial(
     if raw_res.get("is_simulation") is not False:
         record["errors"].append("Trial incorrectly flagged as simulation")
 
-    # Check rederived result record if present
+    # Require rederived result record (fail-closed integrity)
     rederived_file = rederived_dir / f"{trial_id}.json"
-    rederived_data: Optional[Dict[str, Any]] = None
-    if rederived_file.is_file():
-        try:
-            with open(rederived_file, "r", encoding="utf-8") as f:
-                rederived_data = json.load(f)
-                if rederived_data.get("validity_category") != "VALID_LIVE":
-                    record["errors"].append(
-                        f"Validity category not VALID_LIVE: {rederived_data.get('validity_category')}"
-                    )
-                if rederived_data.get("classification") != expected_classification:
-                    record["errors"].append(
-                        f"Classification mismatch: rederived {rederived_data.get('classification')} != expected {expected_classification}"
-                    )
-        except Exception as exc:
-            record["warnings"].append(f"Could not parse rederived record: {exc}")
+    if not rederived_file.is_file():
+        record["errors"].append(f"Rederived result JSON record missing: {rederived_file}")
+        return record
+
+    try:
+        with open(rederived_file, "r", encoding="utf-8") as f:
+            rederived_data = json.load(f)
+    except Exception as exc:
+        record["errors"].append(f"Rederived result JSON record malformed: {exc}")
+        return record
+
+    # Validate all trial identity and classification fields against rederived ground truth
+    if rederived_data.get("trial_id") != trial_id:
+        record["errors"].append(
+            f"Rederived trial_id mismatch: {rederived_data.get('trial_id')} != {trial_id}"
+        )
+    if rederived_data.get("campaign_id") != "ps028-a10-live-20261030-01":
+        record["errors"].append(
+            f"Rederived campaign_id mismatch: {rederived_data.get('campaign_id')} != ps028-a10-live-20261030-01"
+        )
+    if rederived_data.get("scenario_id") != demo["scenario_id"]:
+        record["errors"].append(
+            f"Rederived scenario_id mismatch: {rederived_data.get('scenario_id')} != {demo['scenario_id']}"
+        )
+    if rederived_data.get("browser_name") != demo["browser"]:
+        record["errors"].append(
+            f"Rederived browser mismatch: {rederived_data.get('browser_name')} != {demo['browser']}"
+        )
+    expected_bver = demo["browser_display"]
+    if rederived_data.get("browser_version") != expected_bver:
+        record["errors"].append(
+            f"Rederived browser_version mismatch: {rederived_data.get('browser_version')} != {expected_bver}"
+        )
+    if rederived_data.get("execution_mode") != "LIVE":
+        record["errors"].append(
+            f"Rederived execution_mode not LIVE: {rederived_data.get('execution_mode')}"
+        )
+    if rederived_data.get("is_simulation") is not False:
+        record["errors"].append("Rederived record indicates simulation")
+    if rederived_data.get("validity_category") != "VALID_LIVE":
+        record["errors"].append(
+            f"Rederived validity category not VALID_LIVE: {rederived_data.get('validity_category')}"
+        )
+    if rederived_data.get("classification") != expected_classification:
+        record["errors"].append(
+            f"Rederived classification mismatch: {rederived_data.get('classification')} != {expected_classification}"
+        )
+
+    reder_pf = rederived_data.get("primary_flow")
+    if not reder_pf or not isinstance(reder_pf, dict):
+        record["errors"].append("Rederived record missing primary_flow object")
+    else:
+        if reder_pf.get("pcap_sha256") and reder_pf.get("pcap_sha256") != actual_sha256:
+            record["errors"].append(
+                f"Rederived primary flow PCAP digest mismatch: {reder_pf.get('pcap_sha256')} != {actual_sha256}"
+            )
+        if reder_pf.get("family") != expected_family:
+            record["errors"].append(
+                f"Rederived primary flow family mismatch: {reder_pf.get('family')} != {expected_family}"
+            )
+        if reder_pf.get("handshake_completed") is not True:
+            record["errors"].append("Rederived primary flow handshake not completed")
+        if reder_pf.get("http_status_code") != 200:
+            record["errors"].append(
+                f"Rederived primary flow HTTP status mismatch: {reder_pf.get('http_status_code')} != 200"
+            )
 
     # 4. Offline TShark Dissection
     try:
@@ -445,6 +496,10 @@ def replay_single_trial(
     stream_id = primary_flow.get("stream_id")
     if stream_id is None or str(stream_id) == "":
         record["errors"].append("Primary flow missing stream identifier")
+    elif reder_pf and str(stream_id) != str(reder_pf.get("stream_id")):
+        record["errors"].append(
+            f"Dissected stream ID mismatch: {stream_id} != {reder_pf.get('stream_id')}"
+        )
 
     fam = primary_flow.get("family")
     if fam not in ("IPv4", "IPv6"):

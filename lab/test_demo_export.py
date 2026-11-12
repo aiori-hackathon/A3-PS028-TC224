@@ -42,6 +42,40 @@ class TestDemoExportSecurity(unittest.TestCase):
             )
             self.assertEqual(sanitized[1:], inp)
 
+    def test_formula_injection_sanitization_with_leading_whitespace_and_control_chars(self):
+        """Correction 3: Strings with leading whitespace or control characters before formula triggers must be escaped."""
+        malicious_inputs = [
+            "   =SUM(A1:A10)",
+            " \t=1+1",
+            "\t=CMD()",
+            "\r+cmd|' /C calc'!A0",
+            " \x00=calc",
+            "   @SUM(1,2)",
+            "\n-2+3+cmd",
+            "  \r\n=1337",
+        ]
+        for inp in malicious_inputs:
+            sanitized = sanitize_formula_injection(inp)
+            self.assertTrue(
+                sanitized.startswith("'"),
+                f"Input with leading whitespace/control chars {inp!r} was not sanitized! Result: {sanitized!r}",
+            )
+            self.assertEqual(sanitized[1:], inp)
+
+        # Confirm legitimate numbers with leading whitespace are NOT escaped
+        numeric_with_ws = [
+            "  -10.5",
+            "\t+42.0",
+            "   0",
+            " \n-5.25",
+        ]
+        for num_str in numeric_with_ws:
+            sanitized = sanitize_formula_injection(num_str)
+            self.assertFalse(
+                str(sanitized).startswith("'"),
+                f"Numeric string {num_str!r} with whitespace was falsely escaped! Result: {sanitized!r}",
+            )
+
     def test_numeric_values_preserved_without_string_coercion(self):
         """Legitimate numbers (including negative numbers and floats) must NOT be escaped."""
         numeric_inputs = [
@@ -83,12 +117,41 @@ class TestDemoExportSecurity(unittest.TestCase):
             with self.assertRaises(PermissionError):
                 validate_safe_path("../../etc/passwd", root)
 
+    def test_path_containment_symlink_escape_rejected(self):
+        """Correction 3: Symlink pointing outside allowed root must raise PermissionError."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            allowed_root = tmp_path / "allowed_root"
+            outside_dir = tmp_path / "outside_dir"
+            allowed_root.mkdir()
+            outside_dir.mkdir()
+
+            # Create symlink inside allowed_root that points outside
+            symlink_inside = allowed_root / "evil_symlink"
+            symlink_inside.symlink_to(outside_dir)
+
+            with self.assertRaises(PermissionError):
+                validate_safe_path("evil_symlink/target.csv", allowed_root)
+
     def test_path_containment_protected_directories_rejected(self):
-        """Attempts to target lab/campaigns or lab/derived/phase-c must be rejected."""
+        """Correction 3: Attempts to target lab/campaigns or lab/derived/phase-c must be rejected."""
         repo_root = Path(__file__).resolve().parent.parent
         campaigns_dir = repo_root / "lab" / "campaigns"
+        phase_c_dir = repo_root / "lab" / "derived" / "phase-c"
+
         with self.assertRaises(PermissionError):
             validate_safe_path("overwrite.pcap", campaigns_dir)
+
+        with self.assertRaises(PermissionError):
+            validate_safe_path("overwrite.csv", phase_c_dir)
+
+        # Also verify absolute target pointing into protected directory from any root is blocked
+        with tempfile.TemporaryDirectory() as tmpdir:
+            temp_root = Path(tmpdir)
+            with self.assertRaises(PermissionError):
+                validate_safe_path(campaigns_dir / "ps028-a10-live-20261030-01" / "capture.pcap", temp_root)
+            with self.assertRaises(PermissionError):
+                validate_safe_path(phase_c_dir / "attempts.csv", temp_root)
 
 
 class TestDemoExportFidelity(unittest.TestCase):

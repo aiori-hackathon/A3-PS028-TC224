@@ -7,9 +7,11 @@ naming, JSON numeric preservation, and Phase D simulation exclusion.
 
 import json
 from pathlib import Path
+import shutil
 import tempfile
 import unittest
 
+from lab.analyze import load_trials_from_directory, assess_rfc8305_conformance
 from lab.build_demo_bundle import (
     DEFAULT_CAMPAIGN_DIR,
     DEFAULT_PHASE_C_DIR,
@@ -179,6 +181,139 @@ class TestDemoBundleBuilder(unittest.TestCase):
             self.assertIn("mathematical_formula", m)
             self.assertIn("unit", m)
             self.assertIn("null_reasons", m)
+
+    def test_browser_cohorts_contain_no_executable_paths(self):
+        """Correction 2: Browser cohorts metadata must not leak machine-specific executable paths."""
+        for b_id, b_meta in self.bundle_data["browser_cohorts"].items():
+            self.assertNotIn("executable", b_meta)
+            self.assertIn("name", b_meta)
+            self.assertIn("version", b_meta)
+            self.assertIn("display_name", b_meta)
+
+    def test_provenance_sidecar_contains_manifest_and_all_rederived_trial_hashes(self):
+        """Correction 2: Provenance sidecar must contain checksum manifest and all 280 rederived hashes."""
+        input_files = self.prov_data.get("input_files_sha256", {})
+        self.assertIn("pcap_sha256_checksums.txt", input_files)
+        self.assertIn("campaign_manifest.json", input_files)
+        self.assertIn("attempts.csv", input_files)
+        self.assertIn("rfc8305_assessment.csv", input_files)
+
+        rederived_hashes = self.prov_data.get("rederived_trials_sha256", {})
+        self.assertEqual(len(rederived_hashes), EXPECTED_VALID_LIVE_COUNT)
+        for tid, h in rederived_hashes.items():
+            self.assertTrue(tid.endswith(".json"))
+            self.assertEqual(len(h), 64)
+
+    def test_retransmission_counts_preserved_as_null_when_missing(self):
+        """Correction 2: Missing retransmission counts must remain null, never converted to 0."""
+        for t in self.bundle_data["trials"]:
+            m = t["metrics"]
+            self.assertIn("retransmitted_syn_count_ipv6", m)
+            self.assertIn("retransmitted_syn_count_ipv4", m)
+            v6 = m["retransmitted_syn_count_ipv6"]
+            v4 = m["retransmitted_syn_count_ipv4"]
+            self.assertTrue(v6 is None or isinstance(v6, int))
+            self.assertTrue(v4 is None or isinstance(v4, int))
+
+    def test_invalid_attempt_validity_category_fails_closed(self):
+        """Correction 2: Non-VALID_LIVE / non-CLEANUP_FAILURE attempt must fail closed."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_c_dir = Path(tmpdir) / "phase-c"
+            tmp_c_dir.mkdir()
+            for item in DEFAULT_PHASE_C_DIR.iterdir():
+                if item.name != "attempts.csv":
+                    (tmp_c_dir / item.name).symlink_to(item)
+
+            orig_lines = (DEFAULT_PHASE_C_DIR / "attempts.csv").read_text(encoding="utf-8").splitlines()
+            header = orig_lines[0]
+            first_row = orig_lines[1].split(",")
+            # Corrupt validity_category (index 10)
+            first_row[10] = "CORRUPTED_CATEGORY"
+            corrupted_csv = "\n".join([header, ",".join(first_row)] + orig_lines[2:]) + "\n"
+            (tmp_c_dir / "attempts.csv").write_text(corrupted_csv, encoding="utf-8")
+
+            out_dir = Path(tmpdir) / "out"
+            with self.assertRaises(ValueError) as ctx:
+                build_demonstration_bundle(
+                    campaign_dir=DEFAULT_CAMPAIGN_DIR,
+                    phase_c_dir=tmp_c_dir,
+                    output_dir=out_dir,
+                )
+            self.assertIn("invalid validity", str(ctx.exception))
+
+    def test_cleanup_failure_with_completed_status_fails_closed(self):
+        """Correction 2: Attempt with CLEANUP_FAILURE but COMPLETED status fails closed."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_c_dir = Path(tmpdir) / "phase-c"
+            tmp_c_dir.mkdir()
+            for item in DEFAULT_PHASE_C_DIR.iterdir():
+                if item.name != "attempts.csv":
+                    (tmp_c_dir / item.name).symlink_to(item)
+
+            orig_lines = (DEFAULT_PHASE_C_DIR / "attempts.csv").read_text(encoding="utf-8").splitlines()
+            header = orig_lines[0]
+            # Find a CLEANUP_FAILURE row (e.g. index 2 in 1-based lines) and set status to COMPLETED
+            new_lines = [header]
+            for line in orig_lines[1:]:
+                row = line.split(",")
+                if row[10] == "CLEANUP_FAILURE":
+                    row[9] = "COMPLETED"
+                    new_lines.append(",".join(row))
+                else:
+                    new_lines.append(line)
+            (tmp_c_dir / "attempts.csv").write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+
+            out_dir = Path(tmpdir) / "out"
+            with self.assertRaises(ValueError) as ctx:
+                build_demonstration_bundle(
+                    campaign_dir=DEFAULT_CAMPAIGN_DIR,
+                    phase_c_dir=tmp_c_dir,
+                    output_dir=out_dir,
+                )
+            self.assertIn("unexpected status", str(ctx.exception))
+
+    def test_trial_identity_mismatches_fail_closed(self):
+        """Correction 2: Mismatch between attempts ledger and rederived JSON must fail closed."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_c_dir = Path(tmpdir) / "phase-c"
+            tmp_c_dir.mkdir()
+            for item in DEFAULT_PHASE_C_DIR.iterdir():
+                if item.name not in ("attempts.csv", "rederived_results"):
+                    (tmp_c_dir / item.name).symlink_to(item)
+
+            shutil.copytree(DEFAULT_PHASE_C_DIR / "rederived_results", tmp_c_dir / "rederived_results")
+            target_json = tmp_c_dir / "rederived_results" / "trial-20261029205425-6cb90a54.json"
+            data = json.loads(target_json.read_text(encoding="utf-8"))
+            data["scenario_id"] = "S99_MISMATCH"
+            target_json.write_text(json.dumps(data), encoding="utf-8")
+
+            (tmp_c_dir / "attempts.csv").symlink_to(DEFAULT_PHASE_C_DIR / "attempts.csv")
+
+            out_dir = Path(tmpdir) / "out"
+            with self.assertRaises(ValueError) as ctx:
+                build_demonstration_bundle(
+                    campaign_dir=DEFAULT_CAMPAIGN_DIR,
+                    phase_c_dir=tmp_c_dir,
+                    output_dir=out_dir,
+                )
+            self.assertIn("Scenario mismatch", str(ctx.exception))
+
+    def test_rfc8305_assessment_consistency_with_underlying_trials(self):
+        """Correction 4: Verify RFC 8305 assessment in bundle matches underlying trials."""
+        trials = load_trials_from_directory(DEFAULT_CAMPAIGN_DIR)
+        computed_assessment = assess_rfc8305_conformance(trials)
+        bundle_assessment = self.bundle_data["rfc8305_assessment"]
+
+        self.assertEqual(len(bundle_assessment), len(computed_assessment))
+        comp_by_id = {c["check_id"]: c for c in computed_assessment}
+        for actual in bundle_assessment:
+            cid = actual["check_id"]
+            self.assertIn(cid, comp_by_id)
+            exp = comp_by_id[cid]
+            self.assertEqual(exp["scenario_id"], actual["scenario_id"])
+            self.assertEqual(exp["mandatory_floor_status"], actual["mandatory_floor_status"])
+            self.assertEqual(exp["recommendation_alignment_status"], actual["recommendation_alignment_status"])
+            self.assertEqual(exp["overall_observation_status"], actual["overall_observation_status"])
 
 
 if __name__ == "__main__":
