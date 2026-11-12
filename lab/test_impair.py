@@ -17,6 +17,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
@@ -650,6 +651,411 @@ class TestCLIOptions(unittest.TestCase):
         # Flag before subcommand
         args_before = parser.parse_args(["--dry-run", "apply", "S2"])
         self.assertTrue(args_before.dry_run)
+
+
+class TestFailClosedDNSReload(unittest.TestCase):
+    """
+    Comprehensive Unit & Regression Tests for Fail-Closed DNS Reload Protocol.
+    Verifies Finding C5-04 and Finding A12-CRIT-02 resolution (TC-DNS-01 through TC-DNS-20).
+    """
+
+    def setUp(self):
+        self.temp_dir = Path(tempfile.mkdtemp(prefix="ps028_dns_reload_test_"))
+        self.pid_file = self.temp_dir / "dns.pid"
+        self.log_file = self.temp_dir / "dns.log"
+        self.config_file = self.temp_dir / "dns_config.json"
+
+        # Baseline config
+        with open(impair.DNS_CONFIG_FILE, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+        with open(self.config_file, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, indent=2)
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_reload_fails_closed_missing_pid_file(self):
+        """TC-DNS-01: dns.pid does not exist -> raises DNSPIDError."""
+        self.assertFalse(self.pid_file.exists())
+        with self.assertRaises(impair.DNSPIDError) as ctx:
+            impair.reload_dns_server(pid_file=self.pid_file, log_file=self.log_file, config_file=self.config_file)
+        self.assertIn("does not exist", str(ctx.exception))
+
+    def test_reload_fails_closed_invalid_pid_string(self):
+        """TC-DNS-02: dns.pid contains invalid string -> raises DNSPIDError."""
+        self.pid_file.write_text("invalid_pid\n", encoding="utf-8")
+        with self.assertRaises(impair.DNSPIDError) as ctx:
+            impair.reload_dns_server(pid_file=self.pid_file, log_file=self.log_file, config_file=self.config_file)
+        self.assertIn("Invalid DNS PID", str(ctx.exception))
+
+    def test_reload_fails_closed_illegal_pid_value(self):
+        """TC-DNS-03: dns.pid contains illegal PID <= 1 -> raises DNSPIDError."""
+        for bad_pid in ["0", "-1", "1"]:
+            self.pid_file.write_text(f"{bad_pid}\n", encoding="utf-8")
+            with self.assertRaises(impair.DNSPIDError) as ctx:
+                impair.reload_dns_server(pid_file=self.pid_file, log_file=self.log_file, config_file=self.config_file)
+            self.assertIn("must be a user process > 1", str(ctx.exception))
+
+    @patch("os.kill")
+    def test_reload_fails_closed_stale_pid_process_dead(self, mock_kill):
+        """TC-DNS-04: Process is dead -> raises DNSPIDError."""
+        mock_kill.side_effect = ProcessLookupError("No such process")
+        self.pid_file.write_text("99999\n", encoding="utf-8")
+        with self.assertRaises(impair.DNSPIDError) as ctx:
+            impair.reload_dns_server(pid_file=self.pid_file, log_file=self.log_file, config_file=self.config_file)
+        self.assertIn("not running", str(ctx.exception))
+
+    @patch("os.kill")
+    def test_reload_fails_closed_cmdline_mismatch(self, mock_kill):
+        """TC-DNS-05: Process running but cmdline does not match dns_server.py -> raises DNSPIDError."""
+        mock_kill.return_value = None
+        self.pid_file.write_text("12345\n", encoding="utf-8")
+
+        mock_cmd = MagicMock()
+        mock_cmd.read.return_value = b"/bin/bash\x00-i\x00"
+
+        real_open = open
+        def custom_open(path, *args, **kwargs):
+            if str(path).startswith("/proc/"):
+                return mock_cmd
+            return real_open(path, *args, **kwargs)
+
+        with patch("builtins.open", side_effect=custom_open):
+            with self.assertRaises(impair.DNSPIDError) as ctx:
+                impair.reload_dns_server(pid_file=self.pid_file, log_file=self.log_file, config_file=self.config_file)
+            self.assertIn("does not match dns_server.py", str(ctx.exception))
+
+    @patch("os.kill")
+    def test_reload_fails_closed_proc_cmdline_permission_error(self, mock_kill):
+        """TC-DNS-06: Permission denied reading /proc/{pid}/cmdline -> raises DNSPIDError."""
+        mock_kill.return_value = None
+        self.pid_file.write_text("12345\n", encoding="utf-8")
+
+        real_open = open
+        def custom_open(path, *args, **kwargs):
+            if str(path).startswith("/proc/"):
+                raise PermissionError("Permission denied: /proc/12345/cmdline")
+            return real_open(path, *args, **kwargs)
+
+        with patch("builtins.open", side_effect=custom_open):
+            with self.assertRaises(impair.DNSPIDError) as ctx:
+                impair.reload_dns_server(pid_file=self.pid_file, log_file=self.log_file, config_file=self.config_file)
+            self.assertIn("Permission denied", str(ctx.exception))
+
+    @patch("os.kill")
+    def test_reload_fails_closed_process_dies_before_sighup(self, mock_kill):
+        """TC-DNS-07: Process dies between identity verification and SIGHUP -> raises DNSSignalError."""
+        def kill_side_effect(pid, sig):
+            if sig == 0:
+                return None
+            if sig == signal.SIGHUP:
+                raise ProcessLookupError("Process terminated")
+            return None
+        mock_kill.side_effect = kill_side_effect
+        self.pid_file.write_text("12345\n", encoding="utf-8")
+
+        mock_cmd = MagicMock()
+        mock_cmd.__enter__.return_value = mock_cmd
+        mock_cmd.read.return_value = b"python3\x00lab/dns_server.py\x00"
+
+        real_open = open
+        def custom_open(path, *args, **kwargs):
+            if str(path).startswith("/proc/"):
+                return mock_cmd
+            return real_open(path, *args, **kwargs)
+
+        with patch("builtins.open", side_effect=custom_open):
+            with self.assertRaises(impair.DNSSignalError) as ctx:
+                impair.reload_dns_server(pid_file=self.pid_file, log_file=self.log_file, config_file=self.config_file)
+            self.assertIn("died before SIGHUP delivery", str(ctx.exception))
+
+    @patch("os.kill")
+    def test_reload_fails_closed_sighup_permission_denied(self, mock_kill):
+        """TC-DNS-08: Permission denied sending SIGHUP -> raises DNSSignalError."""
+        def kill_side_effect(pid, sig):
+            if sig == 0:
+                return None
+            if sig == signal.SIGHUP:
+                raise PermissionError("Operation not permitted")
+            return None
+        mock_kill.side_effect = kill_side_effect
+        self.pid_file.write_text("12345\n", encoding="utf-8")
+
+        mock_cmd = MagicMock()
+        mock_cmd.__enter__.return_value = mock_cmd
+        mock_cmd.read.return_value = b"python3\x00lab/dns_server.py\x00"
+
+        real_open = open
+        def custom_open(path, *args, **kwargs):
+            if str(path).startswith("/proc/"):
+                return mock_cmd
+            return real_open(path, *args, **kwargs)
+
+        with patch("builtins.open", side_effect=custom_open):
+            with self.assertRaises(impair.DNSSignalError) as ctx:
+                impair.reload_dns_server(pid_file=self.pid_file, log_file=self.log_file, config_file=self.config_file)
+            self.assertIn("Permission denied", str(ctx.exception))
+
+    @patch("os.kill")
+    def test_reload_success_when_log_confirms(self, mock_kill):
+        """TC-DNS-09: SIGHUP confirmed in log -> returns status OK."""
+        def kill_side_effect(pid, sig):
+            if sig == signal.SIGHUP:
+                with open(self.log_file, "a", encoding="utf-8") as f:
+                    f.write("[2026-11-12T06:00:00.000Z] [INFO] SIGHUP config reload applied successfully: rules={}\n")
+            return None
+        mock_kill.side_effect = kill_side_effect
+        self.pid_file.write_text("12345\n", encoding="utf-8")
+
+        mock_cmd = MagicMock()
+        mock_cmd.__enter__.return_value = mock_cmd
+        mock_cmd.read.return_value = b"python3\x00lab/dns_server.py\x00"
+
+        real_open = open
+        def custom_open(path, *args, **kwargs):
+            if str(path).startswith("/proc/"):
+                return mock_cmd
+            return real_open(path, *args, **kwargs)
+
+        with patch("builtins.open", side_effect=custom_open):
+            res = impair.reload_dns_server(
+                pid_file=self.pid_file,
+                log_file=self.log_file,
+                config_file=self.config_file,
+                verify_active_delays=False
+            )
+            self.assertEqual(res["status"], "OK")
+            self.assertEqual(res["pid"], 12345)
+
+    @patch("os.kill")
+    def test_reload_fails_closed_when_server_rejects_config(self, mock_kill):
+        """TC-DNS-10: SIGHUP config reload rejected in log -> raises DNSConfigurationRejectedError."""
+        def kill_side_effect(pid, sig):
+            if sig == signal.SIGHUP:
+                with open(self.log_file, "a", encoding="utf-8") as f:
+                    f.write("[2026-11-12T06:00:00.000Z] [ERROR] SIGHUP config reload rejected: Schema violation.\n")
+            return None
+        mock_kill.side_effect = kill_side_effect
+        self.pid_file.write_text("12345\n", encoding="utf-8")
+
+        mock_cmd = MagicMock()
+        mock_cmd.__enter__.return_value = mock_cmd
+        mock_cmd.read.return_value = b"python3\x00lab/dns_server.py\x00"
+
+        real_open = open
+        def custom_open(path, *args, **kwargs):
+            if str(path).startswith("/proc/"):
+                return mock_cmd
+            return real_open(path, *args, **kwargs)
+
+        with patch("builtins.open", side_effect=custom_open):
+            with self.assertRaises(impair.DNSConfigurationRejectedError) as ctx:
+                impair.reload_dns_server(
+                    pid_file=self.pid_file,
+                    log_file=self.log_file,
+                    config_file=self.config_file,
+                    verify_active_delays=False
+                )
+            self.assertIn("Schema violation", str(ctx.exception))
+
+    @patch("os.kill")
+    def test_reload_fails_closed_on_log_timeout(self, mock_kill):
+        """TC-DNS-11: SIGHUP confirmation timeout -> raises DNSConfirmationTimeoutError."""
+        mock_kill.return_value = None
+        self.pid_file.write_text("12345\n", encoding="utf-8")
+        self.log_file.write_text("[2026-11-12T05:59:00.000Z] Server started\n", encoding="utf-8")
+
+        mock_cmd = MagicMock()
+        mock_cmd.__enter__.return_value = mock_cmd
+        mock_cmd.read.return_value = b"python3\x00lab/dns_server.py\x00"
+
+        real_open = open
+        def custom_open(path, *args, **kwargs):
+            if str(path).startswith("/proc/"):
+                return mock_cmd
+            return real_open(path, *args, **kwargs)
+
+        with patch("builtins.open", side_effect=custom_open):
+            with self.assertRaises(impair.DNSConfirmationTimeoutError) as ctx:
+                impair.reload_dns_server(
+                    pid_file=self.pid_file,
+                    log_file=self.log_file,
+                    config_file=self.config_file,
+                    timeout=0.05,
+                    verify_active_delays=False
+                )
+            self.assertIn("Timed out", str(ctx.exception))
+
+    @patch("os.kill")
+    def test_reload_tracks_log_offset_to_prevent_stale_confirmation(self, mock_kill):
+        """TC-DNS-12: Pre-existing reload line in log does not cause false positive -> raises timeout."""
+        mock_kill.return_value = None
+        self.pid_file.write_text("12345\n", encoding="utf-8")
+        # Write an old success line
+        self.log_file.write_text("[2026-11-12T05:50:00.000Z] [INFO] SIGHUP config reload applied successfully: rules={}\n", encoding="utf-8")
+
+        mock_cmd = MagicMock()
+        mock_cmd.__enter__.return_value = mock_cmd
+        mock_cmd.read.return_value = b"python3\x00lab/dns_server.py\x00"
+
+        real_open = open
+        def custom_open(path, *args, **kwargs):
+            if str(path).startswith("/proc/"):
+                return mock_cmd
+            return real_open(path, *args, **kwargs)
+
+        with patch("builtins.open", side_effect=custom_open):
+            with self.assertRaises(impair.DNSConfirmationTimeoutError):
+                impair.reload_dns_server(
+                    pid_file=self.pid_file,
+                    log_file=self.log_file,
+                    config_file=self.config_file,
+                    timeout=0.05,
+                    verify_active_delays=False
+                )
+
+    @patch("dns.query.udp")
+    @patch("time.time")
+    def test_active_query_delay_verification_success(self, mock_time, mock_query):
+        """TC-DNS-13: Active query delay verified within tolerance."""
+        mock_time.side_effect = [100.0, 100.504]  # 504ms elapsed
+        resp = MagicMock()
+        import dns.rcode
+        resp.rcode.return_value = dns.rcode.NOERROR
+        rr = MagicMock()
+        rr.address = "2001:db8:2::10"
+        resp.answer = [[rr]]
+        mock_query.return_value = resp
+
+        delay = impair.verify_active_dns_delay(
+            expected_delay_ms=500,
+            qtype="AAAA",
+            expected_addr="2001:db8:2::10",
+            tolerance_ms=25.0
+        )
+        self.assertAlmostEqual(delay, 504.0, delta=0.5)
+
+    @patch("dns.query.udp")
+    @patch("time.time")
+    def test_active_query_delay_fails_when_outside_tolerance_low(self, mock_time, mock_query):
+        """TC-DNS-14: Active query delay outside tolerance (low) -> raises DNSDelayVerificationError."""
+        mock_time.side_effect = [100.0, 100.450]  # 450ms elapsed (< 475ms)
+        resp = MagicMock()
+        import dns.rcode
+        resp.rcode.return_value = dns.rcode.NOERROR
+        rr = MagicMock()
+        rr.address = "2001:db8:2::10"
+        resp.answer = [[rr]]
+        mock_query.return_value = resp
+
+        with self.assertRaises(impair.DNSDelayVerificationError) as ctx:
+            impair.verify_active_dns_delay(
+                expected_delay_ms=500,
+                qtype="AAAA",
+                expected_addr="2001:db8:2::10",
+                tolerance_ms=25.0
+            )
+        self.assertIn("outside expected", str(ctx.exception))
+
+    @patch("dns.query.udp")
+    @patch("time.time")
+    def test_active_query_delay_fails_when_outside_tolerance_high(self, mock_time, mock_query):
+        """TC-DNS-15: Active query delay outside tolerance (high) -> raises DNSDelayVerificationError."""
+        mock_time.side_effect = [100.0, 100.540]  # 540ms elapsed (> 525ms)
+        resp = MagicMock()
+        import dns.rcode
+        resp.rcode.return_value = dns.rcode.NOERROR
+        rr = MagicMock()
+        rr.address = "2001:db8:2::10"
+        resp.answer = [[rr]]
+        mock_query.return_value = resp
+
+        with self.assertRaises(impair.DNSDelayVerificationError) as ctx:
+            impair.verify_active_dns_delay(
+                expected_delay_ms=500,
+                qtype="AAAA",
+                expected_addr="2001:db8:2::10",
+                tolerance_ms=25.0
+            )
+        self.assertIn("outside expected", str(ctx.exception))
+
+    @patch("dns.query.udp")
+    @patch("time.time")
+    def test_active_query_fails_on_rcode_error(self, mock_time, mock_query):
+        """TC-DNS-16: Active query returns SERVFAIL -> raises DNSDelayVerificationError."""
+        mock_time.side_effect = [100.0, 100.050]
+        resp = MagicMock()
+        import dns.rcode
+        resp.rcode.return_value = dns.rcode.SERVFAIL
+        mock_query.return_value = resp
+
+        with self.assertRaises(impair.DNSDelayVerificationError) as ctx:
+            impair.verify_active_dns_delay(
+                expected_delay_ms=0,
+                qtype="A",
+                expected_addr="10.0.2.10",
+                tolerance_ms=25.0
+            )
+        self.assertIn("SERVFAIL", str(ctx.exception))
+
+    @patch("dns.query.udp")
+    @patch("time.time")
+    def test_active_query_fails_on_address_mismatch(self, mock_time, mock_query):
+        """TC-DNS-17: Active query returns wrong address -> raises DNSDelayVerificationError."""
+        mock_time.side_effect = [100.0, 100.010]
+        resp = MagicMock()
+        import dns.rcode
+        resp.rcode.return_value = dns.rcode.NOERROR
+        rr = MagicMock()
+        rr.address = "10.0.99.99"
+        resp.answer = [[rr]]
+        mock_query.return_value = resp
+
+        with self.assertRaises(impair.DNSDelayVerificationError) as ctx:
+            impair.verify_active_dns_delay(
+                expected_delay_ms=0,
+                qtype="A",
+                expected_addr="10.0.2.10",
+                tolerance_ms=25.0
+            )
+        self.assertIn("expected address 10.0.2.10", str(ctx.exception))
+
+    @patch("lab.impair.reload_dns_server", side_effect=impair.DNSPIDError("Stale PID"))
+    def test_apply_dns_delays_fails_closed_if_reload_fails(self, mock_reload):
+        """TC-DNS-18: apply_dns_delays propagates DNSReloadError."""
+        with patch.object(impair, "DNS_CONFIG_FILE", self.config_file), \
+             patch.object(impair, "DNS_BACKUP_A4", self.temp_dir / "a4.bak"), \
+             patch.object(impair, "DNS_BACKUP_A3", self.temp_dir / "a3.bak"), \
+             patch("lab.impair.is_root", return_value=True):
+            with self.assertRaises(impair.DNSPIDError):
+                impair.apply_dns_delays(a_delay_ms=0, aaaa_delay_ms=500, dry_run=False)
+
+    @patch("lab.impair.reload_dns_server", side_effect=impair.DNSSignalError("Signal failed"))
+    def test_restore_dns_baseline_fails_closed_if_reload_fails(self, mock_reload):
+        """TC-DNS-19: restore_dns_baseline propagates DNSReloadError and retains backup."""
+        bak_file = self.temp_dir / "dns_backup_a4.json"
+        with open(impair.DNS_CONFIG_FILE, "r", encoding="utf-8") as f:
+            valid_cfg = f.read()
+        bak_file.write_text(valid_cfg, encoding="utf-8")
+        with patch.object(impair, "DNS_CONFIG_FILE", self.config_file), \
+             patch.object(impair, "DNS_BACKUP_A4", bak_file), \
+             patch.object(impair, "DNS_BACKUP_A3", self.temp_dir / "a3.bak"), \
+             patch("lab.impair.is_root", return_value=True):
+            with self.assertRaises(impair.DNSSignalError):
+                impair.restore_dns_baseline(
+                    dry_run=False,
+                    config_file=self.config_file,
+                    backup_file_a4=bak_file,
+                    lock_file=self.temp_dir / ".dns.lock"
+                )
+            self.assertTrue(bak_file.exists(), "Backup must be retained on failure")
+
+    def test_self_test_baseline_fails_when_dns_pid_missing(self):
+        """TC-DNS-20: self_test_baseline fails closed (returns False) when DNS PID file is missing in live mode."""
+        missing_pid = self.temp_dir / "nonexistent.pid"
+        with patch.object(impair, "DNS_PID_FILE", missing_pid):
+            passed = impair.self_test_baseline(dry_run=False)
+            self.assertFalse(passed, "self_test_baseline must return False when DNS PID file is missing")
 
 
 if __name__ == "__main__":

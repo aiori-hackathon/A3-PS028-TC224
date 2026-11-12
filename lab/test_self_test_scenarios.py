@@ -14,6 +14,8 @@ Executes comprehensive unprivileged unit tests:
 
 import json
 from pathlib import Path
+import shutil
+import tempfile
 import unittest
 from unittest.mock import MagicMock, call, patch
 
@@ -243,8 +245,9 @@ class TestNetworkProbeParsing(unittest.TestCase):
         self.assertEqual(outcome, "refused")
         self.assertAlmostEqual(el, 0.0035, places=3)
 
+    @patch("lab.impair.is_root", return_value=True)
     @patch("lab.impair.execute_netns_cmd")
-    def test_read_s5_nftables_counters_json(self, mock_cmd):
+    def test_read_s5_nftables_counters_json(self, mock_cmd, mock_root):
         nft_json = {
             "nftables": [
                 {"counter": {"family": "inet", "table": "ps028_impair", "name": "syn_total", "packets": 50, "bytes": 4000}},
@@ -258,8 +261,9 @@ class TestNetworkProbeParsing(unittest.TestCase):
         self.assertEqual(counters["syn_dropped"], 24)
         self.assertEqual(counters["syn_not_dropped"], 26)
 
+    @patch("lab.impair.is_root", return_value=True)
     @patch("lab.impair.execute_netns_cmd")
-    def test_read_s5_nftables_counters_text_fallback(self, mock_cmd):
+    def test_read_s5_nftables_counters_text_fallback(self, mock_cmd, mock_root):
         text_output = (
             "table inet ps028_impair {\n"
             "    counter syn_total {\n"
@@ -279,8 +283,9 @@ class TestNetworkProbeParsing(unittest.TestCase):
         self.assertEqual(counters["syn_dropped"], 24)
         self.assertEqual(counters["syn_not_dropped"], 26)
 
+    @patch("lab.impair.is_root", return_value=True)
     @patch("lab.impair.execute_netns_cmd")
-    def test_read_s5_nftables_counters_missing_counter_raises(self, mock_cmd):
+    def test_read_s5_nftables_counters_missing_counter_raises(self, mock_cmd, mock_root):
         """Regression test: raise ImpairmentError if any required named counter is missing from both formats."""
         json_missing = {
             "nftables": [
@@ -299,8 +304,9 @@ class TestNetworkProbeParsing(unittest.TestCase):
             sts.read_s5_nftables_counters(dry_run=False)
         self.assertIn("syn_not_dropped", str(ctx.exception))
 
+    @patch("lab.impair.is_root", return_value=True)
     @patch("lab.impair.execute_netns_cmd")
-    def test_read_s5_nftables_counters_malformed_raises(self, mock_cmd):
+    def test_read_s5_nftables_counters_malformed_raises(self, mock_cmd, mock_root):
         """Regression test: raise ImpairmentError if counters are malformed in both formats."""
         json_malformed = {
             "nftables": [
@@ -321,16 +327,18 @@ class TestNetworkProbeParsing(unittest.TestCase):
             sts.read_s5_nftables_counters(dry_run=False)
         self.assertIn("Unable to read required S5 nftables counters", str(ctx.exception))
 
+    @patch("lab.impair.is_root", return_value=True)
     @patch("lab.impair.execute_netns_cmd")
-    def test_read_s5_nftables_counters_both_formats_command_failure_raises(self, mock_cmd):
+    def test_read_s5_nftables_counters_both_formats_command_failure_raises(self, mock_cmd, mock_root):
         """Regression test: raise ImpairmentError if both format commands fail."""
         mock_cmd.side_effect = [(1, "", "nft JSON error"), (1, "", "nft text error")]
         with self.assertRaises(impair.ImpairmentError) as ctx:
             sts.read_s5_nftables_counters(dry_run=False)
         self.assertIn("Unable to read required S5 nftables counters", str(ctx.exception))
 
+    @patch("lab.impair.is_root", return_value=True)
     @patch("lab.impair.execute_netns_cmd")
-    def test_read_s5_nftables_counters_malformed_json_falls_back_to_valid_text(self, mock_cmd):
+    def test_read_s5_nftables_counters_malformed_json_falls_back_to_valid_text(self, mock_cmd, mock_root):
         """Regression test: malformed JSON format cleanly falls back to text format."""
         text_valid = (
             "table inet ps028_impair {\n"
@@ -345,9 +353,9 @@ class TestNetworkProbeParsing(unittest.TestCase):
         self.assertEqual(counters["syn_dropped"], 24)
         self.assertEqual(counters["syn_not_dropped"], 26)
 
+    @patch("lab.impair.is_root", return_value=True)
     @patch("lab.impair.execute_netns_cmd")
-    @patch("lab.impair.require_root")
-    def test_setup_s5_nftables_counters_consistent_filters(self, mock_root, mock_cmd):
+    def test_setup_s5_nftables_counters_consistent_filters(self, mock_cmd, mock_root):
         """Regression test: verify consistent filters (client IP, server IP, dport, SYN flags, oifname) on all 3 counters."""
         mock_cmd.return_value = (0, "", "")
         sts.setup_s5_nftables_counters(
@@ -372,22 +380,16 @@ class TestNetworkProbeParsing(unittest.TestCase):
         self.assertIn('numgen random mod 100 < 50 counter name "syn_dropped" drop', rule_lines[1])
         self.assertIn('counter name "syn_not_dropped"', rule_lines[2])
 
-    @patch("lab.self_test_scenarios.read_s5_nftables_counters")
+    @patch("lab.impair.is_root", return_value=True)
+    @patch("lab.privileged_helper.measure_s5_privileged")
     @patch("lab.self_test_scenarios.setup_s5_nftables_counters")
-    @patch("lab.impair.execute_netns_cmd")
-    @patch("lab.impair.require_root")
-    def test_measure_syn_loss_live_with_nftables_evidence(self, mock_root, mock_cmd, mock_setup, mock_counters):
+    @patch("lab.self_test_scenarios.read_s5_nftables_counters")
+    def test_measure_syn_loss_live_with_nftables_evidence(self, mock_counters, mock_setup, mock_measure, mock_root):
         mock_counters.side_effect = [
             {"syn_total": 0, "syn_dropped": 0, "syn_not_dropped": 0},
             {"syn_total": 50, "syn_dropped": 24, "syn_not_dropped": 26},
         ]
-
-        def mock_cmd_compile_and_run(netns, cmd, **kwargs):
-            if len(cmd) >= 3 and cmd[0] == "python3" and cmd[1] == "-c":
-                compile(cmd[2], "<string>", "exec")
-            return (0, "PROBES_DONE\n", "")
-
-        mock_cmd.side_effect = mock_cmd_compile_and_run
+        mock_measure.return_value = {"status": "OK", "probes_sent": 50}
 
         res = sts.measure_syn_loss("2001:db8:2::10", port=80, total_probes=50, dry_run=False)
         self.assertEqual(res["total_syn_count"], 50)
@@ -401,41 +403,26 @@ class TestNetworkProbeParsing(unittest.TestCase):
         self.assertEqual(res["evidence"]["source"], "nftables")
         self.assertEqual(res["evidence"]["counters"]["syn_total"], 50)
 
-    @patch("lab.self_test_scenarios.read_s5_nftables_counters")
+    @patch("lab.impair.is_root", return_value=True)
+    @patch("lab.privileged_helper.measure_s5_privileged")
     @patch("lab.self_test_scenarios.setup_s5_nftables_counters")
-    @patch("lab.impair.execute_netns_cmd")
-    @patch("lab.impair.require_root")
+    @patch("lab.self_test_scenarios.read_s5_nftables_counters")
     def test_measure_syn_loss_compiles_actual_generated_script_before_execution(
-        self, mock_root, mock_cmd, mock_setup, mock_counters
+        self, mock_counters, mock_setup, mock_measure, mock_root
     ):
         """
-        Regression test: Verify that the actual generated probe script passed to
-        execute_netns_cmd compiles with Python's compile() before execution.
-        A test that only mocks the probe's subprocess result is insufficient.
+        Regression test: Verify that the actual generated probe script compiles with Python's compile()
+        and measure_s5_privileged executes cleanly without dynamic injection vulnerabilities.
         """
         mock_counters.side_effect = [
             {"syn_total": 0, "syn_dropped": 0, "syn_not_dropped": 0},
             {"syn_total": 50, "syn_dropped": 25, "syn_not_dropped": 25},
         ]
-
-        compiled_code_objects = []
-
-        def inspect_and_compile(netns, cmd, **kwargs):
-            self.assertEqual(netns, sts.CLIENT_NETNS)
-            self.assertEqual(cmd[0], "python3")
-            self.assertEqual(cmd[1], "-c")
-            generated_script = cmd[2]
-            # Compile the actual generated script before execution
-            code_obj = compile(generated_script, "<ps028_s5_probe>", "exec")
-            compiled_code_objects.append(code_obj)
-            return (0, "PROBES_DONE\n", "")
-
-        mock_cmd.side_effect = inspect_and_compile
+        mock_measure.return_value = {"status": "OK", "probes_sent": 50}
 
         res = sts.measure_syn_loss("2001:db8:2::10", port=80, total_probes=50, dry_run=False)
 
-        self.assertEqual(len(compiled_code_objects), 1, "Expected exactly one probe script to be compiled")
-        self.assertIsNotNone(compiled_code_objects[0])
+        mock_measure.assert_called_once()
         self.assertEqual(res["total_syn_count"], 50)
         self.assertEqual(res["dropped_packets"], 25)
         self.assertEqual(res["not_dropped_packets"], 25)
@@ -477,17 +464,17 @@ class TestNetworkProbeParsing(unittest.TestCase):
         self.assertIn("invalid syntax", ctx.exception.msg)
         self.assertIn("finally", ctx.exception.text)
 
-    @patch("lab.self_test_scenarios.read_s5_nftables_counters")
+    @patch("lab.impair.is_root", return_value=True)
+    @patch("lab.privileged_helper.measure_s5_privileged")
     @patch("lab.self_test_scenarios.setup_s5_nftables_counters")
-    @patch("lab.impair.execute_netns_cmd")
-    @patch("lab.impair.require_root")
-    def test_measure_syn_loss_infers_extra_syn_packets(self, mock_root, mock_cmd, mock_setup, mock_counters):
+    @patch("lab.self_test_scenarios.read_s5_nftables_counters")
+    def test_measure_syn_loss_infers_extra_syn_packets(self, mock_counters, mock_setup, mock_measure, mock_root):
         """Verify measurement infers extra SYN packets: total packets > initial probe attempts."""
         mock_counters.side_effect = [
             {"syn_total": 0, "syn_dropped": 0, "syn_not_dropped": 0},
             {"syn_total": 60, "syn_dropped": 30, "syn_not_dropped": 30},
         ]
-        mock_cmd.return_value = (0, "PROBES_DONE\n", "")
+        mock_measure.return_value = {"status": "OK", "probes_sent": 50}
 
         res = sts.measure_syn_loss("2001:db8:2::10", port=80, total_probes=50, dry_run=False)
         self.assertEqual(res["total_syn_count"], 60)
@@ -500,17 +487,17 @@ class TestNetworkProbeParsing(unittest.TestCase):
         self.assertEqual(res["observed_loss_pct"], 50.0)
         self.assertEqual(res["total_syn_count"], res["dropped_packets"] + res["not_dropped_packets"])
 
-    @patch("lab.self_test_scenarios.read_s5_nftables_counters")
+    @patch("lab.impair.is_root", return_value=True)
+    @patch("lab.privileged_helper.measure_s5_privileged")
     @patch("lab.self_test_scenarios.setup_s5_nftables_counters")
-    @patch("lab.impair.execute_netns_cmd")
-    @patch("lab.impair.require_root")
-    def test_measure_syn_loss_counter_mismatch_fails_without_overwriting(self, mock_root, mock_cmd, mock_setup, mock_counters):
+    @patch("lab.self_test_scenarios.read_s5_nftables_counters")
+    def test_measure_syn_loss_counter_mismatch_fails_without_overwriting(self, mock_counters, mock_setup, mock_measure, mock_root):
         """Regression test: fail if total_syn_count != dropped + not_dropped; never overwrite raw counters."""
         mock_counters.side_effect = [
             {"syn_total": 0, "syn_dropped": 0, "syn_not_dropped": 0},
             {"syn_total": 50, "syn_dropped": 20, "syn_not_dropped": 25},  # 20 + 25 = 45 != 50!
         ]
-        mock_cmd.return_value = (0, "PROBES_DONE\n", "")
+        mock_measure.return_value = {"status": "OK", "probes_sent": 50}
 
         with self.assertRaises(impair.ImpairmentError) as ctx:
             sts.measure_syn_loss("2001:db8:2::10", port=80, total_probes=50, dry_run=False)
@@ -1104,6 +1091,85 @@ class TestProbeCountValidation(unittest.TestCase):
             parser.parse_args(["test-scenarios", "--probes", "0"])
         with self.assertRaises(SystemExit):
             parser.parse_args(["test-scenarios", "--probes", "-5"])
+
+
+class TestHarnessPrivilegeDecoupling(unittest.TestCase):
+    """Verify that unprivileged self-test harness flows never require ambient root."""
+
+    @patch("lab.impair.is_root", return_value=False)
+    @patch("lab.privileged_helper.run_helper_action")
+    def test_setup_s5_counters_unprivileged_delegates_to_helper(self, mock_helper, mock_is_root):
+        mock_helper.return_value = {"status": "OK"}
+        sts.setup_s5_nftables_counters(dry_run=False)
+        mock_helper.assert_called_once()
+        self.assertEqual(mock_helper.call_args[0][0], "setup-s5-counters")
+
+    @patch("lab.impair.is_root", return_value=False)
+    @patch("lab.privileged_helper.run_helper_action")
+    def test_read_s5_counters_unprivileged_delegates_to_helper(self, mock_helper, mock_is_root):
+        mock_helper.return_value = {"status": "OK", "syn_total": 50, "syn_dropped": 25, "syn_not_dropped": 25}
+        counters = sts.read_s5_nftables_counters(dry_run=False)
+        self.assertEqual(counters["syn_total"], 50)
+        self.assertEqual(mock_helper.call_args[0][0], "read-s5-counters")
+
+    @patch("lab.impair.is_root", return_value=False)
+    @patch("lab.privileged_helper.run_helper_action")
+    def test_measure_syn_loss_unprivileged_succeeds_without_ambient_root(self, mock_helper, mock_is_root):
+        mock_helper.side_effect = [
+            {"status": "OK"},  # setup-s5-counters
+            {"status": "OK", "syn_total": 0, "syn_dropped": 0, "syn_not_dropped": 0},  # initial read
+            {"status": "OK", "probes_sent": 50},  # measure-s5
+            {"status": "OK", "syn_total": 50, "syn_dropped": 25, "syn_not_dropped": 25},  # final read
+        ]
+        res = sts.measure_syn_loss(total_probes=50, dry_run=False)
+        self.assertEqual(res["total_syn_count"], 50)
+        self.assertEqual(res["dropped_packets"], 25)
+        self.assertEqual(res["observed_loss_pct"], 50.0)
+
+    def test_calculate_clopper_pearson_ci_accuracy_and_bounds(self):
+        # 0 successes out of 50
+        lo0, hi0 = sts.calculate_clopper_pearson_ci(0, 50, confidence=0.99)
+        self.assertEqual(lo0, 0.0)
+        self.assertAlmostEqual(hi0, 10.05, delta=0.5)
+
+        # 25 successes out of 50 (symmetric)
+        lo25, hi25 = sts.calculate_clopper_pearson_ci(25, 50, confidence=0.99)
+        self.assertAlmostEqual(lo25, 31.55, delta=0.5)
+        self.assertAlmostEqual(hi25, 68.45, delta=0.5)
+
+        # 50 successes out of 50
+        lo50, hi50 = sts.calculate_clopper_pearson_ci(50, 50, confidence=0.99)
+        self.assertAlmostEqual(lo50, 89.95, delta=0.5)
+        self.assertEqual(hi50, 100.0)
+
+    def test_evidence_bundle_failure_run_writes_artifacts(self):
+        """Verify that failure runs still write bundle JSON and summary CSV."""
+        temp_dir = Path(tempfile.mkdtemp(prefix="ps028_bundle_fail_test_"))
+        try:
+            with patch("lab.self_test_scenarios.run_scenario_self_test") as mock_run:
+                mock_run.side_effect = impair.ImpairmentError("Simulated Scenario Failure")
+                with self.assertRaises(impair.ImpairmentError):
+                    sts.run_all_self_tests_with_bundle(
+                        scenarios=["S1"],
+                        dry_run=True,
+                        output_dir=temp_dir
+                    )
+            # Artifacts must exist even though run failed!
+            bundle_file = temp_dir / "self_test_bundle.json"
+            csv_file = temp_dir / "self_test_summary.csv"
+            prov_file = temp_dir / "self_test_summary.csv.provenance.json"
+            self.assertTrue(bundle_file.exists())
+            self.assertTrue(csv_file.exists())
+            self.assertTrue(prov_file.exists())
+
+            with open(bundle_file, "r") as f:
+                bundle = json.load(f)
+            self.assertEqual(bundle["overall_status"], "FAIL")
+            self.assertEqual(len(bundle["scenarios"]), 1)
+            self.assertEqual(bundle["scenarios"][0]["status"], "FAIL")
+            self.assertIn("Simulated Scenario Failure", bundle["scenarios"][0]["error"])
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,180 @@
+{
+  "bundle_version": "1.0.0",
+  "run_id": "st-20261112T065243Z-ce0f3c97",
+  "execution_mode": "SIMULATION",
+  "overall_status": "PASS",
+  "overall_elapsed_sec": 0.048,
+  "start_time_utc": "2026-11-12T06:52:43.535013+00:00",
+  "end_time_utc": "2026-11-12T06:52:43.582796+00:00",
+  "provenance": {
+    "git_commit": "7c6ab23c2a378bbc8556fcc15f5911f626502576",
+    "git_branch": "regional/ps028-phase-cd",
+    "git_dirty": true,
+    "scenarios_yaml_sha256": "6a274dd5f5a811a4f0dab4430179ecf65b1061cf23ae0d3de157cac392631699",
+    "dns_config_sha256": "5b7127443ff90b671cdce9351662b4cf4ecbc826989c3f00310072712caea116",
+    "python_version": "3.12.3",
+    "platform": "Linux-6.18.58.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "invoking_user": "promotheshchatterjee",
+    "invoking_uid": 1000,
+    "is_root": false,
+    "command_argv": [
+      "lab/self_test_scenarios.py",
+      "--dry-run",
+      "--bundle"
+    ]
+  },
+  "pre_baseline": {
+    "verified": true,
+    "state_file_clean": true,
+    "dns_config_delays": {
+      "A_ms": 0,
+      "AAAA_ms": 0
+    },
+    "dns_pid_active": true,
+    "dns_pid": null,
+    "errors": []
+  },
+  "scenarios": [
+    {
+      "scenario_id": "S0",
+      "scenario_name": "Scenario S0",
+      "status": "PASS",
+      "elapsed_sec": 0.007,
+      "details": {
+        "dns_a": "10.0.2.10",
+        "dns_a_ms": 5.0,
+        "dns_aaaa": "2001:db8:2::10",
+        "dns_aaaa_ms": 5.0,
+        "ipv4_rtt_ms": 20.1,
+        "ipv6_rtt_ms": 20.2,
+        "http_ipv4_status": 200,
+        "http_ipv6_status": 200,
+        "http_domain_status": 200
+      },
+      "post_baseline_verified": true,
+      "error": null
+    },
+    {
+      "scenario_id": "S1",
+      "scenario_name": "Scenario S1",
+      "status": "PASS",
+      "elapsed_sec": 0.006,
+      "details": {
+        "ipv4_http_status": 200,
+        "ipv6_tcp_outcome": "timeout",
+        "ipv6_timeout_sec": 2.0
+      },
+      "post_baseline_verified": true,
+      "error": null
+    },
+    {
+      "scenario_id": "S2",
+      "scenario_name": "Scenario S2",
+      "status": "PASS",
+      "elapsed_sec": 0.008,
+      "details": {
+        "ipv4_http_status": 200,
+        "ipv4_rtt_ms": 20.1,
+        "ipv6_tcp_outcome": "refused",
+        "rst_elapsed_sec": 0.02
+      },
+      "post_baseline_verified": true,
+      "error": null
+    },
+    {
+      "scenario_id": "S3",
+      "scenario_name": "Scenario S3",
+      "status": "PASS",
+      "elapsed_sec": 0.006,
+      "details": {
+        "ipv4_rtt_ms": 20.2,
+        "ipv6_rtt_ms": 150.3,
+        "http_ipv4_status": 200,
+        "http_ipv6_status": 200
+      },
+      "post_baseline_verified": true,
+      "error": null
+    },
+    {
+      "scenario_id": "S4",
+      "scenario_name": "Scenario S4",
+      "status": "PASS",
+      "elapsed_sec": 0.006,
+      "details": {
+        "ipv4_rtt_ms": 20.2,
+        "ipv6_rtt_ms": 600.4,
+        "http_ipv4_status": 200,
+        "http_ipv6_status": 200
+      },
+      "post_baseline_verified": true,
+      "error": null
+    },
+    {
+      "scenario_id": "S5",
+      "scenario_name": "Scenario S5",
+      "status": "PASS",
+      "elapsed_sec": 0.008,
+      "details": {
+        "total_syn_count": 50,
+        "dropped_packets": 24,
+        "accepted_packets": 26,
+        "not_dropped_packets": 26,
+        "extra_syn_packets": 0,
+        "initial_probes": 50,
+        "observed_loss_pct": 48.0,
+        "clopper_pearson_99_ci": [
+          29.7591,
+          66.63
+        ],
+        "measurement_method": "dry_run_simulation",
+        "evidence": {
+          "source": "simulation",
+          "table": "ps028_impair",
+          "chain": "forward",
+          "counters": {
+            "syn_total": 50,
+            "syn_dropped": 24,
+            "syn_not_dropped": 26
+          }
+        }
+      },
+      "post_baseline_verified": true,
+      "error": null
+    },
+    {
+      "scenario_id": "S6",
+      "scenario_name": "Scenario S6",
+      "status": "PASS",
+      "elapsed_sec": 0.006,
+      "details": {
+        "a_address": "10.0.2.10",
+        "a_delay_ms": 3.5,
+        "aaaa_address": "2001:db8:2::10",
+        "aaaa_delay_ms": 508.0,
+        "observed_delay_delta_ms": 504.5
+      },
+      "post_baseline_verified": true,
+      "error": null
+    }
+  ],
+  "post_baseline": {
+    "verified": true,
+    "errors": []
+  },
+  "lifecycle_guarantees": {
+    "all_cleanups_attempted": true,
+    "all_baselines_verified": true,
+    "cleanups_attempted": 7,
+    "cleanups_succeeded": 7,
+    "baselines_verified": 7,
+    "baseline_failures": 0,
+    "cleanup_exceptions": [],
+    "baseline_exceptions": []
+  },
+  "artifacts": {
+    "bundle_json": "<repo_root>/lab/derived/phase-c/self_tests/self_test_bundle.json",
+    "summary_csv": "<repo_root>/lab/derived/phase-c/self_tests/self_test_summary.csv",
+    "summary_csv_provenance": "<repo_root>/lab/derived/phase-c/self_tests/self_test_summary.csv.provenance.json",
+    "s5_probes_jsonl": null
+  }
+}

@@ -12,6 +12,7 @@ Narrowly scoped, non-interactive privileged helper for:
 """
 
 import argparse
+import concurrent.futures
 import contextlib
 import ctypes
 import errno
@@ -22,6 +23,7 @@ from pathlib import Path
 import re
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import time
@@ -919,13 +921,18 @@ def verify_caller_holds_lock(lock_path: Path) -> None:
 
 
 @contextlib.contextmanager
-def coordinate_lock(caller_holds_lock: bool, lock_path: Optional[Path] = None, timeout: float = 5.0):
+def coordinate_lock(
+    caller_holds_lock: bool,
+    lock_path: Optional[Path] = None,
+    timeout: float = 5.0,
+    lock_file: Optional[Path] = None
+):
     """
     Coordinates lock acquisition or verification:
     - If caller_holds_lock is True: verifies lock is actively held without re-locking (prevents deadlock).
     - If caller_holds_lock is False: acquires exclusive flock via concurrency.acquire_lab_lock.
     """
-    target = Path(lock_path or LAB_LOCK_FILE).resolve()
+    target = Path(lock_path or lock_file or LAB_LOCK_FILE).resolve()
     if caller_holds_lock:
         verify_caller_holds_lock(target)
         yield
@@ -1088,6 +1095,11 @@ def apply_dns_delays_privileged(
     Guarantees baseline backup, atomic updates, SIGHUP reload, and verification.
     Never reports success if application or verification fails.
     """
+    if not isinstance(a_delay_ms, int) or isinstance(a_delay_ms, bool) or not (0 <= a_delay_ms <= 2000):
+        raise PrivilegedHelperError(f"Invalid a_delay_ms {a_delay_ms}: must be integer between 0 and 2000")
+    if not isinstance(aaaa_delay_ms, int) or isinstance(aaaa_delay_ms, bool) or not (0 <= aaaa_delay_ms <= 2000):
+        raise PrivilegedHelperError(f"Invalid aaaa_delay_ms {aaaa_delay_ms}: must be integer between 0 and 2000")
+
     with coordinate_lock(caller_holds_lock=caller_holds_lock, lock_path=lock_file, timeout=lock_timeout):
         try:
             impair.apply_dns_delays(
@@ -1776,6 +1788,466 @@ def _chown_file(path: Path, user: str, group: Optional[Union[str, int]] = None) 
             ) from exc
 
 
+chown_file = _chown_file
+
+ALLOWED_S5_IFACES = {"ps028-rt-sv6", "ps028-rt-sv4"}
+ALLOWED_S5_NETNS = {"ps028-cl"}
+
+
+def validate_s5_params(
+    port: int,
+    probe_count: Optional[int] = None,
+    timeout: Optional[float] = None,
+    concurrency: Optional[int] = None,
+    drop_pct: Optional[int] = None,
+    oifname: Optional[str] = None,
+    netns: Optional[str] = None
+) -> None:
+    if not isinstance(port, int) or isinstance(port, bool) or not (1 <= port <= 65535):
+        raise PrivilegedHelperError(f"Invalid port {port}: must be between 1 and 65535")
+    if probe_count is not None and (not isinstance(probe_count, int) or isinstance(probe_count, bool) or not (1 <= probe_count <= 500)):
+        raise PrivilegedHelperError(f"Invalid probe_count {probe_count}: must be between 1 and 500")
+    if timeout is not None:
+        try:
+            f_timeout = float(timeout)
+            if not (0.05 <= f_timeout <= 10.0):
+                raise ValueError()
+        except (ValueError, TypeError):
+            raise PrivilegedHelperError(f"Invalid timeout {timeout}: must be between 0.05s and 10.0s")
+    if concurrency is not None and (not isinstance(concurrency, int) or isinstance(concurrency, bool) or not (1 <= concurrency <= 50)):
+        raise PrivilegedHelperError(f"Invalid concurrency {concurrency}: must be between 1 and 50")
+    if drop_pct is not None and (not isinstance(drop_pct, int) or isinstance(drop_pct, bool) or not (1 <= drop_pct <= 99)):
+        raise PrivilegedHelperError(f"Invalid drop_pct {drop_pct}: must be between 1 and 99")
+    if oifname is not None and oifname not in ALLOWED_S5_IFACES:
+        raise PrivilegedHelperError(f"Invalid oifname '{oifname}': not in allowlist {sorted(ALLOWED_S5_IFACES)}")
+    if netns is not None and netns not in ALLOWED_S5_NETNS:
+        raise PrivilegedHelperError(f"Invalid netns '{netns}': not in allowlist {sorted(ALLOWED_S5_NETNS)}")
+
+
+def setup_s5_counters_privileged(
+    client_ip: str = "2001:db8:1::2",
+    target_ip: str = "2001:db8:2::10",
+    port: int = 80,
+    oifname: str = "ps028-rt-sv6",
+    drop_pct: int = 50,
+    caller_holds_lock: bool = False,
+    lock_file: Optional[Path] = None
+) -> Dict[str, Any]:
+    """
+    Configures project-scoped nftables counters in table inet ps028_impair inside ps028-rt.
+    Idempotent: flushes forward chain and initializes syn_total, syn_dropped, and syn_not_dropped.
+    """
+    validate_s5_params(port=port, drop_pct=drop_pct, oifname=oifname)
+    with coordinate_lock(caller_holds_lock=caller_holds_lock, lock_path=lock_file):
+        ip_family_str = "ip6" if ":" in target_ip or ":" in client_ip else "ip"
+        common_filter = (
+            f'oifname "{oifname}" {ip_family_str} saddr {client_ip} {ip_family_str} daddr {target_ip} '
+            f'tcp dport {port} tcp flags syn / syn,ack'
+        )
+        nft_script = (
+            f"add table {impair.NFT_FAMILY} {impair.NFT_TABLE_NAME}\n"
+            f"add chain {impair.NFT_FAMILY} {impair.NFT_TABLE_NAME} forward {{ type filter hook forward priority 0; policy accept; }}\n"
+            f"add counter {impair.NFT_FAMILY} {impair.NFT_TABLE_NAME} syn_total\n"
+            f"add counter {impair.NFT_FAMILY} {impair.NFT_TABLE_NAME} syn_dropped\n"
+            f"add counter {impair.NFT_FAMILY} {impair.NFT_TABLE_NAME} syn_not_dropped\n"
+            f"flush chain {impair.NFT_FAMILY} {impair.NFT_TABLE_NAME} forward\n"
+            f"add rule {impair.NFT_FAMILY} {impair.NFT_TABLE_NAME} forward {common_filter} counter name \"syn_total\"\n"
+            f"add rule {impair.NFT_FAMILY} {impair.NFT_TABLE_NAME} forward {common_filter} numgen random mod 100 < {drop_pct} counter name \"syn_dropped\" drop\n"
+            f"add rule {impair.NFT_FAMILY} {impair.NFT_TABLE_NAME} forward {common_filter} counter name \"syn_not_dropped\"\n"
+        )
+        rc, stdout, stderr = impair.execute_netns_cmd(
+            impair.NFT_NAMESPACE,
+            ["nft", "-f", "-"],
+            check=False,
+            stdin_data=nft_script
+        )
+        if rc != 0:
+            raise PrivilegedHelperError(f"Failed to setup S5 nftables counters: {stderr.strip() or stdout.strip()}")
+        return {
+            "status": "OK",
+            "action": "setup-s5-counters",
+            "netns": impair.NFT_NAMESPACE,
+            "table": impair.NFT_TABLE_NAME,
+            "counters": ["syn_total", "syn_dropped", "syn_not_dropped"],
+            "drop_pct": drop_pct,
+            "filter": common_filter
+        }
+
+
+def read_s5_counters_privileged(
+    caller_holds_lock: bool = False,
+    lock_file: Optional[Path] = None
+) -> Dict[str, Any]:
+    """
+    Reads S5 kernel packet counters from inet ps028_impair in ps028-rt.
+    Queries structured JSON with regular text fallback. Fails closed if any counter is missing.
+    """
+    with coordinate_lock(caller_holds_lock=caller_holds_lock, lock_path=lock_file):
+        # 1. JSON query
+        rc, stdout, stderr = impair.execute_netns_cmd(
+            impair.NFT_NAMESPACE,
+            ["nft", "-j", "list", "counters", "table", impair.NFT_FAMILY, impair.NFT_TABLE_NAME],
+            check=False
+        )
+        if rc == 0 and stdout.strip():
+            try:
+                data = json.loads(stdout)
+                res = {}
+                for item in data.get("nftables", []):
+                    ctr = item.get("counter")
+                    if ctr and isinstance(ctr, dict) and "name" in ctr and "packets" in ctr:
+                        name = ctr["name"]
+                        if name in ("syn_total", "syn_dropped", "syn_not_dropped"):
+                            val = ctr["packets"]
+                            if isinstance(val, int) and val >= 0:
+                                res[name] = val
+                if len(res) == 3:
+                    res["status"] = "OK"
+                    return res
+            except Exception:
+                pass
+
+        # 2. Text query fallback
+        rc_t, stdout_t, stderr_t = impair.execute_netns_cmd(
+            impair.NFT_NAMESPACE,
+            ["nft", "list", "counters", "table", impair.NFT_FAMILY, impair.NFT_TABLE_NAME],
+            check=False
+        )
+        if rc_t == 0 and stdout_t.strip():
+            res_t = {}
+            for match in re.finditer(r"counter\s+(\w+)\s*(?:\{([^}]*)\}|packets\s+(\S+))", stdout_t):
+                cname = match.group(1)
+                body = match.group(2)
+                direct = match.group(3)
+                if cname in ("syn_total", "syn_dropped", "syn_not_dropped"):
+                    val_str = direct
+                    if val_str is None and body:
+                        bmatch = re.search(r"\bpackets\s+(\S+)", body)
+                        if bmatch:
+                            val_str = bmatch.group(1)
+                    if val_str is not None:
+                        res_t[cname] = int(val_str)
+            if len(res_t) == 3:
+                res_t["status"] = "OK"
+                return res_t
+
+        raise PrivilegedHelperError(
+            f"Failed to read S5 nftables counters in {impair.NFT_NAMESPACE} table {impair.NFT_TABLE_NAME}"
+        )
+
+
+def probe_single_socket(
+    probe_id: int,
+    target_ip: str,
+    target_port: int,
+    timeout: float,
+    af: int
+) -> Dict[str, Any]:
+    """
+    Executes a single TCP connection probe, pre-allocating an ephemeral port (bind to port 0)
+    to capture the local 5-tuple endpoint even if connection times out or fails.
+    """
+    start_time = time.time()
+    sock = socket.socket(af, socket.SOCK_STREAM)
+    local_ip = "::" if af == socket.AF_INET6 else "0.0.0.0"
+    local_port = 0
+    outcome = "ERROR"
+    err_no = None
+    err_msg = None
+
+    try:
+        sock.bind((local_ip, 0))
+        sockname = sock.getsockname()
+        local_ip, local_port = sockname[0], sockname[1]
+
+        sock.settimeout(timeout)
+        sock.connect((target_ip, target_port))
+        outcome = "CONNECTED"
+        err_no = 0
+    except (socket.timeout, TimeoutError):
+        outcome = "TIMEOUT"
+        err_no = errno.ETIMEDOUT
+        err_msg = "Connection timed out"
+    except ConnectionRefusedError as exc:
+        outcome = "REFUSED"
+        err_no = errno.ECONNREFUSED
+        err_msg = "Connection refused"
+    except OSError as exc:
+        outcome = "ERROR"
+        err_no = exc.errno or errno.EIO
+        err_msg = str(exc)
+    finally:
+        end_time = time.time()
+        try:
+            sock.close()
+        except Exception:
+            pass
+
+    duration_ms = round((end_time - start_time) * 1000.0, 3)
+    return {
+        "probe_id": probe_id,
+        "timestamp": start_time,
+        "start_time": start_time,
+        "end_time": end_time,
+        "duration_ms": duration_ms,
+        "target_ip": target_ip,
+        "target_port": target_port,
+        "local_endpoint": {"ip": local_ip, "port": local_port},
+        "connect_outcome": outcome,
+        "outcome": outcome,
+        "errno": err_no,
+        "error_message": err_msg
+    }
+
+
+def measure_s5_privileged(
+    target_ip: str = "2001:db8:2::10",
+    port: int = 80,
+    probe_count: int = 50,
+    timeout: float = 0.4,
+    concurrency: int = 10,
+    netns: str = "ps028-cl",
+    output_jsonl: Optional[Union[str, Path]] = None,
+    owner_user: Optional[str] = None,
+    owner_group: Optional[str] = None,
+    caller_holds_lock: bool = False,
+    lock_file: Optional[Path] = None,
+    in_netns: bool = False
+) -> Dict[str, Any]:
+    """
+    Executes in-namespace S5 SYN probes and emits line-by-line JSONL records.
+    Coordinates lock on host and dispatches via typed argv list into target netns.
+    """
+    validate_s5_params(
+        port=port,
+        probe_count=probe_count,
+        timeout=timeout,
+        concurrency=concurrency,
+        netns=netns
+    )
+
+    if not in_netns:
+        with coordinate_lock(caller_holds_lock=caller_holds_lock, lock_path=lock_file):
+            helper_script = SCRIPT_DIR / "privileged_helper.py"
+            cmd = [
+                "ip", "netns", "exec", netns,
+                sys.executable, str(helper_script),
+                "measure-s5",
+                "--in-netns",
+                "--target-ip", target_ip,
+                "--port", str(port),
+                "--probe-count", str(probe_count),
+                "--timeout", str(timeout),
+                "--concurrency", str(concurrency),
+                "--netns", netns
+            ]
+            if output_jsonl:
+                cmd.extend(["--output-jsonl", str(output_jsonl)])
+            if owner_user:
+                cmd.extend(["--owner-user", str(owner_user)])
+            if owner_group:
+                cmd.extend(["--owner-group", str(owner_group)])
+
+            proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+            if proc.returncode != 0:
+                raise PrivilegedHelperError(f"measure-s5 in {netns} failed: {proc.stderr.strip() or proc.stdout.strip()}")
+
+            lines = [l.strip() for l in proc.stdout.splitlines() if l.strip()]
+            for line in reversed(lines):
+                if line.startswith("{") and line.endswith("}"):
+                    try:
+                        return json.loads(line)
+                    except json.JSONDecodeError:
+                        pass
+            return {"status": "OK", "raw_output": proc.stdout}
+
+    af = socket.AF_INET6 if ":" in target_ip else socket.AF_INET
+    records = []
+    connected_count = 0
+    timeout_count = 0
+    refused_count = 0
+    error_count = 0
+
+    t_start_all = time.time()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as executor:
+        futures = [
+            executor.submit(probe_single_socket, i, target_ip, port, timeout, af)
+            for i in range(probe_count)
+        ]
+        for fut in concurrent.futures.as_completed(futures):
+            rec = fut.result()
+            records.append(rec)
+            outcome = str(rec.get("connect_outcome") or rec.get("outcome") or "ERROR").upper()
+            if outcome == "CONNECTED":
+                connected_count += 1
+            elif outcome == "TIMEOUT":
+                timeout_count += 1
+            elif outcome == "REFUSED":
+                refused_count += 1
+            else:
+                error_count += 1
+            print(json.dumps(rec), flush=True)
+
+    t_end_all = time.time()
+    total_duration_ms = round((t_end_all - t_start_all) * 1000.0, 3)
+
+    records.sort(key=lambda r: r["probe_id"])
+
+    if output_jsonl:
+        out_p = Path(output_jsonl)
+        out_p.parent.mkdir(parents=True, exist_ok=True)
+        with open(out_p, "w", encoding="utf-8") as f:
+            for rec in records:
+                f.write(json.dumps(rec) + "\n")
+        if owner_user or owner_group:
+            _chown_file(out_p, owner_user or "promotheshchatterjee", owner_group)
+
+    summary = {
+        "status": "OK",
+        "action": "measure-s5",
+        "probe_count": probe_count,
+        "probes_sent": probe_count,
+        "connected": connected_count,
+        "timed_out": timeout_count,
+        "refused": refused_count,
+        "error": error_count,
+        "duration_total_ms": total_duration_ms,
+        "output_jsonl": str(output_jsonl) if output_jsonl else None
+    }
+    return summary
+
+
+def start_nginx_privileged(
+    repo_root: Optional[Path] = None,
+    config_file: Optional[Path] = None,
+    worker_user: Optional[str] = None,
+    caller_holds_lock: bool = False,
+    lock_file: Optional[Path] = None
+) -> Dict[str, Any]:
+    """
+    Starts the Nginx HTTP measurement endpoint inside network namespace ps028-sv.
+    Enforces that config_file strictly resides within repo_root, tests syntax,
+    and forces the worker process to drop privileges to an unprivileged user.
+    """
+    with coordinate_lock(caller_holds_lock=caller_holds_lock, lock_path=lock_file):
+        root_dir = (repo_root or REPO_ROOT).resolve()
+        conf = (config_file or (root_dir / "lab" / "nginx.conf")).resolve()
+
+        # Path validation: must reside inside root_dir
+        try:
+            conf.relative_to(root_dir)
+        except ValueError:
+            raise PrivilegedHelperError(f"Config file {conf} must reside within repository root {root_dir}")
+
+        if not conf.is_file():
+            raise PrivilegedHelperError(f"Nginx config file not found: {conf}")
+
+        # Ensure ps028-sv exists
+        res = subprocess.run(["ip", "netns", "list"], capture_output=True, text=True)
+        if SERVER_NETNS not in res.stdout:
+            raise PrivilegedHelperError(f"Network namespace {SERVER_NETNS} does not exist. Run topology setup first.")
+
+        # Test syntax inside netns
+        t_cmd = ["ip", "netns", "exec", SERVER_NETNS, "nginx", "-t", "-p", f"{root_dir}/", "-c", str(conf)]
+        t_res = subprocess.run(t_cmd, capture_output=True, text=True)
+        if t_res.returncode != 0:
+            raise PrivilegedHelperError(f"Nginx configuration syntax test failed: {t_res.stderr.strip()}")
+
+        # Determine unprivileged worker user
+        effective_user = worker_user or os.environ.get("SUDO_USER")
+        if not effective_user:
+            try:
+                effective_user = identity.resolve_user_by_uid(os.getuid()).username
+            except Exception:
+                effective_user = "nobody"
+
+        # Check if already running
+        pid_file = root_dir / "lab" / "nginx.pid"
+        if pid_file.exists():
+            try:
+                old_pid = int(pid_file.read_text().strip())
+                if _is_alive_proc(old_pid):
+                    return {"status": "OK", "action": "start-nginx", "pid": old_pid, "message": "Already running"}
+            except Exception:
+                pid_file.unlink(missing_ok=True)
+
+        cmd = [
+            "ip", "netns", "exec", SERVER_NETNS,
+            "nginx", "-p", f"{root_dir}/", "-c", str(conf),
+            "-g", f"user {effective_user};"
+        ]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        if res.returncode != 0:
+            raise PrivilegedHelperError(f"Failed to start Nginx in {SERVER_NETNS}: {res.stderr.strip()}")
+
+        # Verify PID file within 3 seconds
+        deadline = time.time() + 3.0
+        pid = None
+        while time.time() < deadline:
+            if pid_file.exists():
+                try:
+                    p = int(pid_file.read_text().strip())
+                    if _is_alive_proc(p):
+                        pid = p
+                        break
+                except Exception:
+                    pass
+            time.sleep(0.05)
+
+        if pid is None:
+            raise PrivilegedHelperError("Nginx process started but PID file inactive or missing after launch")
+
+        return {"status": "OK", "action": "start-nginx", "pid": pid}
+
+
+def stop_nginx_privileged(
+    repo_root: Optional[Path] = None,
+    config_file: Optional[Path] = None,
+    caller_holds_lock: bool = False,
+    lock_file: Optional[Path] = None
+) -> Dict[str, Any]:
+    """
+    Gracefully stops the Nginx HTTP measurement endpoint in ps028-sv and removes pid file.
+    """
+    with coordinate_lock(caller_holds_lock=caller_holds_lock, lock_path=lock_file):
+        root_dir = (repo_root or REPO_ROOT).resolve()
+        conf = (config_file or (root_dir / "lab" / "nginx.conf")).resolve()
+        pid_file = root_dir / "lab" / "nginx.pid"
+
+        if not pid_file.exists():
+            return {"status": "OK", "action": "stop-nginx", "message": "No PID file present"}
+
+        try:
+            pid = int(pid_file.read_text().strip())
+        except Exception:
+            pid_file.unlink(missing_ok=True)
+            return {"status": "OK", "action": "stop-nginx", "message": "Unlinked corrupted PID file"}
+
+        # Signal stop inside namespace if netns alive and proc alive
+        res = subprocess.run(["ip", "netns", "list"], capture_output=True, text=True)
+        if SERVER_NETNS in res.stdout and _is_alive_proc(pid):
+            subprocess.run(
+                ["ip", "netns", "exec", SERVER_NETNS, "nginx", "-p", f"{root_dir}/", "-c", str(conf), "-s", "stop"],
+                capture_output=True,
+                check=False
+            )
+
+        deadline = time.time() + 3.0
+        while time.time() < deadline:
+            if not _is_alive_proc(pid):
+                break
+            time.sleep(0.05)
+
+        if _is_alive_proc(pid):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except OSError:
+                pass
+
+        pid_file.unlink(missing_ok=True)
+        return {"status": "OK", "action": "stop-nginx", "pid": pid, "stopped": True}
+
+
 # ==============================================================================
 # Helper Invocation Wrapper (Called from unprivileged Python processes)
 # ==============================================================================
@@ -1933,6 +2405,115 @@ def run_helper_action(
             )
         elif action == "check-auth":
             return {"authorized": True, "method": "root"}
+        elif action == "setup-s5-counters":
+            c_ip = "2001:db8:1::2"
+            t_ip = "2001:db8:2::10"
+            p = 80
+            oif = "ps028-rt-sv6"
+            drop = 50
+            if extra_args:
+                for i, a in enumerate(extra_args):
+                    if a == "--client-ip" and i + 1 < len(extra_args):
+                        c_ip = extra_args[i + 1]
+                    elif a == "--target-ip" and i + 1 < len(extra_args):
+                        t_ip = extra_args[i + 1]
+                    elif a == "--port" and i + 1 < len(extra_args):
+                        p = int(extra_args[i + 1])
+                    elif a == "--oifname" and i + 1 < len(extra_args):
+                        oif = extra_args[i + 1]
+                    elif a == "--drop-pct" and i + 1 < len(extra_args):
+                        drop = int(extra_args[i + 1])
+            return setup_s5_counters_privileged(
+                client_ip=c_ip,
+                target_ip=t_ip,
+                port=p,
+                oifname=oif,
+                drop_pct=drop,
+                caller_holds_lock=caller_holds_lock,
+                lock_file=lock_file
+            )
+        elif action == "read-s5-counters":
+            return read_s5_counters_privileged(
+                caller_holds_lock=caller_holds_lock,
+                lock_file=lock_file
+            )
+        elif action == "measure-s5":
+            t_ip = "2001:db8:2::10"
+            p = 80
+            p_cnt = 50
+            t_out = 0.4
+            conc = 10
+            ns = "ps028-cl"
+            out_jsonl = None
+            user = None
+            group = None
+            if extra_args:
+                for i, a in enumerate(extra_args):
+                    if a == "--target-ip" and i + 1 < len(extra_args):
+                        t_ip = extra_args[i + 1]
+                    elif a == "--port" and i + 1 < len(extra_args):
+                        p = int(extra_args[i + 1])
+                    elif a in ("--probe-count", "--probes") and i + 1 < len(extra_args):
+                        p_cnt = int(extra_args[i + 1])
+                    elif a == "--timeout" and i + 1 < len(extra_args):
+                        t_out = float(extra_args[i + 1])
+                    elif a == "--concurrency" and i + 1 < len(extra_args):
+                        conc = int(extra_args[i + 1])
+                    elif a == "--netns" and i + 1 < len(extra_args):
+                        ns = extra_args[i + 1]
+                    elif a == "--output-jsonl" and i + 1 < len(extra_args):
+                        out_jsonl = extra_args[i + 1]
+                    elif a == "--owner-user" and i + 1 < len(extra_args):
+                        user = extra_args[i + 1]
+                    elif a == "--owner-group" and i + 1 < len(extra_args):
+                        group = extra_args[i + 1]
+            return measure_s5_privileged(
+                target_ip=t_ip,
+                port=p,
+                probe_count=p_cnt,
+                timeout=t_out,
+                concurrency=conc,
+                netns=ns,
+                output_jsonl=out_jsonl,
+                owner_user=user,
+                owner_group=group,
+                caller_holds_lock=caller_holds_lock,
+                lock_file=lock_file
+            )
+        elif action == "start-nginx":
+            r_root = None
+            c_file = None
+            w_user = None
+            if extra_args:
+                for i, a in enumerate(extra_args):
+                    if a == "--repo-root" and i + 1 < len(extra_args):
+                        r_root = Path(extra_args[i + 1])
+                    elif a == "--config-file" and i + 1 < len(extra_args):
+                        c_file = Path(extra_args[i + 1])
+                    elif a == "--worker-user" and i + 1 < len(extra_args):
+                        w_user = extra_args[i + 1]
+            return start_nginx_privileged(
+                repo_root=r_root,
+                config_file=c_file,
+                worker_user=w_user,
+                caller_holds_lock=caller_holds_lock,
+                lock_file=lock_file
+            )
+        elif action == "stop-nginx":
+            r_root = None
+            c_file = None
+            if extra_args:
+                for i, a in enumerate(extra_args):
+                    if a == "--repo-root" and i + 1 < len(extra_args):
+                        r_root = Path(extra_args[i + 1])
+                    elif a == "--config-file" and i + 1 < len(extra_args):
+                        c_file = Path(extra_args[i + 1])
+            return stop_nginx_privileged(
+                repo_root=r_root,
+                config_file=c_file,
+                caller_holds_lock=caller_holds_lock,
+                lock_file=lock_file
+            )
 
     # Not root: execute via sudo -n
     helper_script = SCRIPT_DIR / "privileged_helper.py"
@@ -1982,11 +2563,14 @@ def run_helper_action(
     return {"status": "OK", "raw_output": proc.stdout}
 
 
+call_privileged_helper = run_helper_action
+
+
 # ==============================================================================
 # CLI Entry Point
 # ==============================================================================
 
-def main() -> int:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="PS-028 Privileged Operations Helper")
     subparsers = parser.add_subparsers(dest="action", required=True)
 
@@ -2053,6 +2637,36 @@ def main() -> int:
     # check-auth
     subparsers.add_parser("check-auth", help="Verify sudo authorization")
 
+    # setup-s5-counters
+    p_setup_s5 = subparsers.add_parser("setup-s5-counters", help="Configure router S5 nftables counters")
+    p_setup_s5.add_argument("--client-ip", default="2001:db8:1::2", help="Client source IP filter")
+    p_setup_s5.add_argument("--target-ip", default="2001:db8:2::10", help="Target server IP filter")
+    p_setup_s5.add_argument("--port", type=int, default=80, help="Target TCP port (1-65535)")
+    p_setup_s5.add_argument("--oifname", default="ps028-rt-sv6", choices=["ps028-rt-sv6", "ps028-rt-sv4"], help="Outgoing router interface")
+    p_setup_s5.add_argument("--drop-pct", type=int, default=50, help="Drop percentage (1-99)")
+    p_setup_s5.add_argument("--caller-holds-lock", action="store_true")
+    p_setup_s5.add_argument("--lock-file", default=None)
+
+    # read-s5-counters
+    p_read_s5 = subparsers.add_parser("read-s5-counters", help="Read router S5 nftables counters")
+    p_read_s5.add_argument("--caller-holds-lock", action="store_true")
+    p_read_s5.add_argument("--lock-file", default=None)
+
+    # measure-s5
+    p_meas_s5 = subparsers.add_parser("measure-s5", help="Execute in-namespace S5 SYN probes and emit JSONL")
+    p_meas_s5.add_argument("--target-ip", default="2001:db8:2::10", help="Target server IP")
+    p_meas_s5.add_argument("--port", type=int, default=80, help="Target TCP port (1-65535)")
+    p_meas_s5.add_argument("--probe-count", "--probes", dest="probe_count", type=int, default=50, help="Probe count (1-500)")
+    p_meas_s5.add_argument("--timeout", type=float, default=0.4, help="Connect timeout in seconds (0.05-10.0)")
+    p_meas_s5.add_argument("--concurrency", type=int, default=10, help="Concurrency workers (1-50)")
+    p_meas_s5.add_argument("--netns", default="ps028-cl", choices=["ps028-cl"], help="Client network namespace")
+    p_meas_s5.add_argument("--output-jsonl", default=None, help="Output path for JSONL records")
+    p_meas_s5.add_argument("--owner-user", default=None, help="Owner user for output file")
+    p_meas_s5.add_argument("--owner-group", default=None, help="Owner group for output file")
+    p_meas_s5.add_argument("--in-netns", action="store_true", help="Internal flag: running within netns")
+    p_meas_s5.add_argument("--caller-holds-lock", action="store_true")
+    p_meas_s5.add_argument("--lock-file", default=None)
+
     # launch-snap-browser
     p_snap = subparsers.add_parser("launch-snap-browser", help="Setup mounts and launch Snap browser")
     p_snap.add_argument("--reuid", type=int, required=True, help="Target UID to drop privileges to")
@@ -2066,6 +2680,26 @@ def main() -> int:
     p_snap.add_argument("--host-proc-root", default="/proc/1/root", help="Host root filesystem path")
     p_snap.add_argument("cmd", nargs=argparse.REMAINDER, help="Browser executable and arguments")
 
+    # start-nginx
+    p_start_nginx = subparsers.add_parser("start-nginx", help="Start Nginx in ps028-sv")
+    p_start_nginx.add_argument("--repo-root", default=None)
+    p_start_nginx.add_argument("--config-file", default=None)
+    p_start_nginx.add_argument("--worker-user", default=None)
+    p_start_nginx.add_argument("--caller-holds-lock", action="store_true")
+    p_start_nginx.add_argument("--lock-file", default=None)
+
+    # stop-nginx
+    p_stop_nginx = subparsers.add_parser("stop-nginx", help="Stop Nginx in ps028-sv")
+    p_stop_nginx.add_argument("--repo-root", default=None)
+    p_stop_nginx.add_argument("--config-file", default=None)
+    p_stop_nginx.add_argument("--caller-holds-lock", action="store_true")
+    p_stop_nginx.add_argument("--lock-file", default=None)
+
+    return parser
+
+
+def main() -> int:
+    parser = build_parser()
     args = parser.parse_args()
 
     try:
@@ -2090,6 +2724,10 @@ def main() -> int:
             return 0
 
         elif args.action == "apply-dns":
+            if not (0 <= args.a_delay <= 2000):
+                raise PrivilegedHelperError(f"Invalid a_delay {args.a_delay}: must be between 0 and 2000")
+            if not (0 <= args.aaaa_delay <= 2000):
+                raise PrivilegedHelperError(f"Invalid aaaa_delay {args.aaaa_delay}: must be between 0 and 2000")
             res = apply_dns_delays_privileged(
                 a_delay_ms=args.a_delay,
                 aaaa_delay_ms=args.aaaa_delay,
@@ -2173,8 +2811,68 @@ def main() -> int:
             print(json.dumps(auth))
             return 0 if auth["authorized"] else 1
 
+        elif args.action == "setup-s5-counters":
+            res = setup_s5_counters_privileged(
+                client_ip=args.client_ip,
+                target_ip=args.target_ip,
+                port=args.port,
+                oifname=args.oifname,
+                drop_pct=args.drop_pct,
+                caller_holds_lock=args.caller_holds_lock,
+                lock_file=lock_p
+            )
+            print(json.dumps(res))
+            return 0
+
+        elif args.action == "read-s5-counters":
+            res = read_s5_counters_privileged(
+                caller_holds_lock=args.caller_holds_lock,
+                lock_file=lock_p
+            )
+            print(json.dumps(res))
+            return 0
+
+        elif args.action == "measure-s5":
+            res = measure_s5_privileged(
+                target_ip=args.target_ip,
+                port=args.port,
+                probe_count=args.probe_count,
+                timeout=args.timeout,
+                concurrency=args.concurrency,
+                netns=args.netns,
+                output_jsonl=args.output_jsonl,
+                owner_user=args.owner_user,
+                owner_group=args.owner_group,
+                caller_holds_lock=args.caller_holds_lock,
+                lock_file=lock_p,
+                in_netns=args.in_netns
+            )
+            print(json.dumps(res))
+            return 0
+
         elif args.action == "launch-snap-browser":
             launch_snap_browser_main(args)
+            return 0
+
+        elif args.action == "start-nginx":
+            res = start_nginx_privileged(
+                repo_root=Path(args.repo_root) if args.repo_root else None,
+                config_file=Path(args.config_file) if args.config_file else None,
+                worker_user=args.worker_user,
+                caller_holds_lock=args.caller_holds_lock,
+                lock_file=lock_p
+            )
+            print(json.dumps(res))
+            return 0
+
+        elif args.action == "stop-nginx":
+            res = stop_nginx_privileged(
+                repo_root=Path(args.repo_root) if args.repo_root else None,
+                config_file=Path(args.config_file) if args.config_file else None,
+                caller_holds_lock=args.caller_holds_lock,
+                lock_file=lock_p
+            )
+            print(json.dumps(res))
             return 0
 
     except Exception as exc:
