@@ -1,0 +1,12 @@
+{
+  "amendment_a13_compliant": true,
+  "generated_by_command": "python3 lab/run_research_sweep.py",
+  "is_simulation": true,
+  "platform": "Linux-6.18.58.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+  "python_version": "3.12.3",
+  "random_seed": 42,
+  "row_count": 640,
+  "sha256": "ff05b33bb30ac3a442dc50b674d4eabfcd5b5243bffa82ffebe85566a98363ae",
+  "sweep_type": "D1_RTT_SWEEP",
+  "target_file": "d1_rtt_sweep.csv"
+}
