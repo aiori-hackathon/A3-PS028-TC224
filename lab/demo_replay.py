@@ -479,10 +479,17 @@ def replay_single_trial(
             )
         if reder_pf.get("handshake_completed") is not True:
             record["errors"].append("Rederived primary flow handshake not completed")
-        if reder_pf.get("http_status_code") != 200:
+        reder_status = reder_pf.get("http_status_code")
+        if type(reder_status) is not int or reder_status != 200:
             record["errors"].append(
-                f"Rederived primary flow HTTP status mismatch: {reder_pf.get('http_status_code')} != 200"
+                f"Rederived primary flow HTTP status mismatch or non-integer: {reder_status} != 200"
             )
+        for fr_key in ("syn_frame", "final_ack_frame", "http_request_frame", "http_response_frame"):
+            fr_val = reder_pf.get(fr_key)
+            if type(fr_val) is not int or fr_val <= 0:
+                record["errors"].append(
+                    f"Rederived primary flow {fr_key} missing or invalid positive integer: {fr_val}"
+                )
 
     # 4. Offline TShark Dissection
     try:
@@ -522,21 +529,20 @@ def replay_single_trial(
     if primary_flow.get("handshake_completed") is not True:
         record["errors"].append("Primary flow RFC 9293 3-way handshake was not completed")
 
-    if primary_flow.get("syn_frame") is None:
-        record["errors"].append("Primary flow initial SYN frame missing")
-    if primary_flow.get("final_ack_frame") is None:
-        record["errors"].append("Primary flow client final ACK frame missing")
-
-    # Correlated HTTP transaction
-    if primary_flow.get("http_request_frame") is None:
-        record["errors"].append("Primary flow HTTP request frame missing")
-    if primary_flow.get("http_response_frame") is None:
-        record["errors"].append("Primary flow HTTP response frame missing")
+    for fr_key, fr_name in (
+        ("syn_frame", "initial SYN frame"),
+        ("final_ack_frame", "client final ACK frame"),
+        ("http_request_frame", "HTTP request frame"),
+        ("http_response_frame", "HTTP response frame"),
+    ):
+        fr_val = primary_flow.get(fr_key)
+        if fr_val is None or type(fr_val) is not int or fr_val <= 0:
+            record["errors"].append(f"Primary flow {fr_name} missing or invalid positive integer: {fr_val}")
 
     status_code = primary_flow.get("http_status_code")
     if status_code is None:
         record["errors"].append("Primary flow HTTP status code missing (fail-closed, no default)")
-    elif not isinstance(status_code, int) or status_code not in range(200, 300):
+    elif type(status_code) is not int or status_code not in range(200, 300):
         record["errors"].append(f"Primary flow HTTP status not in 200-299 success range: {status_code}")
 
     # Latency metric extraction (preserve zeros, do not coerce missing to zero)

@@ -248,6 +248,101 @@ class TestDemoReplayDeterministicUnit(unittest.TestCase):
         self.assertTrue(any("HTTP status code missing" in err for err in rec["errors"]))
 
     @patch("lab.demo_replay.dissect_pcap")
+    def test_float_http_status_code_in_replay_fails_closed(self, mock_dissect):
+        """Correction B: Replay engine rejects floating-point 200.0 HTTP status."""
+        mock_dissect.return_value = {
+            "tcp_streams": {"0": {}},
+            "primary_flow": {
+                "stream_id": "0",
+                "family": "IPv6",
+                "handshake_completed": True,
+                "syn_frame": 1,
+                "final_ack_frame": 3,
+                "http_request_frame": 4,
+                "http_response_frame": 5,
+                "http_status_code": 200.0,  # Float!
+            },
+            "metrics": {},
+        }
+        rec = replay_single_trial(
+            demo=self.valid_spec,
+            checksum_map=self.valid_checksum_map,
+            campaign_dir=CAMPAIGN_DIR,
+            rederived_dir=REDERIVED_DIR,
+        )
+        self.assertEqual(rec["status"], "FAIL")
+        self.assertTrue(any("HTTP status not in 200-299 success range" in err for err in rec["errors"]))
+
+    def test_float_http_status_code_in_rederived_fails_closed(self):
+        """Correction B: Replay engine rejects floating-point 200.0 in rederived record."""
+        real_reder_file = REDERIVED_DIR / f"{self.valid_spec['trial_id']}.json"
+        real_data = json.loads(real_reder_file.read_text(encoding="utf-8"))
+        real_data["primary_flow"]["http_status_code"] = 200.0
+        with tempfile.TemporaryDirectory() as td:
+            temp_rdir = Path(td)
+            (temp_rdir / real_reder_file.name).write_text(json.dumps(real_data), encoding="utf-8")
+            rec = replay_single_trial(
+                demo=self.valid_spec,
+                checksum_map=self.valid_checksum_map,
+                campaign_dir=CAMPAIGN_DIR,
+                rederived_dir=temp_rdir,
+            )
+            self.assertEqual(rec["status"], "FAIL")
+            self.assertTrue(any("HTTP status mismatch or non-integer" in err for err in rec["errors"]))
+
+    @patch("lab.demo_replay.dissect_pcap")
+    def test_boolean_http_status_code_fails_closed(self, mock_dissect):
+        """Correction B: Replay engine rejects boolean True HTTP status."""
+        mock_dissect.return_value = {
+            "tcp_streams": {"0": {}},
+            "primary_flow": {
+                "stream_id": "0",
+                "family": "IPv6",
+                "handshake_completed": True,
+                "syn_frame": 1,
+                "final_ack_frame": 3,
+                "http_request_frame": 4,
+                "http_response_frame": 5,
+                "http_status_code": True,  # Boolean!
+            },
+            "metrics": {},
+        }
+        rec = replay_single_trial(
+            demo=self.valid_spec,
+            checksum_map=self.valid_checksum_map,
+            campaign_dir=CAMPAIGN_DIR,
+            rederived_dir=REDERIVED_DIR,
+        )
+        self.assertEqual(rec["status"], "FAIL")
+        self.assertTrue(any("HTTP status not in 200-299 success range" in err for err in rec["errors"]))
+
+    @patch("lab.demo_replay.dissect_pcap")
+    def test_fractional_frame_in_replay_fails_closed(self, mock_dissect):
+        """Correction B: Replay engine rejects fractional syn_frame."""
+        mock_dissect.return_value = {
+            "tcp_streams": {"0": {}},
+            "primary_flow": {
+                "stream_id": "0",
+                "family": "IPv6",
+                "handshake_completed": True,
+                "syn_frame": 10.9,  # Float!
+                "final_ack_frame": 3,
+                "http_request_frame": 4,
+                "http_response_frame": 5,
+                "http_status_code": 200,
+            },
+            "metrics": {},
+        }
+        rec = replay_single_trial(
+            demo=self.valid_spec,
+            checksum_map=self.valid_checksum_map,
+            campaign_dir=CAMPAIGN_DIR,
+            rederived_dir=REDERIVED_DIR,
+        )
+        self.assertEqual(rec["status"], "FAIL")
+        self.assertTrue(any("initial SYN frame missing or invalid positive integer" in err for err in rec["errors"]))
+
+    @patch("lab.demo_replay.dissect_pcap")
     def test_incomplete_handshake_fails_closed(self, mock_dissect):
         """Handshake without completion (handshake_completed=False) fails closed."""
         mock_dissect.return_value = {

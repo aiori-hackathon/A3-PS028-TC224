@@ -328,6 +328,88 @@ def parse_int_or_none(val: Any) -> Optional[int]:
         return None
 
 
+def validate_strict_positive_int(val: Any, field_name: str, trial_id: str = "") -> int:
+    """
+    Strict integer validation for evidence frame identifiers.
+    Rejects:
+    - None
+    - Booleans (True / False)
+    - Floating point values (e.g. 10.9, 10.0)
+    - Non-numeric strings (e.g. 'abc', '')
+    - Strings containing decimal points (e.g. '10.9', '10.0')
+    - Values <= 0
+    Returns int > 0.
+    """
+    prefix = f"Trial {trial_id} " if trial_id else ""
+    if val is None:
+        raise ValueError(f"{prefix}{field_name} is missing or None")
+    if isinstance(val, bool):
+        raise ValueError(f"{prefix}{field_name} cannot be a boolean: {val}")
+    if isinstance(val, float):
+        raise ValueError(f"{prefix}{field_name} cannot be a floating-point number: {val}")
+    if isinstance(val, int):
+        if val <= 0:
+            raise ValueError(f"{prefix}{field_name} must be a positive integer (> 0), got {val}")
+        return val
+    if isinstance(val, str):
+        val_str = val.strip()
+        if not re.fullmatch(r"[0-9]+", val_str):
+            raise ValueError(f"{prefix}{field_name} must be a positive integer string, got '{val}'")
+        val_int = int(val_str)
+        if val_int <= 0:
+            raise ValueError(f"{prefix}{field_name} must be a positive integer (> 0), got {val_int}")
+        return val_int
+    raise ValueError(f"{prefix}{field_name} has invalid type {type(val).__name__}: {val}")
+
+
+def validate_strict_http_status(val: Any, field_name: str, trial_id: str = "", expected_status: int = 200) -> int:
+    """
+    Strict integer validation for HTTP status code in evidence.
+    Rejects:
+    - None
+    - Booleans (True / False)
+    - Floating point values (e.g. 200.0, 200.9)
+    - Non-numeric strings (e.g. 'abc', '')
+    - Strings containing decimal points (e.g. '200.0')
+    - Any status code other than expected_status (default 200)
+    Returns int (200).
+    """
+    prefix = f"Trial {trial_id} " if trial_id else ""
+    if val is None:
+        raise ValueError(f"{prefix}{field_name} is missing or None")
+    if isinstance(val, bool):
+        raise ValueError(f"{prefix}{field_name} cannot be a boolean: {val}")
+    if isinstance(val, float):
+        raise ValueError(f"{prefix}{field_name} cannot be a floating-point number: {val}")
+    if isinstance(val, int):
+        if val != expected_status:
+            raise ValueError(
+                f"{prefix}{field_name} must be {expected_status}, got {val}"
+            )
+        return val
+    if isinstance(val, str):
+        val_str = val.strip()
+        if not re.fullmatch(r"[0-9]+", val_str):
+            raise ValueError(
+                f"{prefix}{field_name} must be a valid integer string, got '{val}'"
+            )
+        val_int = int(val_str)
+        if val_int != expected_status:
+            raise ValueError(
+                f"{prefix}{field_name} must be {expected_status}, got {val_int}"
+            )
+        return val_int
+    raise ValueError(f"{prefix}{field_name} has invalid type {type(val).__name__}: {val}")
+
+
+VALID_SUCCESSFUL_CLASSIFICATIONS: Dict[str, str] = {
+    "DIRECT_IPV6": "IPv6",
+    "DIRECT_IPV4": "IPv4",
+    "IPV6_TO_IPV4_FALLBACK": "IPv4",
+    "IPV4_TO_IPV6_FALLBACK": "IPv6",
+}
+
+
 TRIAL_ID_PATTERN = re.compile(r"trial-\d{14}-[0-9a-f]{8}")
 HEX64_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 
@@ -631,14 +713,22 @@ def build_demonstration_bundle(
                 f"Attempt {row.get('attempt_id')} has invalid validity '{validity}' or status '{status}' (must be VALID_LIVE and COMPLETED)"
             )
 
-        # 1. Require trial present in canonical checksum manifest
+        # 1. Require attempts.csv campaign_id to equal the campaign manifest campaign_id
+        ledger_campaign_id = row.get("campaign_id")
+        if ledger_campaign_id != campaign_id:
+            raise ValueError(
+                f"Campaign ID mismatch for attempt {row.get('attempt_id')}: "
+                f"attempts ledger has '{ledger_campaign_id}' but manifest has '{campaign_id}'"
+            )
+
+        # 2. Require trial present in canonical checksum manifest
         if tid not in manifest_checksums:
             raise ValueError(
                 f"Valid live trial {tid} is missing from canonical checksum manifest {checksums_file}"
             )
         expected_manifest_digest = manifest_checksums[tid]
 
-        # 2. Require attempts ledger PCAP digest is present, valid format, and matches manifest
+        # 3. Require attempts ledger PCAP digest is present, valid format, and matches manifest
         ledger_digest = row.get("pcap_sha256")
         if not ledger_digest or not HEX64_RE.match(str(ledger_digest)):
             raise ValueError(
@@ -650,7 +740,7 @@ def build_demonstration_bundle(
                 f"'{ledger_digest}' != manifest '{expected_manifest_digest}'"
             )
 
-        # 3. Valid live trial: load rederived JSON
+        # 4. Valid live trial: load rederived JSON
         reder_file = rederived_dir / f"{tid}.json"
         if not reder_file.is_file():
             raise FileNotFoundError(f"Missing rederived JSON record: {reder_file}")
@@ -676,6 +766,26 @@ def build_demonstration_bundle(
         if reder.get("browser_name") != row["browser"]:
             raise ValueError(
                 f"Browser mismatch for trial {tid}: attempts ledger has '{row['browser']}' but rederived has '{reder.get('browser_name')}'"
+            )
+
+        # Require attempts-ledger classification to equal rederived JSON classification
+        ledger_cls = row.get("classification")
+        reder_cls = reder.get("classification")
+        if not ledger_cls:
+            raise ValueError(f"Trial {tid} is missing classification in attempts ledger")
+        if not reder_cls:
+            raise ValueError(f"Trial {tid} is missing classification in rederived record")
+        if ledger_cls != reder_cls:
+            raise ValueError(
+                f"Classification mismatch for trial {tid}: "
+                f"attempts ledger has '{ledger_cls}' but rederived has '{reder_cls}'"
+            )
+
+        # Require classification to be a valid successful measurement classification
+        if reder_cls not in VALID_SUCCESSFUL_CLASSIFICATIONS:
+            raise ValueError(
+                f"Trial {tid} has invalid or unsuccessful classification '{reder_cls}' "
+                f"(must be one of {list(VALID_SUCCESSFUL_CLASSIFICATIONS.keys())}, not CONNECTION_FAILED or INCONCLUSIVE)"
             )
 
         # Validate browser version against canonical cohort specification
@@ -707,8 +817,6 @@ def build_demonstration_bundle(
             )
         if reder.get("execution_mode") != "LIVE" or reder.get("is_simulation") is not False:
             raise ValueError(f"Trial {tid} is not authentic LIVE measurement")
-        if not reder.get("classification"):
-            raise ValueError(f"Trial {tid} is missing classification")
 
         # Strict Primary Flow Evidence Validation
         reder_pf = reder.get("primary_flow")
@@ -723,30 +831,33 @@ def build_demonstration_bundle(
         if pf_family not in ("IPv4", "IPv6"):
             raise ValueError(f"Trial {tid} primary_flow invalid family: '{pf_family}' (must be IPv4 or IPv6)")
 
+        # Check consistency between classification and primary-flow family:
+        # DIRECT_IPV6 -> IPv6, DIRECT_IPV4 -> IPv4, IPV6_TO_IPV4_FALLBACK -> IPv4, IPV4_TO_IPV6_FALLBACK -> IPv6
+        expected_family_for_cls = VALID_SUCCESSFUL_CLASSIFICATIONS[reder_cls]
+        if pf_family != expected_family_for_cls:
+            raise ValueError(
+                f"Classification/family inconsistency for trial {tid}: "
+                f"classification '{reder_cls}' requires primary flow family '{expected_family_for_cls}', "
+                f"but primary_flow has family '{pf_family}'"
+            )
+
         if reder_pf.get("handshake_completed") is not True:
             raise ValueError(f"Trial {tid} primary_flow TCP handshake not completed")
 
-        syn_fr = parse_int_or_none(reder_pf.get("syn_frame"))
-        if syn_fr is None or syn_fr <= 0:
-            raise ValueError(f"Trial {tid} primary_flow missing required positive syn_frame identifier")
+        syn_fr = validate_strict_positive_int(reder_pf.get("syn_frame"), "syn_frame", tid)
+        final_ack_fr = validate_strict_positive_int(reder_pf.get("final_ack_frame"), "final_ack_frame", tid)
+        http_req_fr = validate_strict_positive_int(reder_pf.get("http_request_frame"), "http_request_frame", tid)
+        http_resp_fr = validate_strict_positive_int(reder_pf.get("http_response_frame"), "http_response_frame", tid)
 
-        final_ack_fr = parse_int_or_none(reder_pf.get("final_ack_frame"))
-        if final_ack_fr is None or final_ack_fr <= 0:
-            raise ValueError(f"Trial {tid} primary_flow missing required positive final_ack_frame identifier")
-
-        http_req_fr = parse_int_or_none(reder_pf.get("http_request_frame"))
-        if http_req_fr is None or http_req_fr <= 0:
-            raise ValueError(f"Trial {tid} primary_flow missing required positive http_request_frame identifier")
-
-        http_resp_fr = parse_int_or_none(reder_pf.get("http_response_frame"))
-        if http_resp_fr is None or http_resp_fr <= 0:
-            raise ValueError(f"Trial {tid} primary_flow missing required positive http_response_frame identifier")
-
-        http_status = parse_int_or_none(reder_pf.get("http_status_code"))
-        if http_status is None or http_status != 200:
+        # Strict HTTP status validation: attempts ledger == rederived primary flow == 200
+        ledger_http = validate_strict_http_status(row.get("http_status"), "attempts ledger http_status", tid, 200)
+        reder_http = validate_strict_http_status(reder_pf.get("http_status_code"), "primary_flow http_status_code", tid, 200)
+        if ledger_http != reder_http:
             raise ValueError(
-                f"Trial {tid} primary_flow missing valid successful HTTP status code (expected 200, got {http_status})"
+                f"HTTP status mismatch for trial {tid}: "
+                f"attempts ledger has {ledger_http} but rederived primary flow has {reder_http}"
             )
+        http_status = reder_http
 
         reder_pcap_digest = reder_pf.get("pcap_sha256")
         if not reder_pcap_digest or not HEX64_RE.match(str(reder_pcap_digest)):

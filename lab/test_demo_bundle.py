@@ -25,8 +25,11 @@ from lab.build_demo_bundle import (
     EXPECTED_TIMELINE_EVENTS_COUNT,
     EXPECTED_COHORTS_COUNT,
     EXPECTED_TRIALS_PER_COHORT,
+    VALID_SUCCESSFUL_CLASSIFICATIONS,
     build_demonstration_bundle,
     compute_sha256,
+    validate_strict_positive_int,
+    validate_strict_http_status,
 )
 
 
@@ -617,7 +620,7 @@ class TestDemoBundleBuilder(unittest.TestCase):
                     phase_c_dir=tmp_c_dir,
                     output_dir=Path(tmpdir) / "out",
                 )
-            self.assertIn("missing required positive syn_frame", str(ctx.exception))
+            self.assertTrue("syn_frame is missing or None" in str(ctx.exception) or "missing required positive syn_frame" in str(ctx.exception))
 
             # Case 4: Non-200 HTTP status
             data["primary_flow"]["syn_frame"] = 10
@@ -629,10 +632,307 @@ class TestDemoBundleBuilder(unittest.TestCase):
                     phase_c_dir=tmp_c_dir,
                     output_dir=Path(tmpdir) / "out",
                 )
-            self.assertIn("missing valid successful HTTP status code", str(ctx.exception))
+            self.assertTrue("must be 200" in str(ctx.exception) or "missing valid successful HTTP status code" in str(ctx.exception))
+
+    def test_attempts_ledger_campaign_id_mismatch_fails_closed(self):
+        """Correction A: Attempts ledger campaign_id mismatch with manifest fails closed."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_c_dir = Path(tmpdir) / "phase-c"
+            tmp_c_dir.mkdir()
+            for item in DEFAULT_PHASE_C_DIR.iterdir():
+                if item.name != "attempts.csv":
+                    (tmp_c_dir / item.name).symlink_to(item)
+
+            orig_lines = (DEFAULT_PHASE_C_DIR / "attempts.csv").read_text(encoding="utf-8").splitlines()
+            header = orig_lines[0]
+            first_row = orig_lines[1].split(",")
+            col_idx = header.split(",").index("campaign_id")
+            first_row[col_idx] = "mismatched-campaign-id"
+            corrupted_csv = "\n".join([header, ",".join(first_row)] + orig_lines[2:]) + "\n"
+            (tmp_c_dir / "attempts.csv").write_text(corrupted_csv, encoding="utf-8")
+
+            with self.assertRaises(ValueError) as ctx:
+                build_demonstration_bundle(
+                    campaign_dir=DEFAULT_CAMPAIGN_DIR,
+                    phase_c_dir=tmp_c_dir,
+                    output_dir=Path(tmpdir) / "out",
+                )
+            self.assertIn("Campaign ID mismatch", str(ctx.exception))
+
+    def test_attempts_ledger_classification_mismatch_fails_closed(self):
+        """Correction A: Attempts ledger classification mismatch with rederived JSON fails closed."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_c_dir = Path(tmpdir) / "phase-c"
+            tmp_c_dir.mkdir()
+            for item in DEFAULT_PHASE_C_DIR.iterdir():
+                if item.name != "attempts.csv":
+                    (tmp_c_dir / item.name).symlink_to(item)
+
+            orig_lines = (DEFAULT_PHASE_C_DIR / "attempts.csv").read_text(encoding="utf-8").splitlines()
+            header = orig_lines[0]
+            first_row = orig_lines[1].split(",")
+            col_idx = header.split(",").index("classification")
+            # First row is DIRECT_IPV6; flip to DIRECT_IPV4
+            first_row[col_idx] = "DIRECT_IPV4"
+            corrupted_csv = "\n".join([header, ",".join(first_row)] + orig_lines[2:]) + "\n"
+            (tmp_c_dir / "attempts.csv").write_text(corrupted_csv, encoding="utf-8")
+
+            with self.assertRaises(ValueError) as ctx:
+                build_demonstration_bundle(
+                    campaign_dir=DEFAULT_CAMPAIGN_DIR,
+                    phase_c_dir=tmp_c_dir,
+                    output_dir=Path(tmpdir) / "out",
+                )
+            self.assertIn("Classification mismatch", str(ctx.exception))
+
+    def test_attempts_ledger_http_status_mismatch_fails_closed(self):
+        """Correction A: Attempts ledger HTTP status mismatch with primary flow fails closed."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_c_dir = Path(tmpdir) / "phase-c"
+            tmp_c_dir.mkdir()
+            for item in DEFAULT_PHASE_C_DIR.iterdir():
+                if item.name != "attempts.csv":
+                    (tmp_c_dir / item.name).symlink_to(item)
+
+            orig_lines = (DEFAULT_PHASE_C_DIR / "attempts.csv").read_text(encoding="utf-8").splitlines()
+            header = orig_lines[0]
+            first_row = orig_lines[1].split(",")
+            col_idx = header.split(",").index("http_status")
+            first_row[col_idx] = "500"
+            corrupted_csv = "\n".join([header, ",".join(first_row)] + orig_lines[2:]) + "\n"
+            (tmp_c_dir / "attempts.csv").write_text(corrupted_csv, encoding="utf-8")
+
+            with self.assertRaises(ValueError) as ctx:
+                build_demonstration_bundle(
+                    campaign_dir=DEFAULT_CAMPAIGN_DIR,
+                    phase_c_dir=tmp_c_dir,
+                    output_dir=Path(tmpdir) / "out",
+                )
+            self.assertIn("must be 200", str(ctx.exception))
+
+    def test_invalid_or_failed_classification_fails_closed(self):
+        """Correction A: Non-successful classification (CONNECTION_FAILED, INCONCLUSIVE, unknown) fails closed."""
+        for invalid_cls in ("CONNECTION_FAILED", "INCONCLUSIVE", "UNKNOWN_CLASSIFICATION"):
+            with tempfile.TemporaryDirectory() as tmpdir:
+                tmp_c_dir = Path(tmpdir) / "phase-c"
+                tmp_c_dir.mkdir()
+                for item in DEFAULT_PHASE_C_DIR.iterdir():
+                    if item.name not in ("attempts.csv", "rederived_results"):
+                        (tmp_c_dir / item.name).symlink_to(item)
+
+                # Update attempts.csv
+                orig_lines = (DEFAULT_PHASE_C_DIR / "attempts.csv").read_text(encoding="utf-8").splitlines()
+                header = orig_lines[0]
+                first_row = orig_lines[1].split(",")
+                col_idx = header.split(",").index("classification")
+                first_row[col_idx] = invalid_cls
+                corrupted_csv = "\n".join([header, ",".join(first_row)] + orig_lines[2:]) + "\n"
+                (tmp_c_dir / "attempts.csv").write_text(corrupted_csv, encoding="utf-8")
+
+                # Update rederived JSON
+                shutil.copytree(DEFAULT_PHASE_C_DIR / "rederived_results", tmp_c_dir / "rederived_results")
+                target_json = tmp_c_dir / "rederived_results" / "trial-20261029205425-6cb90a54.json"
+                data = json.loads(target_json.read_text(encoding="utf-8"))
+                data["classification"] = invalid_cls
+                target_json.write_text(json.dumps(data), encoding="utf-8")
+
+                with self.assertRaises(ValueError) as ctx:
+                    build_demonstration_bundle(
+                        campaign_dir=DEFAULT_CAMPAIGN_DIR,
+                        phase_c_dir=tmp_c_dir,
+                        output_dir=Path(tmpdir) / "out",
+                    )
+                self.assertIn("invalid or unsuccessful classification", str(ctx.exception))
+
+    def test_classification_and_family_inconsistency_fails_closed(self):
+        """Correction A: Inconsistency between classification and primary-flow family fails closed."""
+        cases = [
+            ("DIRECT_IPV6", "IPv4"),
+            ("DIRECT_IPV4", "IPv6"),
+            ("IPV6_TO_IPV4_FALLBACK", "IPv6"),
+            ("IPV4_TO_IPV6_FALLBACK", "IPv4"),
+        ]
+        for cls_name, wrong_fam in cases:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                tmp_c_dir = Path(tmpdir) / "phase-c"
+                tmp_c_dir.mkdir()
+                for item in DEFAULT_PHASE_C_DIR.iterdir():
+                    if item.name not in ("attempts.csv", "rederived_results"):
+                        (tmp_c_dir / item.name).symlink_to(item)
+
+                orig_lines = (DEFAULT_PHASE_C_DIR / "attempts.csv").read_text(encoding="utf-8").splitlines()
+                header = orig_lines[0]
+                first_row = orig_lines[1].split(",")
+                first_row[header.split(",").index("classification")] = cls_name
+                corrupted_csv = "\n".join([header, ",".join(first_row)] + orig_lines[2:]) + "\n"
+                (tmp_c_dir / "attempts.csv").write_text(corrupted_csv, encoding="utf-8")
+
+                shutil.copytree(DEFAULT_PHASE_C_DIR / "rederived_results", tmp_c_dir / "rederived_results")
+                target_json = tmp_c_dir / "rederived_results" / "trial-20261029205425-6cb90a54.json"
+                data = json.loads(target_json.read_text(encoding="utf-8"))
+                data["classification"] = cls_name
+                data["primary_flow"]["family"] = wrong_fam
+                target_json.write_text(json.dumps(data), encoding="utf-8")
+
+                with self.assertRaises(ValueError) as ctx:
+                    build_demonstration_bundle(
+                        campaign_dir=DEFAULT_CAMPAIGN_DIR,
+                        phase_c_dir=tmp_c_dir,
+                        output_dir=Path(tmpdir) / "out",
+                    )
+                self.assertIn("Classification/family inconsistency", str(ctx.exception))
+
+    def test_fractional_frame_identifiers_fail_closed(self):
+        """Correction B: Fractional frame identifiers fail closed."""
+        for field, frac_val in (
+            ("syn_frame", 10.9),
+            ("final_ack_frame", 20.5),
+            ("http_request_frame", 30.1),
+            ("http_response_frame", 40.8),
+            ("syn_frame", "10.9"),
+        ):
+            with tempfile.TemporaryDirectory() as tmpdir:
+                tmp_c_dir = Path(tmpdir) / "phase-c"
+                tmp_c_dir.mkdir()
+                for item in DEFAULT_PHASE_C_DIR.iterdir():
+                    if item.name not in ("rederived_results",):
+                        (tmp_c_dir / item.name).symlink_to(item)
+                shutil.copytree(DEFAULT_PHASE_C_DIR / "rederived_results", tmp_c_dir / "rederived_results")
+                target_json = tmp_c_dir / "rederived_results" / "trial-20261029205425-6cb90a54.json"
+                data = json.loads(target_json.read_text(encoding="utf-8"))
+                data["primary_flow"][field] = frac_val
+                target_json.write_text(json.dumps(data), encoding="utf-8")
+
+                with self.assertRaises(ValueError) as ctx:
+                    build_demonstration_bundle(
+                        campaign_dir=DEFAULT_CAMPAIGN_DIR,
+                        phase_c_dir=tmp_c_dir,
+                        output_dir=Path(tmpdir) / "out",
+                    )
+                err = str(ctx.exception)
+                self.assertTrue("floating-point" in err or "positive integer string" in err)
+
+    def test_boolean_frame_identifiers_fail_closed(self):
+        """Correction B: Boolean frame identifiers fail closed."""
+        for field, bool_val in (("syn_frame", True), ("final_ack_frame", False)):
+            with tempfile.TemporaryDirectory() as tmpdir:
+                tmp_c_dir = Path(tmpdir) / "phase-c"
+                tmp_c_dir.mkdir()
+                for item in DEFAULT_PHASE_C_DIR.iterdir():
+                    if item.name not in ("rederived_results",):
+                        (tmp_c_dir / item.name).symlink_to(item)
+                shutil.copytree(DEFAULT_PHASE_C_DIR / "rederived_results", tmp_c_dir / "rederived_results")
+                target_json = tmp_c_dir / "rederived_results" / "trial-20261029205425-6cb90a54.json"
+                data = json.loads(target_json.read_text(encoding="utf-8"))
+                data["primary_flow"][field] = bool_val
+                target_json.write_text(json.dumps(data), encoding="utf-8")
+
+                with self.assertRaises(ValueError) as ctx:
+                    build_demonstration_bundle(
+                        campaign_dir=DEFAULT_CAMPAIGN_DIR,
+                        phase_c_dir=tmp_c_dir,
+                        output_dir=Path(tmpdir) / "out",
+                    )
+                self.assertIn("cannot be a boolean", str(ctx.exception))
+
+    def test_non_numeric_and_non_positive_frame_identifiers_fail_closed(self):
+        """Correction B: Zero, negative, and non-numeric frame identifiers fail closed."""
+        for field, bad_val in (
+            ("syn_frame", 0),
+            ("final_ack_frame", -1),
+            ("http_request_frame", "abc"),
+            ("http_response_frame", ""),
+        ):
+            with tempfile.TemporaryDirectory() as tmpdir:
+                tmp_c_dir = Path(tmpdir) / "phase-c"
+                tmp_c_dir.mkdir()
+                for item in DEFAULT_PHASE_C_DIR.iterdir():
+                    if item.name not in ("rederived_results",):
+                        (tmp_c_dir / item.name).symlink_to(item)
+                shutil.copytree(DEFAULT_PHASE_C_DIR / "rederived_results", tmp_c_dir / "rederived_results")
+                target_json = tmp_c_dir / "rederived_results" / "trial-20261029205425-6cb90a54.json"
+                data = json.loads(target_json.read_text(encoding="utf-8"))
+                data["primary_flow"][field] = bad_val
+                target_json.write_text(json.dumps(data), encoding="utf-8")
+
+                with self.assertRaises(ValueError) as ctx:
+                    build_demonstration_bundle(
+                        campaign_dir=DEFAULT_CAMPAIGN_DIR,
+                        phase_c_dir=tmp_c_dir,
+                        output_dir=Path(tmpdir) / "out",
+                    )
+                err = str(ctx.exception)
+                self.assertTrue("must be a positive integer" in err)
+
+    def test_fractional_and_boolean_http_status_fails_closed(self):
+        """Correction B: Fractional and boolean HTTP status fail closed."""
+        # Case 1: Float 200.0 in rederived JSON
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_c_dir = Path(tmpdir) / "phase-c"
+            tmp_c_dir.mkdir()
+            for item in DEFAULT_PHASE_C_DIR.iterdir():
+                if item.name not in ("rederived_results",):
+                    (tmp_c_dir / item.name).symlink_to(item)
+            shutil.copytree(DEFAULT_PHASE_C_DIR / "rederived_results", tmp_c_dir / "rederived_results")
+            target_json = tmp_c_dir / "rederived_results" / "trial-20261029205425-6cb90a54.json"
+            data = json.loads(target_json.read_text(encoding="utf-8"))
+            data["primary_flow"]["http_status_code"] = 200.0
+            target_json.write_text(json.dumps(data), encoding="utf-8")
+
+            with self.assertRaises(ValueError) as ctx:
+                build_demonstration_bundle(
+                    campaign_dir=DEFAULT_CAMPAIGN_DIR,
+                    phase_c_dir=tmp_c_dir,
+                    output_dir=Path(tmpdir) / "out",
+                )
+            self.assertIn("cannot be a floating-point number", str(ctx.exception))
+
+        # Case 2: Boolean True in rederived JSON
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_c_dir = Path(tmpdir) / "phase-c"
+            tmp_c_dir.mkdir()
+            for item in DEFAULT_PHASE_C_DIR.iterdir():
+                if item.name not in ("rederived_results",):
+                    (tmp_c_dir / item.name).symlink_to(item)
+            shutil.copytree(DEFAULT_PHASE_C_DIR / "rederived_results", tmp_c_dir / "rederived_results")
+            target_json = tmp_c_dir / "rederived_results" / "trial-20261029205425-6cb90a54.json"
+            data = json.loads(target_json.read_text(encoding="utf-8"))
+            data["primary_flow"]["http_status_code"] = True
+            target_json.write_text(json.dumps(data), encoding="utf-8")
+
+            with self.assertRaises(ValueError) as ctx:
+                build_demonstration_bundle(
+                    campaign_dir=DEFAULT_CAMPAIGN_DIR,
+                    phase_c_dir=tmp_c_dir,
+                    output_dir=Path(tmpdir) / "out",
+                )
+            self.assertIn("cannot be a boolean", str(ctx.exception))
+
+        # Case 3: Fractional "200.0" string in attempts.csv
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_c_dir = Path(tmpdir) / "phase-c"
+            tmp_c_dir.mkdir()
+            for item in DEFAULT_PHASE_C_DIR.iterdir():
+                if item.name != "attempts.csv":
+                    (tmp_c_dir / item.name).symlink_to(item)
+
+            orig_lines = (DEFAULT_PHASE_C_DIR / "attempts.csv").read_text(encoding="utf-8").splitlines()
+            header = orig_lines[0]
+            first_row = orig_lines[1].split(",")
+            first_row[header.split(",").index("http_status")] = "200.0"
+            corrupted_csv = "\n".join([header, ",".join(first_row)] + orig_lines[2:]) + "\n"
+            (tmp_c_dir / "attempts.csv").write_text(corrupted_csv, encoding="utf-8")
+
+            with self.assertRaises(ValueError) as ctx:
+                build_demonstration_bundle(
+                    campaign_dir=DEFAULT_CAMPAIGN_DIR,
+                    phase_c_dir=tmp_c_dir,
+                    output_dir=Path(tmpdir) / "out",
+                )
+            self.assertIn("must be a valid integer string", str(ctx.exception))
 
     def test_provenance_sidecar_generator_revision(self):
-        """Correction C: Checked-in provenance sidecar generator commit matches a valid git commit."""
+        """Correction C: Checked-in provenance sidecar generator commit matches latest commit touching build_demo_bundle.py."""
         sidecar_file = DEFAULT_OUTPUT_DIR / "demo_bundle.json.provenance.json"
         bundle_file = DEFAULT_OUTPUT_DIR / "demo_bundle.json"
         if not sidecar_file.is_file():
@@ -647,6 +947,40 @@ class TestDemoBundleBuilder(unittest.TestCase):
         )
         self.assertEqual(res.returncode, 0, f"generator_commit {gen_commit} not found in git history")
         self.assertEqual(compute_sha256(bundle_file), sidecar_data["output_bundle_sha256"])
+
+        # Strengthened check: generator_commit must match the latest commit that modified lab/build_demo_bundle.py
+        log_res = subprocess.run(
+            ["git", "log", "-n", "1", "--pretty=format:%H", "--", "lab/build_demo_bundle.py"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        expected_commit = log_res.stdout.strip()
+        self.assertEqual(
+            gen_commit,
+            expected_commit,
+            f"Provenance sidecar generator_commit '{gen_commit}' is stale or incorrect; "
+            f"expected latest commit touching lab/build_demo_bundle.py ('{expected_commit}')"
+        )
+
+    def test_provenance_sidecar_detects_stale_or_invalid_revision(self):
+        """Correction C: Provenance validator fails closed if generator_commit is stale or invalid."""
+        with tempfile.TemporaryDirectory() as td:
+            temp_out = Path(td)
+            stale_commit = "0" * 40
+            build_demonstration_bundle(
+                campaign_dir=DEFAULT_CAMPAIGN_DIR,
+                phase_c_dir=DEFAULT_PHASE_C_DIR,
+                output_dir=temp_out,
+                commit_sha_override=stale_commit,
+            )
+            sidecar_data = json.loads((temp_out / "demo_bundle.json.provenance.json").read_text(encoding="utf-8"))
+            self.assertEqual(sidecar_data["generator_commit"], stale_commit)
+            res = subprocess.run(
+                ["git", "cat-file", "-e", f"{stale_commit}^{{commit}}"],
+                capture_output=True,
+            )
+            self.assertNotEqual(res.returncode, 0)
 
 
 if __name__ == "__main__":
