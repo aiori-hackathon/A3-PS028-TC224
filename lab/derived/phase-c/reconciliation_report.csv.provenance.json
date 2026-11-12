@@ -1,0 +1,16 @@
+{
+  "target_file": "reconciliation_report.csv",
+  "sha256": "d524f245b93a3a1714314b7b0ea3cabc6003b1bb661701953f7c2552d63ae201",
+  "row_count": 280,
+  "generated_by_command": "python3 lab/rederive_historical_campaign.py",
+  "git_commit": "7c6ab23c2a378bbc8556fcc15f5911f626502576",
+  "git_branch": "regional/ps028-phase-cd",
+  "python_version": "3.12.3",
+  "tshark_version": "4.2.2",
+  "tcpdump_version": "4.99.4",
+  "platform": "Linux-6.18.58.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+  "dissector_flags": [
+    "-o",
+    "tcp.relative_sequence_numbers:FALSE"
+  ]
+}
