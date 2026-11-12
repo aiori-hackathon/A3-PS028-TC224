@@ -1,0 +1,18 @@
+{
+  "bundle_schema_version": "1.0.0",
+  "campaign_id": "ps028-a10-live-20261030-01",
+  "evidence_type": "HISTORICAL_LIVE",
+  "generator_commit": "e6bf1ed4152cf07371e8cf4b005b3f61f55ed803",
+  "generator_script": "lab/build_demo_bundle.py",
+  "generator_version": "1.0.0",
+  "input_files_sha256": {
+    "attempts.csv": "40001094e0b12dad4b75522416d0d483539d5252ecc2f854cd7b0f5e934c1faf",
+    "campaign_manifest.json": "80a1a5c5c57e5e0ff0e44626f02511f4f5f58f12ba62750be8dda14bac0483a6",
+    "connection_attempts.csv": "9034dc85d9a8a123d12e8f9c1328cbf506e4f44a65f17d969e6d38c46b082cf7",
+    "reconciliation_report.csv": "d524f245b93a3a1714314b7b0ea3cabc6003b1bb661701953f7c2552d63ae201",
+    "rfc8305_assessment.csv": "f1f639aa6d0c96928be7f4cc49d45db44eb63b6af70b1945cdd1febca255d9e7",
+    "s5_flow_dissection.csv": "73e7b238990e822b30cd926e5f709c36e76730f0c3857747ff78baa6d9ae3ac0",
+    "trial_timeline.csv": "8ec432bed4fe7533b82a2735767c90525b95d521d840d5b67fd7024387057de5"
+  },
+  "output_bundle_sha256": "7e81d1c9aa51a6088d894cf5e84864b1fb817a58384688e8ba721bcbde4ac092"
+}
