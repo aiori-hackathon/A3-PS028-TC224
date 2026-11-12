@@ -57,13 +57,21 @@ import lab.concurrency as concurrency
 import lab.identity as identity
 import lab.impair as impair
 import lab.teardown as teardown
+from lab.analyze import (
+    FallbackClassification,
+    TrialValidity,
+    ExecutionStatus,
+    ConnectionOutcome,
+    EventSource,
+)
 
 def run_helper_action(*args, **kwargs):
     """Convenience wrapper delegating to privileged_helper.run_helper_action."""
     import lab.privileged_helper as priv_helper
     return priv_helper.run_helper_action(*args, **kwargs)
 
-SCHEMA_VERSION = "1.0.0"
+SCHEMA_VERSION = "1.1.0"
+SUPPORTED_SCHEMA_VERSIONS = frozenset({"1.0.0", "1.1.0"})
 DEFAULT_SCENARIOS_PATH = SCRIPT_DIR / "scenarios.yaml"
 DEFAULT_TRIALS_DIR = SCRIPT_DIR / "trials"
 DNS_PID_FILE = SCRIPT_DIR / "dns.pid"
@@ -1407,65 +1415,137 @@ def parse_chromium_netlog(netlog_path: Union[str, Path], target_url: Optional[st
     - HTTP response status code for target_url (or matching host/path)
     - Winning address family and remote IP address
     - Request method and URL
+    Uses directed-graph dependency traversal:
+    URL_REQUEST -> HTTP_STREAM_JOB / CONNECT_JOB -> SOCKET (TCP_CONNECT).
+    If incomplete or ambiguous, marks AMBIGUOUS; PCAP remains authoritative.
     """
     p = Path(netlog_path)
     if not p.is_file():
-        return {"status_code": None, "winning_family": None, "remote_address": None}
+        return {
+            "status_code": None,
+            "winning_family": None,
+            "remote_address": None,
+            "telemetry_valid": False,
+            "correlated_source_id": None
+        }
 
     try:
         with open(p, "r", encoding="utf-8", errors="replace") as f:
             data = json.load(f)
     except Exception:
-        return {"status_code": None, "winning_family": None, "remote_address": None}
+        return {
+            "status_code": None,
+            "winning_family": None,
+            "remote_address": None,
+            "telemetry_valid": False,
+            "correlated_source_id": None
+        }
 
     events = data.get("events", [])
     types = data.get("constants", {}).get("logEventTypes", {})
     inv_types = {v: k for k, v in types.items()}
 
-    target_host = None
+    target_clean = target_url.lower().rstrip("/") if target_url else ""
+    target_host = ""
     if target_url:
         m = re.search(r"https?://([^/:]+)", target_url)
         if m:
             target_host = m.group(1).lower()
 
+    # Step 1: Find target URL_REQUEST source ID
+    target_url_request_id = None
+    all_url_requests = {}
     matched_sources = set()
-    source_urls = {}
+
     for e in events:
         etype = inv_types.get(e.get("type"))
         params = e.get("params", {})
         sid = e.get("source", {}).get("id")
         if etype == "URL_REQUEST_START_JOB":
             url = params.get("url", "")
+            u_clean = url.lower().rstrip("/")
             if sid is not None:
-                source_urls[sid] = url
-            if target_host and target_host in url.lower():
+                all_url_requests[sid] = url
+            if target_clean and (u_clean == target_clean or u_clean == f"{target_clean}/"):
+                target_url_request_id = sid
+                matched_sources.add(sid)
+            elif not target_url_request_id and target_host and target_host in u_clean:
+                if not u_clean.endswith("/favicon.ico"):
+                    target_url_request_id = sid
                 matched_sources.add(sid)
             elif not target_host and sid is not None:
                 matched_sources.add(sid)
 
-    status_code = None
+    if target_url_request_id is None and all_url_requests:
+        for sid, u in all_url_requests.items():
+            if not u.endswith("/favicon.ico"):
+                target_url_request_id = sid
+                break
+        if target_url_request_id is None:
+            target_url_request_id = list(all_url_requests.keys())[0]
+
+    # Step 2: Build dependency graph (both directions)
+    dep_graph: Dict[int, Set[int]] = {}
+    for e in events:
+        sid = e.get("source", {}).get("id")
+        params = e.get("params", {})
+        dep = params.get("source_dependency", {}).get("id")
+        if sid is not None and dep is not None:
+            dep_graph.setdefault(sid, set()).add(dep)
+            dep_graph.setdefault(dep, set()).add(sid)
+
+    # Step 3: Expand connected component from target_url_request_id
+    related_sources = set()
+    if target_url_request_id is not None:
+        queue = [target_url_request_id]
+        related_sources.add(target_url_request_id)
+        while queue:
+            curr = queue.pop(0)
+            for neighbor in dep_graph.get(curr, set()):
+                if neighbor not in related_sources:
+                    related_sources.add(neighbor)
+                    queue.append(neighbor)
+
+    # Step 4: Extract TCP_CONNECT exclusively from correlated sources
     winning_family = None
     remote_address = None
-
-    for e in events:
-        etype = inv_types.get(e.get("type"))
-        params = e.get("params", {})
-        if etype == "TCP_CONNECT":
-            rem = params.get("remote_address")
-            if rem:
-                if "[" in rem or rem.count(":") > 1:
-                    winning_family = "IPv6"
-                else:
-                    winning_family = "IPv4"
-                remote_address = rem
+    candidate_connects = []
 
     for e in events:
         etype = inv_types.get(e.get("type"))
         sid = e.get("source", {}).get("id")
         params = e.get("params", {})
+        if etype == "TCP_CONNECT":
+            rem = params.get("remote_address")
+            if rem:
+                is_v6 = ("[" in rem or rem.count(":") > 1)
+                fam = "IPv6" if is_v6 else "IPv4"
+                candidate_connects.append((sid, fam, rem))
 
+    correlated_connects = [c for c in candidate_connects if c[0] in related_sources]
+
+    if correlated_connects:
+        winning_family = correlated_connects[0][1]
+        remote_address = correlated_connects[0][2]
+    elif len(candidate_connects) == 1:
+        winning_family = candidate_connects[0][1]
+        remote_address = candidate_connects[0][2]
+    elif len(candidate_connects) > 1:
+        unique_fams = set(c[1] for c in candidate_connects)
+        if len(unique_fams) == 1:
+            winning_family = list(unique_fams)[0]
+            remote_address = candidate_connects[0][2]
+        else:
+            winning_family = "AMBIGUOUS"
+
+    # Step 5: Extract HTTP response headers
+    status_code = None
+    for e in events:
+        etype = inv_types.get(e.get("type"))
+        sid = e.get("source", {}).get("id")
+        params = e.get("params", {})
         if etype in ("HTTP_TRANSACTION_READ_RESPONSE_HEADERS", "HTTP2_SESSION_RECV_HEADERS", "HTTP3_HEADERS_RECEIVED"):
-            if not matched_sources or sid in matched_sources:
+            if not matched_sources or sid in matched_sources or sid in related_sources:
                 headers = params.get("headers", [])
                 if isinstance(headers, list):
                     for h in headers:
@@ -1497,7 +1577,9 @@ def parse_chromium_netlog(netlog_path: Union[str, Path], target_url: Optional[st
     return {
         "status_code": status_code,
         "winning_family": winning_family,
-        "remote_address": remote_address
+        "remote_address": remote_address,
+        "telemetry_valid": bool(winning_family and winning_family != "AMBIGUOUS"),
+        "correlated_source_id": target_url_request_id
     }
 
 
@@ -1722,7 +1804,207 @@ def _compute_rcv_nxt(sinfo: Dict[str, Any]) -> Optional[int]:
     return (rcv_nxt_base + contiguous) & 0xFFFFFFFF
 
 
-def dissect_pcap(pcap_path: Path, target_hostname: str) -> Dict[str, Any]:
+DNS_QTYPE_MAP: Dict[str, str] = {
+    "1": "A", "A": "A",
+    "28": "AAAA", "AAAA": "AAAA",
+    "65": "HTTPS", "HTTPS": "HTTPS",
+    "64": "SVCB", "SVCB": "SVCB",
+    "5": "CNAME", "CNAME": "CNAME",
+    "16": "TXT", "TXT": "TXT",
+    "15": "MX", "MX": "MX",
+    "2": "NS", "NS": "NS",
+    "12": "PTR", "PTR": "PTR",
+    "6": "SOA", "SOA": "SOA",
+}
+
+DNS_RCODE_MAP: Dict[int, str] = {
+    0: "NOERROR",
+    1: "FORMERR",
+    2: "SERVFAIL",
+    3: "NXDOMAIN",
+    4: "NOTIMP",
+    5: "REFUSED",
+    6: "YXDOMAIN",
+    7: "YXRRSET",
+    8: "NXRRSET",
+    9: "NOTAUTH",
+    10: "NOTZONE",
+}
+
+
+def _parse_dns_id(dns_id_str: Any) -> Optional[int]:
+    """Parses tshark dns.id (hex or decimal) to an integer in [0, 65535]."""
+    if dns_id_str is None or dns_id_str == "":
+        return None
+    val = str(dns_id_str).split(",")[0].strip()
+    try:
+        parsed = int(val, 0)
+        return parsed if 0 <= parsed <= 65535 else None
+    except (ValueError, TypeError):
+        return None
+
+
+def _canonicalize_qtype(qtype_raw: Any) -> str:
+    """Maps wire type representation to canonical uppercase string."""
+    if not qtype_raw:
+        return ""
+    val = str(qtype_raw).split(",")[0].strip().upper()
+    return DNS_QTYPE_MAP.get(val, val)
+
+
+def compute_handshake_metrics(
+    primary_stream_id: Optional[str],
+    streams: Dict[str, Dict[str, Any]],
+    ipv6_obs: Dict[str, Any],
+    ipv4_obs: Dict[str, Any]
+) -> Tuple[Dict[str, Optional[float]], Dict[str, str]]:
+    """
+    Computes handshake latency metrics and null reason codes adhering strictly
+    to RFC 9293 §3.5 and Phase C Metric Contract v1.1.0.
+    """
+    metrics: Dict[str, Optional[float]] = {
+        "t_connect_ms": None,
+        "t_setup_total_ms": None,
+        "syn_to_synack_ms": None,
+        "connection_attempt_delay_ms": None,
+        "retransmitted_syn_count_ipv6": 0,
+        "retransmitted_syn_count_ipv4": 0,
+    }
+    null_reasons: Dict[str, str] = {}
+
+    v6_syn = ipv6_obs.get("first_syn_time")
+    v4_syn = ipv4_obs.get("first_syn_time")
+
+    # Retransmitted SYN counts across qualifying streams
+    for sid, s in streams.items():
+        fam = s.get("family")
+        retries = s.get("retransmitted_syn_count", 0)
+        if fam == "IPv6":
+            metrics["retransmitted_syn_count_ipv6"] += retries
+        elif fam == "IPv4":
+            metrics["retransmitted_syn_count_ipv4"] += retries
+
+    # 1. Connection Attempt Delay (CAD)
+    if v6_syn is not None and v4_syn is not None:
+        if v4_syn >= v6_syn:
+            metrics["connection_attempt_delay_ms"] = round((v4_syn - v6_syn) * 1000.0, 2)
+        else:
+            metrics["connection_attempt_delay_ms"] = None
+            null_reasons["connection_attempt_delay_ms"] = "INVALID_FAMILY_CHRONOLOGY"
+    elif v6_syn is not None and v4_syn is None:
+        metrics["connection_attempt_delay_ms"] = None
+        null_reasons["connection_attempt_delay_ms"] = "NOT_APPLICABLE_HEALTHY_PATH"
+    else:
+        metrics["connection_attempt_delay_ms"] = None
+        null_reasons["connection_attempt_delay_ms"] = "INDETERMINATE_NO_SYN"
+
+    # 2. Handshake Metrics on Primary Stream
+    if not primary_stream_id or primary_stream_id not in streams:
+        for m in ("t_connect_ms", "t_setup_total_ms", "syn_to_synack_ms"):
+            null_reasons[m] = "INDETERMINATE_NO_PRIMARY_FLOW"
+        return metrics, null_reasons
+
+    ps = streams[primary_stream_id]
+    t_syn = ps.get("syn_time")
+    t_synack = ps.get("syn_ack_time")
+    t_final_ack = ps.get("final_ack_time")
+    hs_completed = ps.get("tcp_handshake_completed", False)
+    rst_received = ps.get("server_rst_received", False)
+
+    # First SYN of any address family in trial
+    all_first_syns = [t for t in (v6_syn, v4_syn) if t is not None]
+    t_first_syn_any = min(all_first_syns) if all_first_syns else t_syn
+
+    # Compute syn_to_synack_ms
+    if t_syn is None:
+        null_reasons["syn_to_synack_ms"] = "INDETERMINATE_NO_SYN"
+    elif rst_received and t_synack is None:
+        null_reasons["syn_to_synack_ms"] = "INDETERMINATE_CONN_RESET"
+    elif t_synack is None:
+        null_reasons["syn_to_synack_ms"] = "INDETERMINATE_NO_SYNACK"
+    else:
+        metrics["syn_to_synack_ms"] = round((t_synack - t_syn) * 1000.0, 2)
+
+    # Compute t_connect_ms & t_setup_total_ms
+    if t_syn is None:
+        null_reasons["t_connect_ms"] = "INDETERMINATE_NO_SYN"
+        null_reasons["t_setup_total_ms"] = "INDETERMINATE_NO_SYN"
+    elif rst_received and not hs_completed:
+        null_reasons["t_connect_ms"] = "INDETERMINATE_CONN_RESET"
+        null_reasons["t_setup_total_ms"] = "INDETERMINATE_CONN_RESET"
+    elif t_synack is None:
+        null_reasons["t_connect_ms"] = "INDETERMINATE_NO_SYNACK"
+        null_reasons["t_setup_total_ms"] = "INDETERMINATE_NO_SYNACK"
+    elif not hs_completed or t_final_ack is None:
+        null_reasons["t_connect_ms"] = "INDETERMINATE_NO_FINAL_ACK"
+        null_reasons["t_setup_total_ms"] = "INDETERMINATE_NO_FINAL_ACK"
+    else:
+        metrics["t_connect_ms"] = round((t_final_ack - t_syn) * 1000.0, 2)
+        metrics["t_setup_total_ms"] = round((t_final_ack - t_first_syn_any) * 1000.0, 2)
+
+    return metrics, null_reasons
+
+
+def _build_primary_flow_obj(
+    msinfo: Optional[Dict[str, Any]],
+    pcap_sha256: Optional[str] = None,
+    t_conn: Optional[float] = None,
+    t_setup: Optional[float] = None,
+    syn_synack: Optional[float] = None
+) -> Dict[str, Any]:
+    if not msinfo:
+        return {
+            "stream_id": None,
+            "family": None,
+            "winning_family": None,
+            "client_endpoint": None,
+            "server_endpoint": None,
+            "syn_frame": None,
+            "syn_time": None,
+            "syn_ack_frame": None,
+            "syn_ack_time": None,
+            "final_ack_frame": None,
+            "final_ack_time": None,
+            "handshake_completed": False,
+            "http_request_frame": None,
+            "http_response_frame": None,
+            "http_status_code": None,
+            "pcap_sha256": pcap_sha256 or "",
+            "validity": "NO_PRIMARY_FLOW",
+            "t_connect_ms": t_conn,
+            "t_setup_total_ms": t_setup,
+            "syn_to_synack_ms": syn_synack,
+        }
+    cl_ep = list(msinfo.get("client_endpoint")) if msinfo.get("client_endpoint") and all(x is not None for x in msinfo.get("client_endpoint")) else None
+    sv_ep = list(msinfo.get("server_endpoint")) if msinfo.get("server_endpoint") and all(x is not None for x in msinfo.get("server_endpoint")) else None
+    hs_comp = bool(msinfo.get("tcp_handshake_completed", False))
+    validity = "VALID" if (hs_comp and msinfo.get("main_response_code") is not None) else ("INCOMPLETE_HANDSHAKE" if not hs_comp else "VALID")
+    fam = msinfo.get("family")
+    return {
+        "stream_id": msinfo.get("stream_id"),
+        "family": fam,
+        "winning_family": fam.lower() if fam else None,
+        "client_endpoint": cl_ep,
+        "server_endpoint": sv_ep,
+        "syn_frame": msinfo.get("syn_frame"),
+        "syn_time": msinfo.get("syn_time"),
+        "syn_ack_frame": msinfo.get("syn_ack_frame"),
+        "syn_ack_time": msinfo.get("syn_ack_time"),
+        "final_ack_frame": msinfo.get("final_ack_frame"),
+        "final_ack_time": msinfo.get("final_ack_time"),
+        "handshake_completed": hs_comp,
+        "http_request_frame": msinfo.get("main_request_frame"),
+        "http_response_frame": msinfo.get("main_response_frame"),
+        "http_status_code": msinfo.get("main_response_code"),
+        "pcap_sha256": pcap_sha256 or "",
+        "validity": validity,
+        "t_connect_ms": t_conn,
+        "t_setup_total_ms": t_setup,
+        "syn_to_synack_ms": syn_synack,
+    }
+
+
+def dissect_pcap(pcap_path: Path, target_hostname: str = "trial.he.test", pcap_sha256: Optional[str] = None) -> Dict[str, Any]:
     """
     Dissects a PCAP capture using tshark, extracting:
     - DNS queries and answers for target_hostname
@@ -1777,6 +2059,37 @@ def dissect_pcap(pcap_path: Path, target_hostname: str) -> Dict[str, Any]:
             "tcp_handshake_completed": False,
         },
         "tcp_streams": {},
+        "metrics": {
+            "t_connect_ms": None,
+            "t_setup_total_ms": None,
+            "syn_to_synack_ms": None,
+            "connection_attempt_delay_ms": None,
+            "dns_query_to_first_payload_ms": None,
+            "dns_last_positive_response_to_first_payload_ms": None,
+            "dns_resolution_time_ms": None,
+            "dns_latency_a_ms": None,
+            "dns_latency_aaaa_ms": None,
+            "retransmitted_syn_count_ipv6": 0,
+            "retransmitted_syn_count_ipv4": 0,
+            "null_reasons": {
+                "t_connect_ms": "INDETERMINATE_NO_PRIMARY_FLOW",
+                "t_setup_total_ms": "INDETERMINATE_NO_PRIMARY_FLOW",
+                "syn_to_synack_ms": "INDETERMINATE_NO_PRIMARY_FLOW",
+            }
+        },
+        "primary_flow": _build_primary_flow_obj(None, pcap_sha256=pcap_sha256),
+        "dns_transactions": [],
+        "https_svcb_queries": [],
+        "dns_metrics": {
+            "dns_transactions": [],
+            "https_svcb_queries": [],
+            "dns_resolution_time_ms": None,
+            "dns_latency_a_ms": None,
+            "dns_latency_aaaa_ms": None,
+            "dns_query_to_first_payload_ms": None,
+            "dns_last_positive_response_to_first_payload_ms": None,
+            "null_reasons": {},
+        },
     }
 
     tshark = shutil.which("tshark")
@@ -1792,7 +2105,7 @@ def dissect_pcap(pcap_path: Path, target_hostname: str) -> Dict[str, Any]:
                 pass
         return result
 
-    # Fields to extract
+    # Fields to extract (23 legacy fields + 6 extended DNS/transport fields)
     fields = [
         "frame.time_epoch",
         "ip.src", "ip.dst",
@@ -1810,6 +2123,12 @@ def dissect_pcap(pcap_path: Path, target_hostname: str) -> Dict[str, Any]:
         "tcp.len",
         "http.response_in",
         "http.request_in",
+        "dns.id",
+        "dns.flags.rcode",
+        "udp.srcport",
+        "udp.dstport",
+        "dns.count.answers",
+        "dns.resp.name",
     ]
     cmd = [tshark, "-2", "-r", str(pcap_path), "-T", "fields"]
     for f in fields:
@@ -1825,6 +2144,9 @@ def dissect_pcap(pcap_path: Path, target_hostname: str) -> Dict[str, Any]:
     streams: Dict[str, Dict[str, Any]] = {}
     fallback_http_code: Optional[int] = None
     fallback_http_family: Optional[str] = None
+    pending_dns_queries: Dict[Tuple, List[Dict[str, Any]]] = {}
+    dns_transactions: List[Dict[str, Any]] = []
+    https_svcb_queries: List[Dict[str, Any]] = []
 
     for line in lines:
         parts = line.split("\t")
@@ -1836,6 +2158,8 @@ def dissect_pcap(pcap_path: Path, target_hostname: str) -> Dict[str, Any]:
          dns_a, dns_aaaa, http_code, tcp_stream, http_method, http_uri,
          tcp_seq_raw_str, tcp_ack_raw_str, frame_num_str, tcp_len_str,
          http_response_in_str, http_request_in_str) = parts[:23]
+
+        dns_id_str, dns_rcode_str, udp_sport_str, udp_dport_str, dns_ancount_str, dns_resp_name = parts[23:29]
 
         try:
             t_epoch = float(t_epoch_str) if t_epoch_str else None
@@ -1935,8 +2259,13 @@ def dissect_pcap(pcap_path: Path, target_hostname: str) -> Dict[str, Any]:
                     "server_rst_received": False,
                     "client_rst_sent": False,
                     "rst_received": False,
+                    "rst_time": None,
+                    "rst_frame": None,
                     "server_rst_validated": False,
                     "anomalies": [],
+                    "first_payload_time": None,
+                    "first_payload_frame": None,
+                    "retransmitted_syn_count": 0,
                 }
             sinfo = streams[sid]
             if not sinfo["family"]:
@@ -1944,6 +2273,9 @@ def dissect_pcap(pcap_path: Path, target_hostname: str) -> Dict[str, Any]:
 
             if not dir_to_server and tcp_len > 0:
                 sinfo["server_bytes_sent"] = sinfo.get("server_bytes_sent", 0) + tcp_len
+                if sinfo.get("first_payload_time") is None:
+                    sinfo["first_payload_time"] = t_epoch
+                    sinfo["first_payload_frame"] = frame_num
 
             if http_method:
                 m_str = http_method.strip().upper()
@@ -1996,26 +2328,113 @@ def dissect_pcap(pcap_path: Path, target_hostname: str) -> Dict[str, Any]:
                         pass
 
         # 1. DNS parsing
-        if dns_qname:
-            qname_norm = dns_qname.lower().rstrip(".")
-            if qname_norm == hostname_clean or hostname_clean in qname_norm:
+        target_qname = dns_qname.strip() if dns_qname else (dns_resp_name.strip() if dns_resp_name else "")
+        if target_qname:
+            qname_norm = target_qname.lower().rstrip(".")
+            # Finding C1-02: Exact normalized QNAME matching (never substring)
+            if qname_norm == hostname_clean:
                 is_resp = parse_dns_response_flag(dns_resp_flag)
                 qtype_raw = str(dns_qtype).strip() if dns_qtype is not None else ""
                 qtype_str = "AAAA" if qtype_raw in ("28", "AAAA") else ("A" if qtype_raw in ("1", "A") else qtype_raw)
+                qtype_canon = _canonicalize_qtype(qtype_raw)
+
+                # Legacy dictionary preservation
                 if not is_resp:
                     result["dns"]["queries"].append({
-                        "qname": dns_qname,
+                        "qname": target_qname,
                         "qtype": qtype_str,
                         "timestamp": t_epoch
                     })
                 else:
                     ans_addr = (dns_aaaa.strip() if dns_aaaa else "") if qtype_str == "AAAA" else ((dns_a.strip() if dns_a else "") if qtype_str == "A" else "")
                     result["dns"]["responses"].append({
-                        "qname": dns_qname,
+                        "qname": target_qname,
                         "qtype": qtype_str,
                         "address": ans_addr,
                         "timestamp": t_epoch
                     })
+
+                # Structured DNS transaction tracking
+                dns_id = _parse_dns_id(dns_id_str)
+                is_tcp_dns = bool(tcp_sport_str or tcp_dport_str)
+                dns_transport = "TCP" if is_tcp_dns else "UDP"
+                dns_sport = sport if is_tcp_dns else _parse_int_safe(udp_sport_str)
+                dns_dport = dport if is_tcp_dns else _parse_int_safe(udp_dport_str)
+                dns_ip_src = ip6_src if ip6_src else ip_src
+                dns_ip_dst = ip6_dst if ip6_dst else ip_dst
+
+                if not is_resp:
+                    # DNS Query
+                    cl_ep = (dns_ip_src, dns_sport)
+                    sv_ep = (dns_ip_dst, dns_dport)
+                    pair_key = (dns_id, qname_norm, qtype_canon, cl_ep, sv_ep, dns_transport)
+                    q_entry = {
+                        "dns_id": dns_id,
+                        "qname": qname_norm,
+                        "qtype": qtype_canon,
+                        "transport": dns_transport,
+                        "frame": frame_num,
+                        "time": t_epoch,
+                        "cl_ep": cl_ep,
+                        "sv_ep": sv_ep,
+                    }
+                    pending_dns_queries.setdefault(pair_key, []).append(q_entry)
+                else:
+                    # DNS Response
+                    cl_ep = (dns_ip_dst, dns_dport)
+                    sv_ep = (dns_ip_src, dns_sport)
+                    pair_key = (dns_id, qname_norm, qtype_canon, cl_ep, sv_ep, dns_transport)
+
+                    # Extract answers
+                    answers = []
+                    if qtype_canon == "A" and dns_a:
+                        answers = [a.strip() for a in dns_a.split(",") if a.strip()]
+                    elif qtype_canon == "AAAA" and dns_aaaa:
+                        answers = [a.strip() for a in dns_aaaa.split(",") if a.strip()]
+
+                    # Extract RCODE
+                    dns_rcode_int = _parse_int_safe(dns_rcode_str)
+                    rcode_str = DNS_RCODE_MAP.get(dns_rcode_int, str(dns_rcode_str).strip() or "NOERROR")
+
+                    matched_q = None
+                    if pair_key in pending_dns_queries and pending_dns_queries[pair_key]:
+                        matched_q = pending_dns_queries[pair_key].pop(0)
+                        if not pending_dns_queries[pair_key]:
+                            del pending_dns_queries[pair_key]
+                    else:
+                        # Fallback match by (dns_id, qname_norm, qtype_canon)
+                        for pk in list(pending_dns_queries.keys()):
+                            if pk[0] == dns_id and pk[1] == qname_norm and pk[2] == qtype_canon:
+                                if pending_dns_queries[pk]:
+                                    matched_q = pending_dns_queries[pk].pop(0)
+                                    if not pending_dns_queries[pk]:
+                                        del pending_dns_queries[pk]
+                                    break
+
+                    q_time = matched_q["time"] if matched_q else None
+                    q_frame = matched_q["frame"] if matched_q else None
+                    duration_ms = None
+                    if t_epoch is not None and q_time is not None and t_epoch >= q_time:
+                        duration_ms = round((t_epoch - q_time) * 1000.0, 2)
+
+                    tx_record = {
+                        "dns_id": dns_id,
+                        "qname": qname_norm,
+                        "qtype": qtype_canon,
+                        "rcode": rcode_str if matched_q else "INDETERMINATE_ORPHAN_RESPONSE",
+                        "transport": dns_transport,
+                        "query_frame": q_frame,
+                        "query_time": q_time,
+                        "response_frame": frame_num,
+                        "response_time": t_epoch,
+                        "duration_ms": duration_ms,
+                        "answers": answers,
+                    }
+
+                    if qtype_canon in ("HTTPS", "SVCB", "65", "64"):
+                        https_svcb_queries.append(tx_record)
+                    else:
+                        dns_transactions.append(tx_record)
 
         # 2. TCP parsing & Handshake State Tracking
         if tcp_flags_str and pkt_family:
@@ -2061,6 +2480,7 @@ def dissect_pcap(pcap_path: Path, target_hostname: str) -> Dict[str, Any]:
                     sinfo["syn_time"] = t_epoch
                     sinfo["handshake_state"] = "SYN_SENT"
                 elif sinfo["handshake_state"] == "SYN_SENT":
+                    sinfo["retransmitted_syn_count"] = sinfo.get("retransmitted_syn_count", 0) + 1
                     # Retransmitted SYN: verify ISN and payload length
                     # F-41 / RFC 7413 §4.2.2: Retransmission observed with tcp_len == 0 following a data-bearing
                     # SYN (syn_data_len > 0). Documented accurately as a zero-payload SYN retransmission.
@@ -2079,6 +2499,7 @@ def dissect_pcap(pcap_path: Path, target_hostname: str) -> Dict[str, Any]:
                         if not len_match and not zero_payload_syn_retry:
                             sinfo["anomalies"].append(f"CONFLICTING_SYN_PAYLOAD_LEN: original={sinfo['syn_data_len']}, received={tcp_len}")
                 elif sinfo["handshake_state"] in ("SYNACK_RCVD", "ESTABLISHED", "CLOSED_BY_RESET", "CLOSED_BY_CLIENT_ABORT"):
+                    sinfo["retransmitted_syn_count"] = sinfo.get("retransmitted_syn_count", 0) + 1
                     # Retransmitted SYN arriving after SYN-ACK or handshake completion
                     isn_match = (raw_seq is not None and raw_seq == sinfo["client_isn"])
                     len_match = (tcp_len == sinfo["syn_data_len"])
@@ -2233,6 +2654,9 @@ def dissect_pcap(pcap_path: Path, target_hostname: str) -> Dict[str, Any]:
 
             # 4. RST handling
             if rst_flag:
+                if sinfo.get("rst_time") is None:
+                    sinfo["rst_time"] = t_epoch
+                    sinfo["rst_frame"] = frame_num
                 if not dir_to_server:
                     # Server -> Client RST
                     # Policy: RFC 5961 Section 3.2 Exact-RCV.NXT RST Validation Policy & RFC 9293 §3.5.3 (F-38, F-39)
@@ -2360,31 +2784,110 @@ def dissect_pcap(pcap_path: Path, target_hostname: str) -> Dict[str, Any]:
             sinfo["main_get"] = False
             sinfo["main_response_code"] = None
 
+    # Flush remaining unanswered DNS queries
+    for pkey, qlist in pending_dns_queries.items():
+        for q_item in qlist:
+            unanswered_tx = {
+                "dns_id": q_item["dns_id"],
+                "qname": q_item["qname"],
+                "qtype": q_item["qtype"],
+                "rcode": "INDETERMINATE_UNANSWERED_QUERY",
+                "transport": q_item["transport"],
+                "query_frame": q_item["frame"],
+                "query_time": q_item["time"],
+                "response_frame": None,
+                "response_time": None,
+                "duration_ms": None,
+                "answers": [],
+            }
+            if q_item["qtype"] in ("HTTPS", "SVCB", "65", "64"):
+                https_svcb_queries.append(unanswered_tx)
+            else:
+                dns_transactions.append(unanswered_tx)
+
     # Identify primary HTTP navigation flow
-    main_stream_id = None
-    for sid, sinfo in streams.items():
-        if sinfo["main_get"] and sinfo["main_response_code"] is not None:
-            main_stream_id = sid
-            break
-    if main_stream_id is None:
-        for sid, sinfo in streams.items():
-            if sinfo["main_get"]:
-                main_stream_id = sid
-                break
+    # Selection hierarchy (Finding C1-01, C1-05):
+    # Tier 1: Root GET + completed TCP handshake + 2xx/3xx response
+    # Tier 2: Root GET + completed TCP handshake + any response
+    # Tier 3: Root GET + completed TCP handshake
+    # Tier 4: Root GET + any response
+    # Tier 5: Root GET
+    # Tier 6: Fallback earliest completed TCP handshake
+    cand_streams = list(streams.values())
+    main_stream = None
+
+    t1 = [s for s in cand_streams if s.get("main_get") and s.get("tcp_handshake_completed") and s.get("main_response_code") is not None and 200 <= s.get("main_response_code") < 400]
+    if t1:
+        t1.sort(key=lambda s: (s.get("main_response_time") or float("inf"), s.get("final_ack_time") or float("inf"), s.get("syn_time") or float("inf")))
+        main_stream = t1[0]
+    else:
+        t2 = [s for s in cand_streams if s.get("main_get") and s.get("tcp_handshake_completed") and s.get("main_response_code") is not None]
+        if t2:
+            t2.sort(key=lambda s: (s.get("main_response_time") or float("inf"), s.get("final_ack_time") or float("inf"), s.get("syn_time") or float("inf")))
+            main_stream = t2[0]
+        else:
+            t3 = [s for s in cand_streams if s.get("main_get") and s.get("tcp_handshake_completed")]
+            if t3:
+                t3.sort(key=lambda s: (s.get("final_ack_time") or float("inf"), s.get("syn_time") or float("inf")))
+                main_stream = t3[0]
+            else:
+                t4 = [s for s in cand_streams if s.get("main_get") and s.get("main_response_code") is not None]
+                if t4:
+                    t4.sort(key=lambda s: (s.get("main_response_time") or float("inf"), s.get("syn_time") or float("inf")))
+                    main_stream = t4[0]
+                else:
+                    t5 = [s for s in cand_streams if s.get("main_get")]
+                    if t5:
+                        t5.sort(key=lambda s: (s.get("syn_time") or float("inf")))
+                        main_stream = t5[0]
+                    else:
+                        # Tier 6: Earliest completed TCP handshake
+                        t6 = [s for s in cand_streams if s.get("tcp_handshake_completed")]
+                        if t6:
+                            t6.sort(key=lambda s: (s.get("final_ack_time") or float("inf"), s.get("syn_time") or float("inf")))
+                            main_stream = t6[0]
+                        else:
+                            # Tier 7: Earliest stream with a SYN
+                            t7 = [s for s in cand_streams if s.get("syn_time") is not None]
+                            if t7:
+                                t7.sort(key=lambda s: (s.get("syn_time") or float("inf")))
+                                main_stream = t7[0]
+                            elif cand_streams:
+                                main_stream = cand_streams[0]
+
+    main_stream_id = main_stream["stream_id"] if main_stream else None
+    has_main_get = bool(main_stream and main_stream.get("main_get"))
 
     if main_stream_id is not None:
         msinfo = streams[main_stream_id]
-        result["http_status_code"] = msinfo["main_response_code"]
-        result["http_response_family"] = msinfo["family"]
-        result["main_http_flow"] = {
-            "stream_id": main_stream_id,
-            "family": msinfo["family"],
-            "status_code": msinfo["main_response_code"],
-            "request": msinfo.get("main_request"),
-            "correlated": True,
-            "tcp_handshake_completed": bool(msinfo.get("tcp_handshake_completed", False)),
-        }
+        if has_main_get:
+            result["http_status_code"] = msinfo["main_response_code"]
+            result["http_response_family"] = msinfo["family"]
+            result["main_http_flow"] = {
+                "stream_id": main_stream_id,
+                "family": msinfo["family"],
+                "status_code": msinfo["main_response_code"],
+                "request": msinfo.get("main_request"),
+                "http_uri": msinfo.get("first_request")[1] if msinfo.get("first_request") else None,
+                "correlated": True,
+                "tcp_handshake_completed": bool(msinfo.get("tcp_handshake_completed", False)),
+            }
+        else:
+            result["http_status_code"] = None
+            result["http_response_family"] = None
+            result["diagnostic_fallback_http_code"] = fallback_http_code
+            result["diagnostic_fallback_http_family"] = fallback_http_family
+            result["main_http_flow"] = {
+                "stream_id": main_stream_id,
+                "family": msinfo["family"],
+                "status_code": None,
+                "request": None,
+                "http_uri": None,
+                "correlated": False,
+                "tcp_handshake_completed": bool(msinfo.get("tcp_handshake_completed", False)),
+            }
     else:
+        msinfo = None
         result["http_status_code"] = None
         result["http_response_family"] = None
         result["diagnostic_fallback_http_code"] = fallback_http_code
@@ -2394,6 +2897,7 @@ def dissect_pcap(pcap_path: Path, target_hostname: str) -> Dict[str, Any]:
             "family": None,
             "status_code": None,
             "request": None,
+            "http_uri": None,
             "correlated": False,
             "tcp_handshake_completed": False,
         }
@@ -2408,19 +2912,127 @@ def dissect_pcap(pcap_path: Path, target_hostname: str) -> Dict[str, Any]:
         except Exception:
             pass
 
+    # Compute per-stream handshake metrics
+    for sid, sinfo in streams.items():
+        t_syn = sinfo.get("syn_time")
+        t_synack = sinfo.get("syn_ack_time")
+        t_final_ack = sinfo.get("final_ack_time")
+        hs_comp = sinfo.get("tcp_handshake_completed", False)
+        rst_rcvd = sinfo.get("server_rst_received", False)
+        st_nulls = {}
+        if t_syn is not None and t_synack is not None:
+            sinfo["syn_to_synack_ms"] = round((t_synack - t_syn) * 1000.0, 2)
+        else:
+            sinfo["syn_to_synack_ms"] = None
+            st_nulls["syn_to_synack_ms"] = "INDETERMINATE_CONN_RESET" if rst_rcvd else ("INDETERMINATE_NO_SYNACK" if t_syn is not None else "INDETERMINATE_NO_SYN")
+
+        if t_syn is not None and hs_comp and t_final_ack is not None:
+            sinfo["t_connect_ms"] = round((t_final_ack - t_syn) * 1000.0, 2)
+            sinfo["t_setup_total_ms"] = round((t_final_ack - t_syn) * 1000.0, 2)
+        else:
+            sinfo["t_connect_ms"] = None
+            sinfo["t_setup_total_ms"] = None
+            st_reason = "INDETERMINATE_CONN_RESET" if rst_rcvd else ("INDETERMINATE_NO_SYN" if t_syn is None else ("INDETERMINATE_NO_SYNACK" if t_synack is None else "INDETERMINATE_NO_FINAL_ACK"))
+            st_nulls["t_connect_ms"] = st_reason
+            st_nulls["t_setup_total_ms"] = st_reason
+        sinfo["null_reasons"] = st_nulls
+
     result["tcp_streams"] = streams
+    result["schema_version"] = SCHEMA_VERSION
 
-    # Compute Happy Eyeballs Connection Attempt Delay (CAD)
-    v6_syn = result["ipv6"]["first_syn_time"]
-    v4_syn = result["ipv4"]["first_syn_time"]
-    if v6_syn is not None and v4_syn is not None and v4_syn >= v6_syn:
-        result["connection_attempt_delay_ms"] = round((v4_syn - v6_syn) * 1000.0, 2)
+    # Compute Handshake Metrics adhering to RFC 9293 §3.5 and Phase C Metric Contract
+    metrics, null_reasons = compute_handshake_metrics(
+        primary_stream_id=main_stream_id,
+        streams=streams,
+        ipv6_obs=result["ipv6"],
+        ipv4_obs=result["ipv4"]
+    )
 
-    # Compute winning connection setup time
-    if result["ipv4"]["syn_ack_time"] and v4_syn:
-        result["connection_setup_time_ms"] = round((result["ipv4"]["syn_ack_time"] - v4_syn) * 1000.0, 2)
-    elif result["ipv6"]["syn_ack_time"] and v6_syn:
-        result["connection_setup_time_ms"] = round((result["ipv6"]["syn_ack_time"] - v6_syn) * 1000.0, 2)
+    # Compute DNS-to-first-byte and per-family resolution metrics (Finding C1-02, Decision 2)
+    t_first_payload = msinfo.get("first_payload_time") if msinfo else None
+    all_a_aaaa_q = [tx["query_time"] for tx in dns_transactions if tx["qtype"] in ("A", "AAAA") and tx.get("query_time") is not None]
+    all_positive_r = [
+        tx["response_time"] for tx in dns_transactions
+        if tx["qtype"] in ("A", "AAAA") and tx.get("response_time") is not None
+        and tx.get("rcode") == "NOERROR" and len(tx.get("answers", [])) > 0
+    ]
+
+    dns_query_to_first_payload_ms = None
+    dns_last_positive_response_to_first_payload_ms = None
+
+    if t_first_payload is not None:
+        if all_a_aaaa_q:
+            dns_query_to_first_payload_ms = round((t_first_payload - min(all_a_aaaa_q)) * 1000.0, 2)
+        else:
+            null_reasons["dns_query_to_first_payload_ms"] = "INDETERMINATE_UNPAIRABLE_DNS"
+
+        if all_positive_r:
+            dns_last_positive_response_to_first_payload_ms = round((t_first_payload - max(all_positive_r)) * 1000.0, 2)
+        else:
+            null_reasons["dns_last_positive_response_to_first_payload_ms"] = "INDETERMINATE_UNPAIRABLE_DNS"
+    else:
+        null_reasons["dns_query_to_first_payload_ms"] = "INDETERMINATE_NO_PAYLOAD"
+        null_reasons["dns_last_positive_response_to_first_payload_ms"] = "INDETERMINATE_NO_PAYLOAD"
+
+    dns_latency_a = None
+    dns_latency_aaaa = None
+    dns_res_time = None
+
+    a_txs = [tx for tx in dns_transactions if tx["qtype"] == "A" and tx.get("duration_ms") is not None]
+    if a_txs:
+        dns_latency_a = a_txs[0]["duration_ms"]
+
+    aaaa_txs = [tx for tx in dns_transactions if tx["qtype"] == "AAAA" and tx.get("duration_ms") is not None]
+    if aaaa_txs:
+        dns_latency_aaaa = aaaa_txs[0]["duration_ms"]
+
+    all_q_times = [tx["query_time"] for tx in dns_transactions if tx.get("query_time") is not None]
+    all_r_times = [tx["response_time"] for tx in dns_transactions if tx.get("response_time") is not None]
+    if all_q_times and all_r_times:
+        min_q = min(all_q_times)
+        max_r = max(all_r_times)
+        if max_r >= min_q:
+            dns_res_time = round((max_r - min_q) * 1000.0, 2)
+
+    metrics["dns_query_to_first_payload_ms"] = dns_query_to_first_payload_ms
+    metrics["dns_last_positive_response_to_first_payload_ms"] = dns_last_positive_response_to_first_payload_ms
+    metrics["dns_resolution_time_ms"] = dns_res_time
+    metrics["dns_latency_a_ms"] = dns_latency_a
+    metrics["dns_latency_aaaa_ms"] = dns_latency_aaaa
+    metrics["null_reasons"] = null_reasons
+
+    dns_metrics = {
+        "dns_transactions": dns_transactions,
+        "https_svcb_queries": https_svcb_queries,
+        "dns_resolution_time_ms": dns_res_time,
+        "dns_latency_a_ms": dns_latency_a,
+        "dns_latency_aaaa_ms": dns_latency_aaaa,
+        "dns_query_to_first_payload_ms": dns_query_to_first_payload_ms,
+        "dns_last_positive_response_to_first_payload_ms": dns_last_positive_response_to_first_payload_ms,
+        "null_reasons": {k: v for k, v in null_reasons.items() if k.startswith("dns_")},
+    }
+
+    t_conn = metrics.get("t_connect_ms")
+    t_setup = metrics.get("t_setup_total_ms")
+    syn_synack = metrics.get("syn_to_synack_ms")
+
+    primary_flow_obj = _build_primary_flow_obj(
+        msinfo=msinfo,
+        pcap_sha256=pcap_sha256,
+        t_conn=t_conn,
+        t_setup=t_setup,
+        syn_synack=syn_synack
+    )
+
+    result["metrics"] = metrics
+    result["dns_metrics"] = dns_metrics
+    result["dns_transactions"] = dns_transactions
+    result["https_svcb_queries"] = https_svcb_queries
+    result["primary_flow"] = primary_flow_obj
+
+    # Legacy fields preservation
+    result["connection_attempt_delay_ms"] = metrics.get("connection_attempt_delay_ms")
+    result["connection_setup_time_ms"] = syn_synack
 
     return result
 
@@ -2485,8 +3097,9 @@ def classify_fallback(
     main_flow_correlated = bool(main_flow.get("correlated", False))
     main_flow_handshake = bool(main_flow.get("tcp_handshake_completed", False))
 
-    # Requirement 3: Contradiction detection only when PCAP flow is genuinely correlated
-    if winning_family and main_flow_correlated and main_flow_fam and winning_family != main_flow_fam:
+    # Requirement 3: Contradiction detection only when PCAP flow is genuinely correlated and telemetry unambiguous
+    if (winning_family and winning_family != "AMBIGUOUS" and
+        main_flow_correlated and main_flow_fam and winning_family != main_flow_fam):
         return {
             "fallback_occurred": False,
             "classification": "INCONCLUSIVE",
@@ -2728,7 +3341,7 @@ def update_http_outcome_from_dissection(
     if main_flow_correlated and observed_http_code is not None:
         http_outcome["status_code"] = observed_http_code
         http_outcome["success"] = (200 <= observed_http_code < 400)
-        if not http_outcome.get("winning_address_family") and dissection.get("http_response_family"):
+        if dissection.get("http_response_family"):
             http_outcome["winning_address_family"] = dissection["http_response_family"]
             http_outcome["winning_ip"] = (
                 SERVER_IPV6 if dissection["http_response_family"] == "IPv6" else SERVER_IPV4
@@ -3808,7 +4421,7 @@ def run_trial(
         # 8. Validate and Dissect Packet Capture
         pcap_valid, pcap_sha256, pcap_size, pkt_count, pcap_msg = validate_pcap_file(pcap_path)
         drop_stats = parse_tcpdump_drop_statistics(tcpdump_log)
-        dissection = dissect_pcap(pcap_path, target_hostname=hostname)
+        dissection = dissect_pcap(pcap_path, target_hostname=hostname, pcap_sha256=pcap_sha256)
 
         # Update HTTP outcome with evidence from packet dissection or browser instrumentation
         http_outcome = update_http_outcome_from_dissection(
@@ -3878,6 +4491,37 @@ def run_trial(
                         "tcp_handshake_completed": False,
                     },
                     "tcp_streams": {},
+                    "metrics": {
+                        "t_connect_ms": None,
+                        "t_setup_total_ms": None,
+                        "syn_to_synack_ms": None,
+                        "connection_attempt_delay_ms": None,
+                        "dns_query_to_first_payload_ms": None,
+                        "dns_last_positive_response_to_first_payload_ms": None,
+                        "dns_resolution_time_ms": None,
+                        "dns_latency_a_ms": None,
+                        "dns_latency_aaaa_ms": None,
+                        "retransmitted_syn_count_ipv6": 0,
+                        "retransmitted_syn_count_ipv4": 0,
+                        "null_reasons": {
+                            "t_connect_ms": "INDETERMINATE_NO_PRIMARY_FLOW",
+                            "t_setup_total_ms": "INDETERMINATE_NO_PRIMARY_FLOW",
+                            "syn_to_synack_ms": "INDETERMINATE_NO_PRIMARY_FLOW",
+                        }
+                    },
+                    "primary_flow": _build_primary_flow_obj(None, pcap_sha256=pcap_sha256),
+                    "dns_transactions": [],
+                    "https_svcb_queries": [],
+                    "dns_metrics": {
+                        "dns_transactions": [],
+                        "https_svcb_queries": [],
+                        "dns_resolution_time_ms": None,
+                        "dns_latency_a_ms": None,
+                        "dns_latency_aaaa_ms": None,
+                        "dns_query_to_first_payload_ms": None,
+                        "dns_last_positive_response_to_first_payload_ms": None,
+                        "null_reasons": {},
+                    },
                 }
         elif not pcap_valid or pkt_count == 0:
             was_pcap_valid = pcap_valid
@@ -3931,6 +4575,37 @@ def run_trial(
                     "tcp_handshake_completed": False,
                 },
                 "tcp_streams": {},
+                "metrics": {
+                    "t_connect_ms": None,
+                    "t_setup_total_ms": None,
+                    "syn_to_synack_ms": None,
+                    "connection_attempt_delay_ms": None,
+                    "dns_query_to_first_payload_ms": None,
+                    "dns_last_positive_response_to_first_payload_ms": None,
+                    "dns_resolution_time_ms": None,
+                    "dns_latency_a_ms": None,
+                    "dns_latency_aaaa_ms": None,
+                    "retransmitted_syn_count_ipv6": 0,
+                    "retransmitted_syn_count_ipv4": 0,
+                    "null_reasons": {
+                        "t_connect_ms": "INDETERMINATE_NO_PRIMARY_FLOW",
+                        "t_setup_total_ms": "INDETERMINATE_NO_PRIMARY_FLOW",
+                        "syn_to_synack_ms": "INDETERMINATE_NO_PRIMARY_FLOW",
+                    }
+                },
+                "primary_flow": _build_primary_flow_obj(None, pcap_sha256=pcap_sha256),
+                "dns_transactions": [],
+                "https_svcb_queries": [],
+                "dns_metrics": {
+                    "dns_transactions": [],
+                    "https_svcb_queries": [],
+                    "dns_resolution_time_ms": None,
+                    "dns_latency_a_ms": None,
+                    "dns_latency_aaaa_ms": None,
+                    "dns_query_to_first_payload_ms": None,
+                    "dns_last_positive_response_to_first_payload_ms": None,
+                    "null_reasons": {},
+                },
             }
 
         # 9. Classify Happy Eyeballs Fallback
@@ -3965,8 +4640,13 @@ def run_trial(
             "scenario_description": sc_info.get("description", ""),
             "hostname": hostname,
             "target_url": target_url,
+            "browser_name": bname,
+            "browser_version": bver,
             "execution_mode": "SIMULATION" if is_simulation else "LIVE",
             "is_simulation": is_simulation,
+            "validity_category": "SIMULATION" if is_simulation else ("MEASUREMENT_FAILURE" if is_measurement_failure else "VALID_LIVE"),
+            "classification": classification["classification"],
+            "classification_reason": classification["reason"],
             "timestamps": {
                 "start_time": start_iso,
                 "scenario_applied_time": scenario_applied_iso,
@@ -3988,7 +4668,19 @@ def run_trial(
                 "profile_cleaned": profile_cleaned
             },
             "http_outcome": http_outcome,
-            "dns_observations": dissection["dns"],
+            "metrics": dissection.get("metrics", {}),
+            "primary_flow": dissection.get("primary_flow", _build_primary_flow_obj(None, pcap_sha256=pcap_sha256)),
+            "dns_transactions": dissection.get("dns_transactions", []),
+            "https_svcb_queries": dissection.get("https_svcb_queries", []),
+            "dns_metrics": dissection.get("dns_metrics", {}),
+            "evidence_provenance": {
+                "vantage_point": "ps028-cl:ps028-cl-rt",
+                "tshark_version": "4.2.2",
+                "tcpdump_version": "4.99.4",
+                "parser_version": SCHEMA_VERSION,
+                "dissector_flags": ["-o", "tcp.relative_sequence_numbers:FALSE"],
+            },
+            "dns_observations": dissection.get("dns", {"queries": [], "responses": []}),
             "network_observations": {
                 "ipv6_attempt": classification["ipv6_attempt"],
                 "ipv4_attempt": classification["ipv4_attempt"],

@@ -1803,5 +1803,544 @@ class TestLiveEvidenceIntegration(unittest.TestCase):
         self.assertNotIn("or where an IPv4 attempt starts within 50ms, conform", s6_check["reasoning"])
 
 
+class TestSchemaEvolutionAndPhaseC1Metrics(unittest.TestCase):
+    """
+    Milestone 2 Batch C1 Schema Evolution & Phase C1 Metrics Tests in analyze.py:
+    - Schema 1.1.0 ingestion, validation, and TrialEvidence population
+    - Schema 1.0.0 backward compatibility
+    - Fail-closed rejection of unsupported schema versions (CORRUPTED_RECORD)
+    - Strict null preservation (no coercion to 0.0)
+    - Type verification and corrupt record exclusion
+    """
+
+    def setUp(self):
+        self.temp_dir = Path(tempfile.mkdtemp(prefix="ps028_schema_test_"))
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_schema_1_1_0_validation_and_loading(self):
+        """Schema 1.1.0 trial record validates as VALID_LIVE and populates all Phase C1 fields."""
+        trial_dict = _create_synthetic_trial(trial_id="trial-test-c1-110", scenario_id="S0")
+        trial_dict["schema_version"] = "1.1.0"
+        trial_dict["metrics"] = {
+            "t_connect_ms": 25.5,
+            "t_setup_total_ms": 30.0,
+            "syn_to_synack_ms": 22.0,
+            "dns_query_to_first_payload_ms": 65.0,
+            "dns_last_positive_response_to_first_payload_ms": 45.0,
+            "null_reasons": {}
+        }
+        trial_dict["primary_flow"] = {
+            "stream_id": "0",
+            "family": "IPv6",
+            "winning_family": "ipv6",
+            "t_connect_ms": 25.5,
+            "t_setup_total_ms": 30.0,
+            "syn_to_synack_ms": 22.0,
+        }
+        trial_dict["dns_transactions"] = [
+            {"dns_id": 0x1234, "qname": "trial-test-c1-110.he.test", "qtype": "AAAA", "duration_ms": 5.0}
+        ]
+        trial_dict["https_svcb_queries"] = [
+            {"dns_id": 0x5678, "qname": "trial-test-c1-110.he.test", "qtype": "HTTPS"}
+        ]
+
+        result_path = self.temp_dir / "result.json"
+        result_path.write_text(json.dumps(trial_dict), encoding="utf-8")
+
+        validity, reason = analyze.validate_trial_record(trial_dict, result_path)
+        self.assertEqual(validity, "VALID_LIVE")
+        self.assertIsNone(reason)
+
+        evidence = analyze.load_trial_from_json(result_path)
+        self.assertEqual(evidence.validity_category, "VALID_LIVE")
+        self.assertAlmostEqual(evidence.t_connect_ms, 25.5)
+        self.assertAlmostEqual(evidence.t_setup_total_ms, 30.0)
+        self.assertAlmostEqual(evidence.syn_to_synack_ms, 22.0)
+        self.assertAlmostEqual(evidence.dns_query_to_first_payload_ms, 65.0)
+        self.assertAlmostEqual(evidence.dns_last_positive_response_to_first_payload_ms, 45.0)
+        self.assertIsInstance(evidence.primary_flow, dict)
+        self.assertEqual(len(evidence.dns_transactions), 1)
+        self.assertEqual(len(evidence.https_svcb_queries), 1)
+
+    def test_schema_1_0_0_backward_compatibility(self):
+        """Schema 1.0.0 record validates and loads correctly with fallback metrics."""
+        trial_dict = _create_synthetic_trial(trial_id="trial-test-c1-100", scenario_id="S0", setup_time_ms=21.5)
+        trial_dict["schema_version"] = "1.0.0"
+
+        result_path = self.temp_dir / "result.json"
+        result_path.write_text(json.dumps(trial_dict), encoding="utf-8")
+
+        validity, reason = analyze.validate_trial_record(trial_dict, result_path)
+        self.assertEqual(validity, "VALID_LIVE")
+        self.assertIsNone(reason)
+
+        evidence = analyze.load_trial_from_json(result_path)
+        self.assertEqual(evidence.validity_category, "VALID_LIVE")
+        self.assertAlmostEqual(evidence.connection_setup_time_ms, 21.5)
+
+    def test_fail_closed_unsupported_schema_versions(self):
+        """Any schema version outside {1.0.0, 1.1.0} fails closed as CORRUPTED_RECORD."""
+        invalid_versions = ["1.0.1", "1.2.0", "2.0.0", "0.9.0", "", None, 1.1, 1]
+        for bad_ver in invalid_versions:
+            trial_dict = _create_synthetic_trial(trial_id=f"trial-bad-{bad_ver}")
+            trial_dict["schema_version"] = bad_ver
+
+            result_path = self.temp_dir / f"result_{bad_ver}.json"
+            validity, reason = analyze.validate_trial_record(trial_dict, result_path)
+            self.assertEqual(validity, "CORRUPTED_RECORD", f"Failed to reject invalid version: {bad_ver}")
+            self.assertIn("Schema version mismatch", reason)
+
+    def test_null_preservation_not_coerced_to_zero(self):
+        """Incomplete handshakes retain explicit nulls and null reasons without zero coercion."""
+        trial_dict = _create_synthetic_trial(trial_id="trial-null-test", scenario_id="S1")
+        trial_dict["schema_version"] = "1.1.0"
+        trial_dict["metrics"] = {
+            "t_connect_ms": None,
+            "t_setup_total_ms": None,
+            "syn_to_synack_ms": None,
+            "null_reasons": {
+                "t_connect_ms": "INDETERMINATE_NO_FINAL_ACK",
+                "syn_to_synack_ms": "INDETERMINATE_NO_SYNACK"
+            }
+        }
+        trial_dict["primary_flow"] = {
+            "stream_id": "0",
+            "family": "IPv6",
+            "t_connect_ms": None,
+            "t_setup_total_ms": None,
+            "syn_to_synack_ms": None,
+        }
+        result_path = self.temp_dir / "result_null.json"
+        result_path.write_text(json.dumps(trial_dict), encoding="utf-8")
+
+        evidence = analyze.load_trial_from_json(result_path)
+        self.assertIsNone(evidence.t_connect_ms)
+        self.assertIsNone(evidence.t_setup_total_ms)
+        self.assertIsNone(evidence.syn_to_synack_ms)
+        self.assertIsNotNone(evidence.null_reasons)
+        self.assertEqual(evidence.null_reasons.get("t_connect_ms"), "INDETERMINATE_NO_FINAL_ACK")
+        self.assertEqual(evidence.null_reasons.get("syn_to_synack_ms"), "INDETERMINATE_NO_SYNACK")
+
+    # =========================================================================
+    # DEFECT-C1-CHALLENGE-01 Regression Suite: Deep Field Type Enforcement
+    # =========================================================================
+
+    def test_validation_rejects_string_metrics_as_corrupted(self):
+        """
+        DEFECT-C1-CHALLENGE-01: Verifies that trial records containing non-numeric strings
+        (or other non-null, non-numeric types) in numeric metric fields fail closed.
+        They must evaluate to ('CORRUPTED_RECORD', ...) in validate_trial_record,
+        load with validity_category='CORRUPTED_RECORD' in load_trial_from_json,
+        and be strictly excluded from VALID_LIVE.
+        """
+        test_cases = [
+            ("metrics", "t_connect_ms", "twenty", "String representation in metrics.t_connect_ms"),
+            ("metrics", "t_connect_ms", "", "Empty string in metrics.t_connect_ms"),
+            ("metrics", "t_connect_ms", "25.5ms", "String with units in metrics.t_connect_ms"),
+            ("metrics", "t_connect_ms", {"bad": "type"}, "Dictionary in metrics.t_connect_ms"),
+            ("metrics", "t_connect_ms", [25.5], "List in metrics.t_connect_ms"),
+            ("metrics", "t_setup_total_ms", "thirty", "String in metrics.t_setup_total_ms"),
+            ("metrics", "syn_to_synack_ms", "invalid", "String in metrics.syn_to_synack_ms"),
+            ("metrics", "connection_attempt_delay_ms", "cad_string", "String in metrics.connection_attempt_delay_ms"),
+            ("metrics", "dns_query_to_first_payload_ms", "payload_delay", "String in metrics.dns_query_to_first_payload_ms"),
+            ("metrics", "dns_last_positive_response_to_first_payload_ms", "late", "String in metrics.dns_last_positive_response_to_first_payload_ms"),
+            ("metrics", "dns_resolution_time_ms", "five", "String in metrics.dns_resolution_time_ms"),
+            ("metrics", "dns_latency_a_ms", "five", "String in metrics.dns_latency_a_ms"),
+            ("metrics", "dns_latency_aaaa_ms", "five", "String in metrics.dns_latency_aaaa_ms"),
+            ("primary_flow", "t_connect_ms", "twenty", "String in primary_flow.t_connect_ms"),
+            ("primary_flow", "t_setup_total_ms", "thirty", "String in primary_flow.t_setup_total_ms"),
+            ("primary_flow", "syn_to_synack_ms", "bad", "String in primary_flow.syn_to_synack_ms"),
+            ("network_observations", "connection_setup_time_ms", "fast", "String in network_observations.connection_setup_time_ms"),
+            ("network_observations", "connection_attempt_delay_ms", "delayed", "String in network_observations.connection_attempt_delay_ms"),
+        ]
+
+        for idx, (section, field, bad_val, desc) in enumerate(test_cases):
+            trial = _create_synthetic_trial(trial_id=f"corrupt-metric-{idx}", scenario_id="S0")
+            trial["schema_version"] = "1.1.0"
+            if "metrics" not in trial:
+                trial["metrics"] = {}
+            if "primary_flow" not in trial:
+                trial["primary_flow"] = {"stream_id": "0", "family": "IPv6"}
+
+            if section not in trial or not isinstance(trial[section], dict):
+                trial[section] = {}
+            trial[section][field] = bad_val
+
+            result_file = self.temp_dir / f"corrupt_metric_{idx}.json"
+            result_file.write_text(json.dumps(trial), encoding="utf-8")
+
+            # 1. validate_trial_record must reject fail-closed
+            validity, reason = analyze.validate_trial_record(trial, result_file)
+            self.assertEqual(
+                validity,
+                "CORRUPTED_RECORD",
+                f"Failed for {desc} ({section}.{field}={bad_val!r}): Expected CORRUPTED_RECORD, got {validity}"
+            )
+            self.assertIsNotNone(reason, f"Expected non-empty exclusion reason for {desc}")
+            self.assertNotEqual(validity, "VALID_LIVE", f"{desc} must never be classified as VALID_LIVE")
+
+            # 2. load_trial_from_json must load safely without unhandled exception and retain CORRUPTED_RECORD
+            evidence = analyze.load_trial_from_json(result_file)
+            self.assertEqual(
+                evidence.validity_category,
+                "CORRUPTED_RECORD",
+                f"Failed for {desc}: TrialEvidence validity_category must be CORRUPTED_RECORD, got {evidence.validity_category}"
+            )
+            self.assertIsNotNone(evidence.exclusion_reason)
+
+    test_deep_field_type_enforcement_string_in_numeric_metric_rejected = test_validation_rejects_string_metrics_as_corrupted
+    test_deep_field_type_validation_rejects_strings = test_validation_rejects_string_metrics_as_corrupted
+
+    def test_validation_rejects_boolean_metrics_as_corrupted(self):
+        """
+        DEFECT-C1-CHALLENGE-01: Verifies that boolean values (True/False) in numeric
+        metric fields are rejected as CORRUPTED_RECORD and NOT silently coerced to 1.0 or 0.0.
+        In Python, isinstance(True, int) is True, creating a dangerous silent coercion trap
+        where float(True) produces 1.0ms latency.
+        """
+        bool_cases = [
+            ("metrics", "t_connect_ms", True),
+            ("metrics", "t_connect_ms", False),
+            ("metrics", "t_setup_total_ms", True),
+            ("metrics", "syn_to_synack_ms", True),
+            ("metrics", "dns_latency_a_ms", True),
+            ("metrics", "dns_latency_aaaa_ms", False),
+            ("metrics", "dns_resolution_time_ms", True),
+            ("primary_flow", "t_connect_ms", True),
+            ("primary_flow", "t_setup_total_ms", False),
+            ("network_observations", "connection_setup_time_ms", True),
+            ("network_observations", "connection_attempt_delay_ms", False),
+        ]
+
+        for idx, (section, field, bool_val) in enumerate(bool_cases):
+            trial = _create_synthetic_trial(trial_id=f"bool-metric-{idx}", scenario_id="S0")
+            trial["schema_version"] = "1.1.0"
+            if "metrics" not in trial:
+                trial["metrics"] = {}
+            if "primary_flow" not in trial:
+                trial["primary_flow"] = {"stream_id": "0", "family": "IPv6"}
+
+            trial[section][field] = bool_val
+
+            result_file = self.temp_dir / f"bool_metric_{idx}.json"
+            result_file.write_text(json.dumps(trial), encoding="utf-8")
+
+            # 1. validate_trial_record must reject boolean as CORRUPTED_RECORD
+            validity, reason = analyze.validate_trial_record(trial, result_file)
+            self.assertEqual(
+                validity,
+                "CORRUPTED_RECORD",
+                f"Boolean {bool_val} in {section}.{field} was not rejected as CORRUPTED_RECORD (got {validity})"
+            )
+            self.assertIsNotNone(reason)
+
+            # 2. load_trial_from_json must not coerce True to 1.0 or False to 0.0
+            evidence = analyze.load_trial_from_json(result_file)
+            self.assertEqual(evidence.validity_category, "CORRUPTED_RECORD")
+
+            # Explicitly guard against silent float(True) coercion
+            if field == "t_connect_ms" and bool_val is True:
+                self.assertNotEqual(
+                    evidence.t_connect_ms,
+                    1.0,
+                    "Silent coercion detected: Boolean True in t_connect_ms was coerced to 1.0"
+                )
+            if field == "connection_setup_time_ms" and bool_val is True:
+                self.assertNotEqual(
+                    evidence.connection_setup_time_ms,
+                    1.0,
+                    "Silent coercion detected: Boolean True in connection_setup_time_ms was coerced to 1.0"
+                )
+
+    test_deep_field_type_enforcement_boolean_rejected = test_validation_rejects_boolean_metrics_as_corrupted
+    test_deep_field_type_validation_rejects_booleans = test_validation_rejects_boolean_metrics_as_corrupted
+
+    def test_validation_rejects_invalid_packet_count_types(self):
+        """
+        DEFECT-C1-CHALLENGE-01: Verifies that non-int values in capture_metadata["packet_count"]
+        do not crash validate_trial_record with unhandled TypeError (e.g. '<=' not supported between str and int).
+        Non-integer packet counts must fail closed safely as CORRUPTED_RECORD.
+        """
+        bad_packet_counts = [
+            ("invalid_count_string", "Non-numeric string"),
+            ("120", "Numeric string"),
+            ("", "Empty string"),
+            (True, "Boolean True (would satisfy packet_count > 0 without bool guard)"),
+            (False, "Boolean False"),
+            (120.5, "Float packet count (packets must be discrete integers)"),
+            ({"count": 100}, "Dictionary packet count"),
+            ([100], "List packet count"),
+        ]
+
+        for idx, (bad_cnt, desc) in enumerate(bad_packet_counts):
+            trial = _create_synthetic_trial(trial_id=f"bad-pkt-{idx}", scenario_id="S0")
+            trial["schema_version"] = "1.1.0"
+            trial["capture_metadata"]["packet_count"] = bad_cnt
+
+            result_file = self.temp_dir / f"bad_pkt_{idx}.json"
+            result_file.write_text(json.dumps(trial), encoding="utf-8")
+
+            # 1. validate_trial_record must not raise TypeError or any unhandled exception
+            try:
+                validity, reason = analyze.validate_trial_record(trial, result_file)
+            except Exception as exc:
+                self.fail(f"validate_trial_record crashed with {type(exc).__name__}: {exc} for {desc}")
+
+            self.assertEqual(
+                validity,
+                "CORRUPTED_RECORD",
+                f"Non-integer packet_count ({desc}) must be rejected as CORRUPTED_RECORD, got {validity}"
+            )
+            self.assertIsNotNone(reason)
+
+            # 2. load_trial_from_json must also succeed safely without crash
+            try:
+                evidence = analyze.load_trial_from_json(result_file)
+            except Exception as exc:
+                self.fail(f"load_trial_from_json crashed with {type(exc).__name__}: {exc} for {desc}")
+
+            self.assertEqual(evidence.validity_category, "CORRUPTED_RECORD")
+
+    test_deep_field_type_enforcement_packet_count_string_does_not_crash = test_validation_rejects_invalid_packet_count_types
+    test_packet_count_string_fails_closed_without_type_error = test_validation_rejects_invalid_packet_count_types
+
+    def test_loader_handles_corrupted_metrics_gracefully(self):
+        """
+        DEFECT-C1-CHALLENGE-01: Verifies conversion shielding and defense-in-depth in
+        load_trial_from_json. Even if unexpected types or corrupt values bypass or
+        occur outside validate_trial_record (e.g. status_code, browser duration,
+        or uncoerced metrics), load_trial_from_json catches the exception, avoids
+        crashing the process, and returns a safe CORRUPTED_RECORD TrialEvidence.
+        """
+        conversion_defect_cases = [
+            ({"http_outcome": {"status_code": "not_an_int", "success": True}}, "Corrupted status_code string"),
+            ({"browser": {"name": "chrome", "duration_ms": "slow"}}, "Corrupted browser duration string"),
+            ({"metrics": {"t_connect_ms": "cannot_convert"}}, "Corrupted metric string bypassing validation"),
+            ({"network_observations": {"connection_attempt_delay_ms": "bad_float"}}, "Corrupted CAD string"),
+        ]
+
+        for idx, (override_dict, desc) in enumerate(conversion_defect_cases):
+            trial = _create_synthetic_trial(trial_id=f"shield-test-{idx}", scenario_id="S0")
+            trial["schema_version"] = "1.1.0"
+            for k, v in override_dict.items():
+                if isinstance(v, dict) and isinstance(trial.get(k), dict):
+                    trial[k].update(v)
+                else:
+                    trial[k] = v
+
+            result_file = self.temp_dir / f"shield_test_{idx}.json"
+            result_file.write_text(json.dumps(trial), encoding="utf-8")
+
+            try:
+                evidence = analyze.load_trial_from_json(result_file)
+            except Exception as exc:
+                self.fail(
+                    f"load_trial_from_json raised uncaught exception {type(exc).__name__}: {exc} for {desc}"
+                )
+
+            # Record must fail closed as CORRUPTED_RECORD
+            self.assertEqual(
+                evidence.validity_category,
+                "CORRUPTED_RECORD",
+                f"Expected CORRUPTED_RECORD for {desc}, got {evidence.validity_category}"
+            )
+            self.assertIsNotNone(evidence.exclusion_reason)
+
+    test_load_trial_from_json_shields_unhandled_type_conversions = test_loader_handles_corrupted_metrics_gracefully
+
+    def test_directory_loader_isolates_corrupted_files(self):
+        """
+        DEFECT-C1-CHALLENGE-01: Verifies campaign directory scanning isolation.
+        When scanning a directory containing a mix of valid live trials and corrupted trials
+        (e.g. string metrics, non-int packet count, boolean metric), load_trials_from_directory
+        must not abort. It must load all trials, classifying valid ones as VALID_LIVE and
+        corrupted ones as CORRUPTED_RECORD, preventing pipeline interruption or data poisoning.
+        """
+        campaign_dir = self.temp_dir / "mixed_campaign"
+        campaign_dir.mkdir(parents=True, exist_ok=True)
+
+        # 1. Valid Trial A (VALID_LIVE)
+        trial_a_dir = campaign_dir / "trial_01"
+        trial_a_dir.mkdir()
+        trial_a = _create_synthetic_trial(trial_id="trial-01", scenario_id="S0")
+        trial_a["schema_version"] = "1.1.0"
+        trial_a["metrics"] = {"t_connect_ms": 20.0, "t_setup_total_ms": 20.0, "syn_to_synack_ms": 19.0, "null_reasons": {}}
+        trial_a["primary_flow"] = {"stream_id": "0", "family": "IPv6", "t_connect_ms": 20.0, "t_setup_total_ms": 20.0, "syn_to_synack_ms": 19.0}
+        (trial_a_dir / "result.json").write_text(json.dumps(trial_a), encoding="utf-8")
+
+        # 2. Corrupted Trial B (String in metric: t_connect_ms = "twenty")
+        trial_b_dir = campaign_dir / "trial_02"
+        trial_b_dir.mkdir()
+        trial_b = _create_synthetic_trial(trial_id="trial-02", scenario_id="S0")
+        trial_b["schema_version"] = "1.1.0"
+        trial_b["metrics"] = {"t_connect_ms": "twenty", "t_setup_total_ms": 25.0}
+        (trial_b_dir / "result.json").write_text(json.dumps(trial_b), encoding="utf-8")
+
+        # 3. Corrupted Trial C (Non-int packet_count: "invalid")
+        trial_c_dir = campaign_dir / "trial_03"
+        trial_c_dir.mkdir()
+        trial_c = _create_synthetic_trial(trial_id="trial-03", scenario_id="S0")
+        trial_c["schema_version"] = "1.1.0"
+        trial_c["capture_metadata"]["packet_count"] = "invalid_count"
+        (trial_c_dir / "result.json").write_text(json.dumps(trial_c), encoding="utf-8")
+
+        # 4. Corrupted Trial D (Boolean metric: True in t_connect_ms)
+        trial_d_dir = campaign_dir / "trial_04"
+        trial_d_dir.mkdir()
+        trial_d = _create_synthetic_trial(trial_id="trial-04", scenario_id="S0")
+        trial_d["schema_version"] = "1.1.0"
+        trial_d["metrics"] = {"t_connect_ms": True}
+        (trial_d_dir / "result.json").write_text(json.dumps(trial_d), encoding="utf-8")
+
+        # 5. Valid Trial E (VALID_LIVE)
+        trial_e_dir = campaign_dir / "trial_05"
+        trial_e_dir.mkdir()
+        trial_e = _create_synthetic_trial(trial_id="trial-05", scenario_id="S0")
+        trial_e["schema_version"] = "1.1.0"
+        trial_e["metrics"] = {"t_connect_ms": 30.0, "t_setup_total_ms": 30.0, "syn_to_synack_ms": 29.0, "null_reasons": {}}
+        trial_e["primary_flow"] = {"stream_id": "0", "family": "IPv6", "t_connect_ms": 30.0, "t_setup_total_ms": 30.0, "syn_to_synack_ms": 29.0}
+        (trial_e_dir / "result.json").write_text(json.dumps(trial_e), encoding="utf-8")
+
+        # Execute directory scan
+        try:
+            loaded_trials = analyze.load_trials_from_directory(campaign_dir)
+        except Exception as exc:
+            self.fail(f"load_trials_from_directory crashed on mixed directory: {type(exc).__name__}: {exc}")
+
+        # Assert all 5 trials were scanned and ingested
+        self.assertEqual(len(loaded_trials), 5, f"Expected 5 trials loaded, got {len(loaded_trials)}")
+
+        # Verify separation of validity categories
+        valid_live = [t for t in loaded_trials if t.validity_category == "VALID_LIVE"]
+        corrupted = [t for t in loaded_trials if t.validity_category == "CORRUPTED_RECORD"]
+
+        self.assertEqual(len(valid_live), 2, f"Expected exactly 2 VALID_LIVE trials, got {len(valid_live)}")
+        self.assertEqual(len(corrupted), 3, f"Expected exactly 3 CORRUPTED_RECORD trials, got {len(corrupted)}")
+
+        # Verify valid trials metrics remain pure and uncorrupted
+        valid_t_connect = [t.t_connect_ms for t in valid_live]
+        self.assertEqual(valid_t_connect, [20.0, 30.0])
+        mean_t_connect = sum(valid_t_connect) / len(valid_t_connect)
+        self.assertAlmostEqual(mean_t_connect, 25.0)
+
+        # Verify corrupted trials did not pollute valid set and contain exclusion reasons
+        for bad_t in corrupted:
+            self.assertIsNotNone(bad_t.exclusion_reason)
+
+    test_load_trials_from_directory_isolates_corrupted_record_without_crash = test_directory_loader_isolates_corrupted_files
+    test_directory_scan_survives_corrupted_records = test_directory_loader_isolates_corrupted_files
+
+
+class TestResearchCohortKeysAndUnifiedEnums(unittest.TestCase):
+    """
+    Unit tests for Finding C4-01 (Version-Aware Research Cohort Keys)
+    and Finding C2-02 (Canonical Shared Enums).
+    """
+
+    def test_canonical_enums_defined_and_string_compatible(self):
+        """Validates that all canonical enums match Metric Contract v1.1.0 specifications."""
+        # FallbackClassification
+        self.assertEqual(analyze.FallbackClassification.DIRECT_IPV6, "DIRECT_IPV6")
+        self.assertEqual(analyze.FallbackClassification.DIRECT_IPV4, "DIRECT_IPV4")
+        self.assertEqual(analyze.FallbackClassification.IPV6_TO_IPV4_FALLBACK, "IPV6_TO_IPV4_FALLBACK")
+        self.assertEqual(analyze.FallbackClassification.IPV4_TO_IPV6_FALLBACK, "IPV4_TO_IPV6_FALLBACK")
+        self.assertEqual(analyze.FallbackClassification.CONNECTION_FAILED, "CONNECTION_FAILED")
+        self.assertEqual(analyze.FallbackClassification.INCONCLUSIVE, "INCONCLUSIVE")
+
+        # TrialValidity
+        self.assertEqual(analyze.TrialValidity.VALID_LIVE, "VALID_LIVE")
+        self.assertEqual(analyze.TrialValidity.SIMULATION, "SIMULATION")
+        self.assertEqual(analyze.TrialValidity.CLEANUP_FAILURE, "CLEANUP_FAILURE")
+        self.assertEqual(analyze.TrialValidity.MEASUREMENT_FAILURE, "MEASUREMENT_FAILURE")
+        self.assertEqual(analyze.TrialValidity.CORRUPTED_RECORD, "CORRUPTED_RECORD")
+
+        # ConnectionOutcome
+        self.assertEqual(analyze.ConnectionOutcome.ESTABLISHED_PRIMARY, "ESTABLISHED_PRIMARY")
+        self.assertEqual(analyze.ConnectionOutcome.ESTABLISHED_ANCILLARY, "ESTABLISHED_ANCILLARY")
+        self.assertEqual(analyze.ConnectionOutcome.RESET, "RESET")
+        self.assertEqual(analyze.ConnectionOutcome.NO_SYNACK_TIMEOUT, "NO_SYNACK_TIMEOUT")
+        self.assertEqual(analyze.ConnectionOutcome.ABANDONED, "ABANDONED")
+        self.assertEqual(analyze.ConnectionOutcome.INDETERMINATE, "INDETERMINATE")
+
+        # EventSource
+        self.assertEqual(analyze.EventSource.HARNESS, "HARNESS")
+        self.assertEqual(analyze.EventSource.PCAP, "PCAP")
+        self.assertEqual(analyze.EventSource.BROWSER_TELEMETRY, "BROWSER_TELEMETRY")
+
+    def test_research_cohort_key_construction_and_serialization(self):
+        """Finding C4-01: Verifies composite cohort key hashing, serialization, and slug derivation."""
+        key = analyze.ResearchCohortKey(
+            browser_name="google-chrome",
+            browser_version="156.0.8078.73",
+            os_kernel="Linux-6.18.58.1",
+            host_class="wsl2_x86_64",
+            git_commit="7c6ab23",
+            condition_id="S0",
+            resolver_mode="in_lab_dns",
+        )
+
+        canonical = key.to_canonical_string()
+        self.assertEqual(
+            canonical,
+            "google-chrome:156.0.8078.73:Linux-6.18.58.1:wsl2_x86_64:7c6ab23:S0:in_lab_dns"
+        )
+
+        slug = key.to_short_slug()
+        self.assertEqual(slug, "google-chrome-156-wsl2_x86_64-s0")
+
+    def test_trial_evidence_cohort_key_derivation(self):
+        """Verifies make_research_cohort_key and TrialEvidence.get_research_cohort_key."""
+        evidence = analyze.TrialEvidence(
+            trial_id="trial-test-01",
+            scenario_id="S5",
+            scenario_name="ipv6_syn_loss_50pct",
+            browser_name="firefox",
+            browser_version="159.0",
+            execution_mode="LIVE",
+            is_simulation=False,
+            http_status_code=200,
+            http_success=True,
+            winning_address_family="IPv6",
+            winning_ip="2001:db8:2::10",
+            connection_setup_time_ms=25.0,
+            connection_attempt_delay_ms=None,
+            dns_latency_a_ms=5.0,
+            dns_latency_aaaa_ms=5.0,
+            dns_resolution_time_ms=5.0,
+            browser_duration_ms=1000.0,
+            packet_count=50,
+            pcap_valid=True,
+            pcap_sha256="abc",
+            scenario_restored=True,
+            baseline_verified=True,
+            cleanup_errors=[],
+            classification="DIRECT_IPV6",
+            classification_reason="Clean IPv6",
+            validity_category="VALID_LIVE",
+            exclusion_reason=None,
+            source_path="/tmp/test",
+            raw_dict={
+                "environment_metadata": {
+                    "os_kernel": "Linux-6.8.0",
+                    "host_class": "baremetal_linux_x86_64",
+                    "git_commit": "abcdef1",
+                    "resolver_mode": "delayed_dns",
+                }
+            }
+        )
+
+        cohort_key = evidence.get_research_cohort_key()
+        self.assertEqual(cohort_key.browser_name, "firefox")
+        self.assertEqual(cohort_key.browser_version, "159.0")
+        self.assertEqual(cohort_key.condition_id, "S5")
+        self.assertEqual(cohort_key.os_kernel, "Linux-6.8.0")
+        self.assertEqual(cohort_key.host_class, "baremetal_linux_x86_64")
+        self.assertEqual(cohort_key.to_short_slug(), "firefox-159-baremetal_linux_x86_64-s5")
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
