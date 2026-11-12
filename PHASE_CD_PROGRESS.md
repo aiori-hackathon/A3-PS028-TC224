@@ -1,9 +1,9 @@
 # PS-028 Happy Eyeballs Lab: Phase C + Phase D Progress Tracker
 
-- **Branch**: `regional/ps028-phase-cd`
+- **Branch**: `regional/phase-e-demo-readiness` (branched from `regional/ps028-phase-cd` @ `b920ebc93f2e6aaae8396b7095b6cd3c8598ade5`)
 - **Base Branch**: `regional/p0-remediation` @ commit `7c6ab23c2a378bbc8556fcc15f5911f626502576`
-- **Last Updated**: 2026-11-12T09:07:00Z
-- **Current Status**: **PHASE C SEALED & FULLY VERIFIED; PHASE D PAUSED (SIMULATION ONLY) BY OWNER DECISION**
+- **Last Updated**: 2026-11-12T13:14:00Z
+- **Current Status**: **PHASE C/D SEALED & VERIFIED; PHASE E DEMO-READINESS REMEDIATED (857 PASSING TESTS)**
 
 ---
 
@@ -76,21 +76,35 @@
   - [x] Unit test suite in `lab/test_research_sweeps.py` (6 tests passing)
   - [x] Batch D Gate Report sealed (`docs/phase-cd/gates/batch_d.md`) with explicit Rule R1 simulation disclosure
 
-- [x] **Milestone 7: Phase E (Submission Readiness E1–E5)** — **PASSED**
+- [x] **Milestone 7: Phase E (Demo-Readiness Remediation & Verification)** — **PASSED**
   - [x] Authored PS-028 compliance matrix (`docs/phase-cd/ps028-compliance-matrix.md`) mapping all 15 requirements to verifying evidence
-  - [x] Implemented prototype demonstration replay script (`lab/demo_replay.py`) replaying authentic PCAPs in < 5 seconds
+  - [x] Remediated prototype demonstration replay script (`lab/demo_replay.py`) expanding to 14 representative authentic PCAPs across S0-S6 x Chrome/Firefox
+  - [x] Eliminated fabricated fallbacks and truthiness zero bugs; enforced fail-closed validation on primary flow, 3-way handshake, and HTTP status
   - [x] Implemented canonical Happy Eyeballs connection racing pseudocode snippet (`lab/demo_replay.py --pseudocode`)
-  - [x] Verified repository hygiene: pinned root `requirements.txt`, updated `.gitignore`
-  - [x] Prepared owner administrative handover checklist (`docs/phase-cd/owner_handover_checklist.md`)
-  - [x] Verified 100% offline clean-clone test execution (824 passing tests total)
+  - [x] Built deterministic demonstration data bundle (`lab/build_demo_bundle.py`) reconciling 280 valid live trials, 2 exclusions, 765 flows, 95 S5 flows, and 28,330 timeline events into `lab/derived/phase-e/demo_bundle.json`
+  - [x] Generated machine-readable metric registry (`lab/derived/phase-e/metric_registry.json`) preserving canonical `connection_attempt_delay_ms` key
+  - [x] Implemented safe demonstration export utility (`lab/demo_export.py`) with spreadsheet formula-injection defense and realpath containment checks
+  - [x] Verified repository hygiene: updated `.gitignore`, corrected `README.md` metadata and video hyperlink text
+  - [x] Reconciled test snapshots across project history (857 total fresh passing tests)
+  - [x] Verified 100% offline clean test execution (857 passing tests total)
 
 ---
 
-## 2. Test Suite Counts
+## 2. Test Suite Counts & Reconciliation
 
-- **Class A (Deterministic Unit Tests in `lab/`)**: **731 passing** (0 errors, 0 failures, 0 skips) across 18 test modules
+- **Class A (Deterministic Unit Tests in `lab/`)**: **764 passing** (0 errors, 0 failures, 0 skips) across 21 test modules
 - **Class B (Synthetic & Fixture Tests in `tests/`)**: **93 passing** (0 errors, 0 failures, 0 skips) across 5 tiers
-- **Total Passing Automated Tests**: **824 tests (100% pass rate)**
+- **Total Passing Automated Tests**: **857 tests (100% pass rate)**
+
+### Documented Test Count Reconciliation Across Project History
+- **67 Tests (`TEST_READY.md`)**: Initial E2E synthetic testing track baseline covering Tiers 1–4 prior to Batch C5.
+- **818 Tests (`docs/phase-cd/gates/batch_c5.md`)**: Sealed historical gate report snapshot (725 in `lab/` + 93 in `tests/`) prior to Batch D simulation tests. Historical gate reports are preserved without modification.
+- **824 Tests (`regional/ps028-phase-cd` HEAD)**: Phase C/D baseline (731 in `lab/` + 93 in `tests/`), incorporating Batch D research sweep tests (`lab/test_research_sweeps.py`, +6 tests).
+- **857 Tests (`regional/phase-e-demo-readiness`)**: Current Phase E demo-readiness test count incorporating new dedicated readiness test suites:
+  - `lab/test_demo_replay.py` (+15 tests)
+  - `lab/test_demo_bundle.py` (+9 tests)
+  - `lab/test_demo_export.py` (+9 tests)
+  - 731 + 33 = 764 in `lab/` + 93 in `tests/` = **857 total passing tests**.
 
 ---
 

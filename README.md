@@ -6,9 +6,11 @@
 |-|-|
 |Campaign|`ps028-a10-live-20261030-01`|
 |Evidence and code baseline|Branch `a/lab-foundation` · commit [`002c4453d35d6760760c6a14d2e98618b024f1f2`](https://github.com/aiori-hackathon/A3-PS028-TC224/commit/002c4453d35d6760760c6a14d2e98618b024f1f2)|
+|Phase C/D analysis revision|Branch `regional/ps028-phase-cd` · commit [`b920ebc93f2e6aaae8396b7095b6cd3c8598ade5`](https://github.com/aiori-hackathon/A3-PS028-TC224/commit/b920ebc93f2e6aaae8396b7095b6cd3c8598ade5)|
+|Consolidation target|Branch `regional/p0-remediation` (PR base)|
 |Final technical report|[`PS028 Detailed Analysis & Report PDF.pdf`](PS028%20Detailed%20Analysis%20%26%20Report%20PDF.pdf)|
 |Team introduction|https://youtu.be/5LLxlW9f6r4?si=EQjgtt3bIgkQ4Nix|
-|Final Project Demonstration Video|[https://youtu.be/5LLxlW9f6r4?si=EQjgtt3bIgkQ4Nix](https://youtu.be/LYngp7dzoRI?si=1mPrapHizazV41zB)|
+|Final Project Demonstration Video|[https://youtu.be/LYngp7dzoRI?si=1mPrapHizazV41zB](https://youtu.be/LYngp7dzoRI?si=1mPrapHizazV41zB)|
 |Campaign evidence|[`lab/campaigns/ps028-a10-live-20261030-01/`](lab/campaigns/ps028-a10-live-20261030-01)|
 
 \---
@@ -160,9 +162,9 @@ S4 Firefox includes one direct-IPv6 main flow with a 600.95 ms SYN-to-SYN/ACK in
 |PCAP packet count / reported capture drops|36,225 / 0|
 |Primary `GET /` flows found|280 / 280|
 |Primary-flow / browser winner disagreements|0|
-|Recorded local test run|725 unit tests (lab/) + 93 E2E/adversarial tests (tests/); final test-runner status `OK` (100% pass)|
+|Recorded local test run|764 unit tests (lab/) + 93 E2E/adversarial tests (tests/) = 857 total; final test-runner status `OK` (100% pass)|
 
-The two excluded attempts were a Firefox S0 preflight baseline self-test failure (`Broken pipe`) and a Chrome S6 cleanup failure caused by a helper operation requiring root privileges. Both records remain in the evidence trail and were retried using unique trial IDs. The historical 400-test record reflects the initial baseline; the test suite has since expanded to 725 unit tests and 93 synthetic/adversarial tests, all passing cleanly offline.
+The two excluded attempts were a Firefox S0 preflight baseline self-test failure (`Broken pipe`) and a Chrome S6 cleanup failure caused by a helper operation requiring root privileges. Both records remain in the evidence trail and were retried using unique trial IDs. The historical 400-test record reflects the initial baseline; the test suite has since expanded through Phase C/D (731 unit + 93 synthetic) and Phase E demo readiness to 764 unit tests across 21 test modules and 93 synthetic/adversarial tests, all 857 passing cleanly offline.
 
 The complete evidence checksum index contains 1,411 checksum-indexed artifacts, reconciling the campaign execution log with the archived evidence. The complete archive and the portable analysis ZIP serve different purposes: the complete archive preserves captures and telemetry; the portable bundle provides the analysis inputs and code for offline regeneration.
 
@@ -198,7 +200,7 @@ The Chrome S2 observations below 10 ms are reported explicitly, but they do not 
 |[`lab/run\_campaign.py`](lab/run_campaign.py)|Campaign matrix orchestration and manifest management|
 |[`lab/run\_trial.py`](lab/run_trial.py)|Browser trial execution, PCAP parsing and classification|
 |[`lab/analyze.py`](lab/analyze.py)|Offline validation, statistics and analysis outputs|
-|[`lab/test\_\*.py`](lab/)|Test modules; offline suite contains 725 passing unit tests across 17 modules|
+|[`lab/test\_\*.py`](lab/)|Test modules; offline suite contains 764 passing unit tests across 21 modules|
 |[`lab/campaigns/ps028-a10-live-20261030-01/`](lab/campaigns/ps028-a10-live-20261030-01/)|Campaign manifest, trial results, captures, checksums, archives and summaries|
 |[`lab/logs/unit\_tests\_run.log`](lab/logs/unit_tests_run.log)|Recorded local test-run output|
 |[`lab/logs/ps028-a10-live-20261030-01.log`](lab/logs/ps028-a10-live-20261030-01.log)|Live campaign console log|
