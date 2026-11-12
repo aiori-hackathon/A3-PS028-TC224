@@ -1,0 +1,45 @@
+{
+  "replication_schema_version": "1.0.0",
+  "project_id": "A3-PS028-TC224",
+  "status": "PENDING_AUTHENTIC_PARTNER_EVIDENCE",
+  "governing_document": "docs/phase-d-experiment-protocol.md Section 6.2",
+  "amendment_compliance": ["A2", "A4", "A6", "A8", "A10", "A11", "A13"],
+  "authoritative_baseline_campaign": "ps028-a10-live-20261030-01",
+  "target_clients": [
+    {
+      "browser": "google-chrome",
+      "pinned_version": "156.0.8078.73",
+      "executable_path": "/usr/bin/google-chrome"
+    },
+    {
+      "browser": "firefox",
+      "pinned_version": "159.0",
+      "executable_path": "/usr/bin/firefox"
+    }
+  ],
+  "required_scenarios": [
+    {"scenario_id": "S0", "description": "Dual-stack healthy baseline (10ms RTT per link)", "repetitions": 20},
+    {"scenario_id": "S1", "description": "IPv6 SYN blackhole (unresponsive primary path)", "repetitions": 20},
+    {"scenario_id": "S2", "description": "IPv6 TCP RST rejection (active failure)", "repetitions": 20},
+    {"scenario_id": "S3", "description": "Symmetric link delay (100ms RTT)", "repetitions": 20},
+    {"scenario_id": "S4", "description": "Asymmetric link delay (IPv6 600ms, IPv4 10ms)", "repetitions": 20},
+    {"scenario_id": "S5", "description": "50% stochastic IPv6 SYN loss (exact binomial acceptance)", "repetitions": 20},
+    {"scenario_id": "S6", "description": "Delayed AAAA DNS resolution (500ms delay on AAAA)", "repetitions": 20}
+  ],
+  "planned_trial_count": 280,
+  "required_toolchain": {
+    "python_minimum": "3.10",
+    "iproute2_minimum": "6.1.0",
+    "nftables_minimum": "1.0.0",
+    "tshark_minimum": "4.0.0",
+    "nginx_minimum": "1.24.0"
+  },
+  "replication_partner": {
+    "partner_institution": "UNASSIGNED",
+    "operator_id": "PENDING",
+    "host_platform": "PENDING",
+    "kernel_version": "PENDING",
+    "execution_timestamp": null,
+    "evidence_archive_sha256": null
+  }
+}

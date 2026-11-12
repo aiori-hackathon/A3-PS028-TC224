@@ -51,7 +51,8 @@ import lab.concurrency as concurrency
 import lab.impair as impair
 import lab.run_trial as run_trial
 
-SCHEMA_VERSION = "1.0.0"
+SCHEMA_VERSION = "1.1.0"
+SUPPORTED_SCHEMA_VERSIONS = frozenset({"1.0.0", "1.1.0"})
 DEFAULT_SCENARIOS = ["S0", "S1", "S2", "S3", "S4", "S5", "S6"]
 DEFAULT_CAMPAIGNS_DIR = SCRIPT_DIR / "campaigns"
 MANIFEST_FILENAME = "campaign_manifest.json"
@@ -425,8 +426,8 @@ def validate_attempt_evidence(
     except Exception as e:
         return False, f"Failed to parse result.json: {e}", {}
 
-    if data.get("schema_version") != run_trial.SCHEMA_VERSION:
-        return False, f"Schema version mismatch: {data.get('schema_version')} != {run_trial.SCHEMA_VERSION}", data
+    if data.get("schema_version") not in SUPPORTED_SCHEMA_VERSIONS:
+        return False, f"Schema version mismatch: {data.get('schema_version')} not in {sorted(list(SUPPORTED_SCHEMA_VERSIONS))}", data
 
     if data.get("scenario_id") != expected_scenario:
         return False, f"Scenario mismatch in result: {data.get('scenario_id')} != {expected_scenario}", data
@@ -579,9 +580,9 @@ class CampaignManifest:
         except Exception as e:
             raise CampaignResumeError(f"Failed to read campaign manifest {manifest_path}: {e}")
 
-        if data.get("schema_version") != SCHEMA_VERSION:
+        if data.get("schema_version") not in SUPPORTED_SCHEMA_VERSIONS:
             raise CampaignResumeError(
-                f"Manifest schema version mismatch: {data.get('schema_version')} != {SCHEMA_VERSION}"
+                f"Manifest schema version mismatch: {data.get('schema_version')} not in {sorted(list(SUPPORTED_SCHEMA_VERSIONS))}"
             )
 
         config = data.get("configuration", {})

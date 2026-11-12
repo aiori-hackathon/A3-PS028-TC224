@@ -5692,5 +5692,475 @@ class TestTCPHandshakeVerificationRegression(unittest.TestCase):
         self.assertEqual(s0["handshake_state"], "CLOSED_BY_RESET")
 
 
+class TestPhaseC1HandshakeAndFlowCorrelationRegression(unittest.TestCase):
+    """
+    Milestone 2 Batch C1 Regression Tests:
+    - SYN-only incomplete handshake (null preservation)
+    - Missing final ACK (null preservation with INDETERMINATE_NO_FINAL_ACK)
+    - Valid 3-way handshake completion (RFC 9293 §3.5 t_connect_ms and Amendment A3 t_setup_total_ms)
+    - Retransmitted SYN invariance (initial SYN timestamp not advanced)
+    - Ancillary stream isolation (root document / or /index.html exclusively decides primary flow)
+    - Exact QNAME matching (normalized exact match vs loose substring)
+    - Duplicate dns.id handling via FIFO transaction queue
+    - Type 65 (HTTPS/SVCB) query isolation from A/AAAA distributions
+    - DNS query / last-positive-response to first payload latency metrics
+    - Schema 1.1.0 and compact primary_flow emission
+    """
+
+    def setUp(self):
+        self.temp_dir = Path(tempfile.mkdtemp(prefix="ps028_c1_regress_"))
+        self.pcap_file = self.temp_dir / "test.pcap"
+        header = struct.pack("<IHHIIII", 0xa1b2c3d4, 2, 4, 0, 0, 65535, 1)
+        self.pcap_file.write_bytes(header)
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def _make_tshark_line_c1(
+        self,
+        t_epoch: float = 10.0,
+        ip_src: str = "",
+        ip_dst: str = "",
+        ip6_src: str = "",
+        ip6_dst: str = "",
+        flags: str = "0x0002",
+        sport: int = 50000,
+        dport: int = 80,
+        dns_qname: str = "",
+        dns_qtype: str = "",
+        dns_resp: str = "",
+        dns_a: str = "",
+        dns_aaaa: str = "",
+        http_code: str = "",
+        stream: str = "0",
+        http_method: str = "",
+        http_uri: str = "",
+        seq_raw: int = 1000,
+        ack_raw: int = 0,
+        frame_num: int = 1,
+        tcp_len: int = 0,
+        http_response_in: str = "",
+        http_request_in: str = "",
+        dns_id: str = "",
+        dns_rcode: str = "",
+        udp_sport: str = "",
+        udp_dport: str = "",
+        dns_ancount: str = "",
+        dns_resp_name: str = "",
+    ) -> str:
+        fields = [
+            str(t_epoch), ip_src, ip_dst, ip6_src, ip6_dst, flags,
+            str(sport), str(dport), dns_qname, dns_qtype, dns_resp, dns_a, dns_aaaa,
+            http_code, stream, http_method, http_uri, str(seq_raw), str(ack_raw),
+            str(frame_num), str(tcp_len), http_response_in, http_request_in,
+            dns_id, dns_rcode, udp_sport, udp_dport, dns_ancount, dns_resp_name
+        ]
+        return "\t".join(fields)
+
+    @patch("shutil.which", return_value="/usr/bin/tshark")
+    @patch("subprocess.run")
+    def test_handshake_syn_only_preserves_explicit_nulls(self, mock_run, mock_which):
+        """SYN-only: Incomplete handshake retains explicit nulls with canonical reason codes."""
+        lines = [
+            self._make_tshark_line_c1(
+                t_epoch=10.00,
+                ip6_src="2001:db8:1::2",
+                ip6_dst=run_trial.SERVER_IPV6,
+                flags="0x0002",
+                sport=50000,
+                dport=80,
+                stream="0",
+                seq_raw=1000,
+                ack_raw=0,
+                frame_num=1,
+            )
+        ]
+        mock_proc = MagicMock()
+        mock_proc.stdout = "\n".join(lines) + "\n"
+        mock_run.return_value = mock_proc
+
+        dissection = run_trial.dissect_pcap(self.pcap_file, "trial.he.test")
+        s0 = dissection["tcp_streams"]["0"]
+        self.assertFalse(s0["tcp_handshake_completed"])
+        self.assertIsNone(s0["t_connect_ms"])
+        self.assertIsNone(s0["t_setup_total_ms"])
+        self.assertIsNone(s0["syn_to_synack_ms"])
+        self.assertEqual(s0["null_reasons"]["syn_to_synack_ms"], "INDETERMINATE_NO_SYNACK")
+        self.assertEqual(s0["null_reasons"]["t_connect_ms"], "INDETERMINATE_NO_SYNACK")
+        self.assertEqual(s0["null_reasons"]["t_setup_total_ms"], "INDETERMINATE_NO_SYNACK")
+
+    @patch("shutil.which", return_value="/usr/bin/tshark")
+    @patch("subprocess.run")
+    def test_handshake_missing_final_ack_preserves_explicit_null(self, mock_run, mock_which):
+        """Missing final ACK: syn_to_synack_ms calculated, but t_connect_ms remains null."""
+        lines = [
+            self._make_tshark_line_c1(
+                t_epoch=10.00,
+                ip6_src="2001:db8:1::2",
+                ip6_dst=run_trial.SERVER_IPV6,
+                flags="0x0002",
+                sport=50000,
+                dport=80,
+                stream="0",
+                seq_raw=1000,
+                ack_raw=0,
+                frame_num=1,
+            ),
+            self._make_tshark_line_c1(
+                t_epoch=10.02,
+                ip6_src=run_trial.SERVER_IPV6,
+                ip6_dst="2001:db8:1::2",
+                flags="0x0012",
+                sport=80,
+                dport=50000,
+                stream="0",
+                seq_raw=5000,
+                ack_raw=1001,
+                frame_num=2,
+            ),
+        ]
+        mock_proc = MagicMock()
+        mock_proc.stdout = "\n".join(lines) + "\n"
+        mock_run.return_value = mock_proc
+
+        dissection = run_trial.dissect_pcap(self.pcap_file, "trial.he.test")
+        s0 = dissection["tcp_streams"]["0"]
+        self.assertFalse(s0["tcp_handshake_completed"])
+        self.assertAlmostEqual(s0["syn_to_synack_ms"], 20.0, places=2)
+        self.assertIsNone(s0["t_connect_ms"])
+        self.assertIsNone(s0["t_setup_total_ms"])
+        self.assertEqual(s0["null_reasons"]["t_connect_ms"], "INDETERMINATE_NO_FINAL_ACK")
+        self.assertEqual(s0["null_reasons"]["t_setup_total_ms"], "INDETERMINATE_NO_FINAL_ACK")
+
+    @patch("shutil.which", return_value="/usr/bin/tshark")
+    @patch("subprocess.run")
+    def test_handshake_valid_three_way_completion(self, mock_run, mock_which):
+        """Completed 3-way handshake: t_connect_ms, t_setup_total_ms, and syn_to_synack_ms all populated."""
+        lines = [
+            self._make_tshark_line_c1(
+                t_epoch=10.00,
+                ip6_src="2001:db8:1::2",
+                ip6_dst=run_trial.SERVER_IPV6,
+                flags="0x0002",
+                sport=50000,
+                dport=80,
+                stream="0",
+                seq_raw=1000,
+                ack_raw=0,
+                frame_num=1,
+            ),
+            self._make_tshark_line_c1(
+                t_epoch=10.025,
+                ip6_src=run_trial.SERVER_IPV6,
+                ip6_dst="2001:db8:1::2",
+                flags="0x0012",
+                sport=80,
+                dport=50000,
+                stream="0",
+                seq_raw=5000,
+                ack_raw=1001,
+                frame_num=2,
+            ),
+            self._make_tshark_line_c1(
+                t_epoch=10.030,
+                ip6_src="2001:db8:1::2",
+                ip6_dst=run_trial.SERVER_IPV6,
+                flags="0x0010",
+                sport=50000,
+                dport=80,
+                stream="0",
+                seq_raw=1001,
+                ack_raw=5001,
+                frame_num=3,
+            ),
+        ]
+        mock_proc = MagicMock()
+        mock_proc.stdout = "\n".join(lines) + "\n"
+        mock_run.return_value = mock_proc
+
+        dissection = run_trial.dissect_pcap(self.pcap_file, "trial.he.test")
+        s0 = dissection["tcp_streams"]["0"]
+        self.assertTrue(s0["tcp_handshake_completed"])
+        self.assertAlmostEqual(s0["syn_to_synack_ms"], 25.0, places=2)
+        self.assertAlmostEqual(s0["t_connect_ms"], 30.0, places=2)
+        self.assertAlmostEqual(s0["t_setup_total_ms"], 30.0, places=2)
+        self.assertNotIn("t_connect_ms", s0["null_reasons"])
+
+    @patch("shutil.which", return_value="/usr/bin/tshark")
+    @patch("subprocess.run")
+    def test_handshake_wrong_ack_seq_ignored(self, mock_run, mock_which):
+        """ACK with unexpected sequence does NOT complete handshake."""
+        lines = [
+            self._make_tshark_line_c1(
+                t_epoch=10.00,
+                ip6_src="2001:db8:1::2",
+                ip6_dst=run_trial.SERVER_IPV6,
+                flags="0x0002",
+                sport=50000,
+                dport=80,
+                stream="0",
+                seq_raw=1000,
+                ack_raw=0,
+                frame_num=1,
+            ),
+            self._make_tshark_line_c1(
+                t_epoch=10.02,
+                ip6_src=run_trial.SERVER_IPV6,
+                ip6_dst="2001:db8:1::2",
+                flags="0x0012",
+                sport=80,
+                dport=50000,
+                stream="0",
+                seq_raw=5000,
+                ack_raw=1001,
+                frame_num=2,
+            ),
+            self._make_tshark_line_c1(
+                t_epoch=10.03,
+                ip6_src="2001:db8:1::2",
+                ip6_dst=run_trial.SERVER_IPV6,
+                flags="0x0010",
+                sport=50000,
+                dport=80,
+                stream="0",
+                seq_raw=1001,
+                ack_raw=9999,  # Mismatched ACK sequence
+                frame_num=3,
+            ),
+        ]
+        mock_proc = MagicMock()
+        mock_proc.stdout = "\n".join(lines) + "\n"
+        mock_run.return_value = mock_proc
+
+        dissection = run_trial.dissect_pcap(self.pcap_file, "trial.he.test")
+        s0 = dissection["tcp_streams"]["0"]
+        self.assertFalse(s0["tcp_handshake_completed"])
+        self.assertIsNone(s0["t_connect_ms"])
+        self.assertEqual(s0["null_reasons"]["t_connect_ms"], "INDETERMINATE_NO_FINAL_ACK")
+
+    @patch("shutil.which", return_value="/usr/bin/tshark")
+    @patch("subprocess.run")
+    def test_retransmitted_syn_invariance(self, mock_run, mock_which):
+        """Retransmitted SYN increments retransmitted_syn_count without advancing initial SYN timestamp."""
+        lines = [
+            # Frame 1: Initial SYN at t=10.00
+            self._make_tshark_line_c1(
+                t_epoch=10.00,
+                ip6_src="2001:db8:1::2",
+                ip6_dst=run_trial.SERVER_IPV6,
+                flags="0x0002",
+                sport=50000,
+                dport=80,
+                stream="0",
+                seq_raw=1000,
+                ack_raw=0,
+                frame_num=1,
+            ),
+            # Frame 2: Retransmitted SYN at t=10.50
+            self._make_tshark_line_c1(
+                t_epoch=10.50,
+                ip6_src="2001:db8:1::2",
+                ip6_dst=run_trial.SERVER_IPV6,
+                flags="0x0002",
+                sport=50000,
+                dport=80,
+                stream="0",
+                seq_raw=1000,
+                ack_raw=0,
+                frame_num=2,
+            ),
+            # Frame 3: Server SYN-ACK at t=10.52
+            self._make_tshark_line_c1(
+                t_epoch=10.52,
+                ip6_src=run_trial.SERVER_IPV6,
+                ip6_dst="2001:db8:1::2",
+                flags="0x0012",
+                sport=80,
+                dport=50000,
+                stream="0",
+                seq_raw=5000,
+                ack_raw=1001,
+                frame_num=3,
+            ),
+            # Frame 4: Client final ACK at t=10.54
+            self._make_tshark_line_c1(
+                t_epoch=10.54,
+                ip6_src="2001:db8:1::2",
+                ip6_dst=run_trial.SERVER_IPV6,
+                flags="0x0010",
+                sport=50000,
+                dport=80,
+                stream="0",
+                seq_raw=1001,
+                ack_raw=5001,
+                frame_num=4,
+            ),
+        ]
+        mock_proc = MagicMock()
+        mock_proc.stdout = "\n".join(lines) + "\n"
+        mock_run.return_value = mock_proc
+
+        dissection = run_trial.dissect_pcap(self.pcap_file, "trial.he.test")
+        s0 = dissection["tcp_streams"]["0"]
+        self.assertTrue(s0["tcp_handshake_completed"])
+        self.assertEqual(s0["retransmitted_syn_count"], 1)
+        # RFC 9293 §3.5: t_connect_ms measured strictly from initial SYN (10.00)
+        self.assertAlmostEqual(s0["t_connect_ms"], 540.0, places=2)
+        self.assertAlmostEqual(s0["syn_to_synack_ms"], 520.0, places=2)
+
+    @patch("shutil.which", return_value="/usr/bin/tshark")
+    @patch("subprocess.run")
+    def test_ancillary_stream_isolation_favors_root_document(self, mock_run, mock_which):
+        """Stream carrying root document (GET /) exclusively decides primary flow over ancillary streams."""
+        lines = [
+            # Stream 0: Ancillary /favicon.ico request
+            self._make_tshark_line_c1(t_epoch=10.00, ip_src="10.0.1.2", ip_dst=run_trial.SERVER_IPV4, flags="0x0002", sport=40000, dport=80, stream="0", seq_raw=100, ack_raw=0, frame_num=1),
+            self._make_tshark_line_c1(t_epoch=10.01, ip_src=run_trial.SERVER_IPV4, ip_dst="10.0.1.2", flags="0x0012", sport=80, dport=40000, stream="0", seq_raw=500, ack_raw=101, frame_num=2),
+            self._make_tshark_line_c1(t_epoch=10.015, ip_src="10.0.1.2", ip_dst=run_trial.SERVER_IPV4, flags="0x0010", sport=40000, dport=80, stream="0", seq_raw=101, ack_raw=501, frame_num=3),
+            self._make_tshark_line_c1(t_epoch=10.016, ip_src="10.0.1.2", ip_dst=run_trial.SERVER_IPV4, flags="0x0018", sport=40000, dport=80, stream="0", seq_raw=101, ack_raw=501, frame_num=4, tcp_len=50, http_method="GET", http_uri="/favicon.ico", http_response_in="5"),
+            self._make_tshark_line_c1(t_epoch=10.02, ip_src=run_trial.SERVER_IPV4, ip_dst="10.0.1.2", flags="0x0018", sport=80, dport=40000, stream="0", seq_raw=501, ack_raw=151, frame_num=5, tcp_len=100, http_code="404", http_request_in="4"),
+
+            # Stream 1: Primary root document request (GET /)
+            self._make_tshark_line_c1(t_epoch=10.03, ip6_src="2001:db8:1::2", ip6_dst=run_trial.SERVER_IPV6, flags="0x0002", sport=50000, dport=80, stream="1", seq_raw=1000, ack_raw=0, frame_num=6),
+            self._make_tshark_line_c1(t_epoch=10.05, ip6_src=run_trial.SERVER_IPV6, ip6_dst="2001:db8:1::2", flags="0x0012", sport=80, dport=50000, stream="1", seq_raw=5000, ack_raw=1001, frame_num=7),
+            self._make_tshark_line_c1(t_epoch=10.055, ip6_src="2001:db8:1::2", ip6_dst=run_trial.SERVER_IPV6, flags="0x0010", sport=50000, dport=80, stream="1", seq_raw=1001, ack_raw=5001, frame_num=8),
+            self._make_tshark_line_c1(t_epoch=10.056, ip6_src="2001:db8:1::2", ip6_dst=run_trial.SERVER_IPV6, flags="0x0018", sport=50000, dport=80, stream="1", seq_raw=1001, ack_raw=5001, frame_num=9, tcp_len=50, http_method="GET", http_uri="/", http_response_in="10"),
+            self._make_tshark_line_c1(t_epoch=10.07, ip6_src=run_trial.SERVER_IPV6, ip6_dst="2001:db8:1::2", flags="0x0018", sport=80, dport=50000, stream="1", seq_raw=5001, ack_raw=1051, frame_num=10, tcp_len=200, http_code="200", http_request_in="9"),
+        ]
+        mock_proc = MagicMock()
+        mock_proc.stdout = "\n".join(lines) + "\n"
+        mock_run.return_value = mock_proc
+
+        dissection = run_trial.dissect_pcap(self.pcap_file, "trial.he.test")
+        self.assertEqual(dissection["main_http_flow"]["stream_id"], "1")
+        self.assertEqual(dissection["main_http_flow"]["http_uri"], "/")
+        self.assertEqual(dissection["main_http_flow"]["status_code"], 200)
+        self.assertEqual(dissection["primary_flow"]["stream_id"], "1")
+        self.assertEqual(dissection["primary_flow"]["family"], "IPv6")
+
+    @patch("shutil.which", return_value="/usr/bin/tshark")
+    @patch("subprocess.run")
+    def test_exact_qname_matching_vs_substring(self, mock_run, mock_which):
+        """Exact normalized QNAME matching prevents subdomains or similar strings from matching target hostname."""
+        lines = [
+            # Subdomain query/response: should be ignored by exact matching
+            self._make_tshark_line_c1(t_epoch=10.00, dns_qname="sub.trial.he.test", dns_qtype="1", dns_id="0x0001", udp_sport="53000", udp_dport="53"),
+            self._make_tshark_line_c1(t_epoch=10.01, dns_qname="sub.trial.he.test", dns_qtype="1", dns_resp="1", dns_a="10.0.1.99", dns_id="0x0001", udp_sport="53", udp_dport="53000"),
+            # Exact target query/response
+            self._make_tshark_line_c1(t_epoch=10.02, dns_qname="trial.he.test.", dns_qtype="1", dns_id="0x0002", udp_sport="53001", udp_dport="53"),
+            self._make_tshark_line_c1(t_epoch=10.03, dns_qname="trial.he.test.", dns_qtype="1", dns_resp="1", dns_a="10.0.2.10", dns_id="0x0002", udp_sport="53", udp_dport="53001"),
+        ]
+        mock_proc = MagicMock()
+        mock_proc.stdout = "\n".join(lines) + "\n"
+        mock_run.return_value = mock_proc
+
+        dissection = run_trial.dissect_pcap(self.pcap_file, "trial.he.test")
+        # Legacy queries array should only contain the matched query
+        queries = dissection["dns"]["queries"]
+        self.assertEqual(len(queries), 1)
+        self.assertEqual(queries[0]["qname"].rstrip("."), "trial.he.test")
+        responses = dissection["dns"]["responses"]
+        self.assertEqual(len(responses), 1)
+        self.assertEqual(responses[0]["address"], "10.0.2.10")
+
+    @patch("shutil.which", return_value="/usr/bin/tshark")
+    @patch("subprocess.run")
+    def test_duplicate_dns_id_fifo_pairing(self, mock_run, mock_which):
+        """Sequential DNS queries reusing the same transaction ID pair cleanly via FIFO queue."""
+        lines = [
+            # Tx 1: query and response
+            self._make_tshark_line_c1(t_epoch=10.00, dns_qname="trial.he.test", dns_qtype="1", dns_id="0x1234", udp_sport="50000", udp_dport="53"),
+            self._make_tshark_line_c1(t_epoch=10.02, dns_qname="trial.he.test", dns_qtype="1", dns_resp="1", dns_a="10.0.2.10", dns_id="0x1234", udp_sport="53", udp_dport="50000"),
+            # Tx 2: query and response reusing 0x1234
+            self._make_tshark_line_c1(t_epoch=10.05, dns_qname="trial.he.test", dns_qtype="1", dns_id="0x1234", udp_sport="50001", udp_dport="53"),
+            self._make_tshark_line_c1(t_epoch=10.08, dns_qname="trial.he.test", dns_qtype="1", dns_resp="1", dns_a="10.0.2.10", dns_id="0x1234", udp_sport="53", udp_dport="50001"),
+        ]
+        mock_proc = MagicMock()
+        mock_proc.stdout = "\n".join(lines) + "\n"
+        mock_run.return_value = mock_proc
+
+        dissection = run_trial.dissect_pcap(self.pcap_file, "trial.he.test")
+        txs = dissection["dns_transactions"]
+        self.assertEqual(len(txs), 2)
+        self.assertAlmostEqual(txs[0]["duration_ms"], 20.0, places=2)
+        self.assertAlmostEqual(txs[1]["duration_ms"], 30.0, places=2)
+
+    @patch("shutil.which", return_value="/usr/bin/tshark")
+    @patch("subprocess.run")
+    def test_type_65_https_svcb_isolation(self, mock_run, mock_which):
+        """Type 65 (HTTPS/SVCB) queries are routed to https_svcb_queries and excluded from A/AAAA distributions."""
+        lines = [
+            # Type 65 query/response
+            self._make_tshark_line_c1(t_epoch=10.00, dns_qname="trial.he.test", dns_qtype="65", dns_id="0x6565", udp_sport="50000", udp_dport="53"),
+            self._make_tshark_line_c1(t_epoch=10.01, dns_qname="trial.he.test", dns_qtype="65", dns_resp="1", dns_id="0x6565", udp_sport="53", udp_dport="50000"),
+            # Type 1 (A) query/response
+            self._make_tshark_line_c1(t_epoch=10.00, dns_qname="trial.he.test", dns_qtype="1", dns_id="0x0001", udp_sport="50001", udp_dport="53"),
+            self._make_tshark_line_c1(t_epoch=10.025, dns_qname="trial.he.test", dns_qtype="1", dns_resp="1", dns_a="10.0.2.10", dns_id="0x0001", udp_sport="53", udp_dport="50001"),
+        ]
+        mock_proc = MagicMock()
+        mock_proc.stdout = "\n".join(lines) + "\n"
+        mock_run.return_value = mock_proc
+
+        dissection = run_trial.dissect_pcap(self.pcap_file, "trial.he.test")
+        self.assertEqual(len(dissection["https_svcb_queries"]), 1)
+        self.assertEqual(dissection["https_svcb_queries"][0]["qtype"], "HTTPS")
+        self.assertAlmostEqual(dissection["dns_metrics"]["dns_latency_a_ms"], 25.0, places=2)
+
+    @patch("shutil.which", return_value="/usr/bin/tshark")
+    @patch("subprocess.run")
+    def test_dns_first_payload_latency_metrics(self, mock_run, mock_which):
+        """Extracts dns_query_to_first_payload_ms and dns_last_positive_response_to_first_payload_ms."""
+        lines = [
+            # DNS query and response
+            self._make_tshark_line_c1(t_epoch=10.00, dns_qname="trial.he.test", dns_qtype="1", dns_id="0x0001", udp_sport="50000", udp_dport="53"),
+            self._make_tshark_line_c1(t_epoch=10.02, dns_qname="trial.he.test", dns_qtype="1", dns_resp="1", dns_a="10.0.2.10", dns_id="0x0001", udp_sport="53", udp_dport="50000"),
+            # TCP Handshake on stream 0
+            self._make_tshark_line_c1(t_epoch=10.03, ip_src="10.0.1.2", ip_dst=run_trial.SERVER_IPV4, flags="0x0002", sport=40000, dport=80, stream="0", seq_raw=100, ack_raw=0, frame_num=3),
+            self._make_tshark_line_c1(t_epoch=10.04, ip_src=run_trial.SERVER_IPV4, ip_dst="10.0.1.2", flags="0x0012", sport=80, dport=40000, stream="0", seq_raw=500, ack_raw=101, frame_num=4),
+            self._make_tshark_line_c1(t_epoch=10.045, ip_src="10.0.1.2", ip_dst=run_trial.SERVER_IPV4, flags="0x0010", sport=40000, dport=80, stream="0", seq_raw=101, ack_raw=501, frame_num=5),
+            # HTTP Request and Response
+            self._make_tshark_line_c1(t_epoch=10.05, ip_src="10.0.1.2", ip_dst=run_trial.SERVER_IPV4, flags="0x0018", sport=40000, dport=80, stream="0", seq_raw=101, ack_raw=501, frame_num=6, tcp_len=50, http_method="GET", http_uri="/", http_response_in="7"),
+            self._make_tshark_line_c1(t_epoch=10.08, ip_src=run_trial.SERVER_IPV4, ip_dst="10.0.1.2", flags="0x0018", sport=80, dport=40000, stream="0", seq_raw=501, ack_raw=151, frame_num=7, tcp_len=200, http_code="200", http_request_in="6"),
+        ]
+        mock_proc = MagicMock()
+        mock_proc.stdout = "\n".join(lines) + "\n"
+        mock_run.return_value = mock_proc
+
+        dissection = run_trial.dissect_pcap(self.pcap_file, "trial.he.test")
+        metrics = dissection["metrics"]
+        self.assertAlmostEqual(metrics["dns_query_to_first_payload_ms"], 80.0, places=2)
+        self.assertAlmostEqual(metrics["dns_last_positive_response_to_first_payload_ms"], 60.0, places=2)
+
+    @patch("shutil.which", return_value="/usr/bin/tshark")
+    @patch("subprocess.run")
+    def test_schema_1_1_0_structure_emission(self, mock_run, mock_which):
+        """dissect_pcap emits schema 1.1.0 and compact primary_flow evidence object."""
+        lines = [
+            self._make_tshark_line_c1(
+                t_epoch=10.00,
+                ip6_src="2001:db8:1::2",
+                ip6_dst=run_trial.SERVER_IPV6,
+                flags="0x0002",
+                sport=50000,
+                dport=80,
+                stream="0",
+                seq_raw=1000,
+                ack_raw=0,
+                frame_num=1,
+            ),
+        ]
+        mock_proc = MagicMock()
+        mock_proc.stdout = "\n".join(lines) + "\n"
+        mock_run.return_value = mock_proc
+
+        dissection = run_trial.dissect_pcap(self.pcap_file, "trial.he.test")
+        self.assertEqual(dissection["schema_version"], "1.1.0")
+        self.assertIn("primary_flow", dissection)
+        self.assertIn("dns_transactions", dissection)
+        self.assertIn("https_svcb_queries", dissection)
+        self.assertIn("metrics", dissection)
+
+
 if __name__ == "__main__":
     unittest.main()
+

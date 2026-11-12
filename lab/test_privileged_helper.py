@@ -2345,5 +2345,190 @@ class TestS6PrivilegeBoundaryAndLifecycle(unittest.TestCase):
             self.assertTrue(mock_nft_clr.called, "nftables rules must be cleared on rollback")
 
 
+class TestPrivilegedHelperDNSCommands(unittest.TestCase):
+    """Regression tests for privileged helper DNS commands and bounds validation."""
+
+    def setUp(self):
+        self.temp_dir = Path(tempfile.mkdtemp(prefix="ps028_ph_dns_test_"))
+        self.config_file = self.temp_dir / "dns_config.json"
+        with open(impair.DNS_CONFIG_FILE, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+        with open(self.config_file, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, indent=2)
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    @patch("lab.impair.apply_dns_delays")
+    def test_apply_dns_strict_integer_bounds(self, mock_apply):
+        """TC-PH-DNS-01: Valid integer bounds succeed and return status OK."""
+        def fake_apply(*args, **kwargs):
+            cfg = impair.load_dns_config(self.config_file)
+            cfg.setdefault("rules", {}).setdefault("A", {})["delay_ms"] = kwargs.get("a_delay_ms", 0)
+            cfg.setdefault("rules", {}).setdefault("AAAA", {})["delay_ms"] = kwargs.get("aaaa_delay_ms", 500)
+            with open(self.config_file, "w", encoding="utf-8") as f:
+                json.dump(cfg, f, indent=2)
+        mock_apply.side_effect = fake_apply
+
+        res = priv_helper.apply_dns_delays_privileged(
+            a_delay_ms=0,
+            aaaa_delay_ms=500,
+            config_file=self.config_file
+        )
+        self.assertEqual(res["status"], "OK")
+        self.assertEqual(res["a_delay_ms"], 0)
+        self.assertEqual(res["aaaa_delay_ms"], 500)
+        mock_apply.assert_called_once()
+
+    def test_apply_dns_rejects_negative_integers(self):
+        """TC-PH-DNS-02: Negative delay rejected."""
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+            priv_helper.apply_dns_delays_privileged(
+                a_delay_ms=-10,
+                aaaa_delay_ms=500,
+                config_file=self.config_file
+            )
+        self.assertIn("between 0 and 2000", str(ctx.exception))
+
+    def test_apply_dns_rejects_excessive_delays(self):
+        """TC-PH-DNS-03: Excessive delay (>2000ms) rejected."""
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+            priv_helper.apply_dns_delays_privileged(
+                a_delay_ms=0,
+                aaaa_delay_ms=2500,
+                config_file=self.config_file
+            )
+        self.assertIn("between 0 and 2000", str(ctx.exception))
+
+    def test_apply_dns_rejects_shell_injections(self):
+        """TC-PH-DNS-04: Non-integer / shell injection string rejected by CLI parser."""
+        parser = priv_helper.build_parser()
+        with self.assertRaises(SystemExit):
+            parser.parse_args(["apply-dns", "--a-delay", "10; rm -rf /"])
+
+    @patch("lab.impair.apply_dns_delays", side_effect=impair.DNSConfirmationTimeoutError("SIGHUP timeout"))
+    def test_apply_dns_propagates_dns_reload_failure(self, mock_apply):
+        """TC-PH-DNS-05: Reload failure propagates as PrivilegedHelperError."""
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+            priv_helper.apply_dns_delays_privileged(
+                a_delay_ms=0,
+                aaaa_delay_ms=500,
+                config_file=self.config_file
+            )
+        self.assertIn("SIGHUP timeout", str(ctx.exception))
+
+    @patch("lab.impair.restore_dns_baseline", side_effect=impair.DNSSignalError("Signal refused"))
+    def test_restore_dns_propagates_dns_reload_failure(self, mock_restore):
+        """TC-PH-DNS-06: Restore failure propagates as PrivilegedHelperError."""
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+            priv_helper.restore_dns_privileged(
+                config_file=self.config_file
+            )
+        self.assertIn("Signal refused", str(ctx.exception))
+
+
+class TestPrivilegedHelperS5Commands(unittest.TestCase):
+    """Regression tests for privileged helper S5 counter setup, read, and measurement."""
+
+    @patch("lab.impair.execute_netns_cmd")
+    def test_setup_s5_counters_argv_validation(self, mock_cmd):
+        """TC-PH-S5-01: Validates interface and sets up nftables rules; rejects unallowlisted iface."""
+        mock_cmd.return_value = (0, "", "")
+        res = priv_helper.setup_s5_counters_privileged(
+            port=80,
+            target_ip="2001:db8:2::10",
+            client_ip="2001:db8:1::2",
+            oifname="ps028-rt-sv6"
+        )
+        self.assertEqual(res["status"], "OK")
+        mock_cmd.assert_called_once()
+
+        # Reject unallowlisted interface
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+            priv_helper.setup_s5_counters_privileged(
+                port=80,
+                target_ip="2001:db8:2::10",
+                client_ip="2001:db8:1::2",
+                oifname="eth0"
+            )
+        self.assertIn("not in allowlist", str(ctx.exception))
+
+    @patch("lab.impair.execute_netns_cmd")
+    def test_read_s5_counters_json_output(self, mock_cmd):
+        """TC-PH-S5-02: Returns JSON counters dictionary with atomic read."""
+        nft_json = {
+            "nftables": [
+                {"counter": {"family": "inet", "table": "ps028_impair", "name": "syn_total", "packets": 50}},
+                {"counter": {"family": "inet", "table": "ps028_impair", "name": "syn_dropped", "packets": 25}},
+                {"counter": {"family": "inet", "table": "ps028_impair", "name": "syn_not_dropped", "packets": 25}},
+            ]
+        }
+        mock_cmd.return_value = (0, json.dumps(nft_json), "")
+        res = priv_helper.read_s5_counters_privileged()
+        self.assertEqual(res["status"], "OK")
+        self.assertEqual(res["syn_total"], 50)
+        self.assertEqual(res["syn_dropped"], 25)
+        self.assertEqual(res["syn_not_dropped"], 25)
+
+    def test_measure_s5_bound_validation(self):
+        """TC-PH-S5-03: Rejects probe_count <= 0 or > 500, port <= 0, timeout <= 0."""
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+            priv_helper.measure_s5_privileged(probe_count=0)
+        self.assertIn("probe_count", str(ctx.exception))
+
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+            priv_helper.measure_s5_privileged(probe_count=1000)
+        self.assertIn("probe_count", str(ctx.exception))
+
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+            priv_helper.measure_s5_privileged(port=70000)
+        self.assertIn("port", str(ctx.exception))
+
+    def test_measure_s5_emits_valid_jsonl_records(self):
+        """TC-PH-S5-04: Multi-threaded probe worker emits valid JSONL records and summary."""
+        temp_dir = Path(tempfile.mkdtemp(prefix="ps028_s5_test_"))
+        jsonl_path = temp_dir / "s5_probes.jsonl"
+        try:
+            with patch("lab.privileged_helper.probe_single_socket") as mock_probe:
+                mock_probe.side_effect = lambda idx, ip, port, to, *args: {
+                    "probe_id": idx,
+                    "target_ip": ip,
+                    "target_port": port,
+                    "client_ip": "127.0.0.1",
+                    "client_port": 50000 + idx,
+                    "t_start": 100.0,
+                    "t_end": 100.1,
+                    "duration_ms": 100.0,
+                    "connect_outcome": "CONNECTED" if idx % 2 == 0 else "TIMEOUT",
+                    "outcome": "connected" if idx % 2 == 0 else "timeout",
+                    "errno": 0 if idx % 2 == 0 else 110,
+                    "err_str": None if idx % 2 == 0 else "Connection timed out"
+                }
+                res = priv_helper.measure_s5_privileged(
+                    target_ip="127.0.0.1",
+                    port=80,
+                    probe_count=10,
+                    timeout=0.1,
+                    concurrency=2,
+                    netns="ps028-cl",
+                    output_jsonl=jsonl_path,
+                    caller_holds_lock=False,
+                    lock_file=temp_dir / "test.lock",
+                    in_netns=True
+                )
+                self.assertEqual(res["status"], "OK")
+                self.assertEqual(res["probes_sent"], 10)
+                self.assertTrue(jsonl_path.exists())
+
+                lines = jsonl_path.read_text(encoding="utf-8").strip().splitlines()
+                self.assertEqual(len(lines), 10)
+                records = [json.loads(line) for line in lines]
+                self.assertEqual(records[0]["probe_id"], 0)
+                self.assertIn("outcome", records[0])
+                self.assertIn("duration_ms", records[0])
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main()

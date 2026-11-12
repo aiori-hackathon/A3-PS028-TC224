@@ -1,0 +1,5 @@
+# PS-028 Happy Eyeballs Measurement Lab Dependencies
+# The core measurement analyzer and evidence exporter use the Python standard library.
+# The scenario configuration parser requires PyYAML.
+
+PyYAML>=6.0.1

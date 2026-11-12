@@ -19,7 +19,7 @@ The measurement matrix comprised **280 planned cells** covering 7 scenarios (S0â
 
 Overall connection classification under the canonical PS-028 packet-based rule yielded **154 `DIRECT_IPV6`** connections (55.00%) and **126 `IPV6_TO_IPV4_FALLBACK`** connections (45.00%). Both browsers exhibited 100% IPv6 preference under healthy baseline conditions (S0) and successfully fell back to IPv4 under IPv6 SYN blackholing (S1) and IPv6 TCP RST rejection (S2). However, under delayed DNS AAAA resolution (S6), both Chrome and Firefox waited ~500ms for delayed AAAA responses rather than triggering an IPv4 fallback after the RFC 8305 recommended 50ms Resolution Delay (Section 3), subsequently connecting directly over IPv6. In Scenario S5 (50% SYN loss), 33 trials connected over IPv6 (including 5 trials with post-navigation ancillary or speculative IPv4 traffic) and 7 trials fell back to IPv4.
 
-All 280 valid trial PCAPs and result records were independently audited and verified against the finalized manifest. The testbed baseline state was validated clean. At the time this report was prepared, the lab test suite comprised **400 tests** and passed without errors; the expanded suite subsequently reached **523 passing tests** in the WSL validation on 2026-11-11.
+All 280 valid trial PCAPs and result records were independently audited and verified against the finalized manifest. The testbed baseline state was validated clean. The preflight baseline suite comprised 524 passing tests; following Phase C and D hardening, the offline verification suite comprises **725 unit tests** in `lab/` and **93 E2E/adversarial tests** in `tests/` (818 passing tests total, 0 errors, 0 failures), alongside 48 dedicated adversarial challenge tests.
 
 ---
 

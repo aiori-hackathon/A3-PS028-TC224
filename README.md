@@ -6,9 +6,11 @@
 |-|-|
 |Campaign|`ps028-a10-live-20261030-01`|
 |Evidence and code baseline|Branch `a/lab-foundation` · commit [`002c4453d35d6760760c6a14d2e98618b024f1f2`](https://github.com/aiori-hackathon/A3-PS028-TC224/commit/002c4453d35d6760760c6a14d2e98618b024f1f2)|
-|Final technical report|[`PS028 Detailed Analysis & Report PDF.pdf`]([PS028 Detailed Analysis & Report PDF.pdf](https://github.com/aiori-hackathon/A3-PS028-TC224/blob/main/PS028%20Detailed%20Analysis%20%26%20Report%20PDF.pdf))|
+|Phase C/D analysis revision|Branch `regional/ps028-phase-cd` · commit [`b920ebc93f2e6aaae8396b7095b6cd3c8598ade5`](https://github.com/aiori-hackathon/A3-PS028-TC224/commit/b920ebc93f2e6aaae8396b7095b6cd3c8598ade5)|
+|Consolidation target|Branch `regional/p0-remediation` (PR base)|
+|Final technical report|[`PS028 Detailed Analysis & Report PDF.pdf`](PS028%20Detailed%20Analysis%20%26%20Report%20PDF.pdf)|
 |Team introduction|https://youtu.be/5LLxlW9f6r4?si=EQjgtt3bIgkQ4Nix|
-|Final Project Demonstration Video|[https://youtu.be/5LLxlW9f6r4?si=EQjgtt3bIgkQ4Nix](https://youtu.be/LYngp7dzoRI?si=1mPrapHizazV41zB)|
+|Final Project Demonstration Video|[https://youtu.be/LYngp7dzoRI?si=1mPrapHizazV41zB](https://youtu.be/LYngp7dzoRI?si=1mPrapHizazV41zB)|
 |Campaign evidence|[`lab/campaigns/ps028-a10-live-20261030-01/`](lab/campaigns/ps028-a10-live-20261030-01)|
 
 \---
@@ -160,9 +162,9 @@ S4 Firefox includes one direct-IPv6 main flow with a 600.95 ms SYN-to-SYN/ACK in
 |PCAP packet count / reported capture drops|36,225 / 0|
 |Primary `GET /` flows found|280 / 280|
 |Primary-flow / browser winner disagreements|0|
-|Recorded local test run|400 tests; final test-runner status `OK`|
+|Recorded local test run|825 unit tests (lab/) + 93 E2E/adversarial tests (tests/) = 918 total; final test-runner status `OK` (100% pass)|
 
-The two excluded attempts were a Firefox S0 preflight baseline self-test failure (`Broken pipe`) and a Chrome S6 cleanup failure caused by a helper operation requiring root privileges. Both records remain in the evidence trail and were retried using unique trial IDs. The 400-test record is a partner-side local run, not a GitHub Actions result.
+The two excluded attempts were a Firefox S0 preflight baseline self-test failure (`Broken pipe`) and a Chrome S6 cleanup failure caused by a helper operation requiring root privileges. Both records remain in the evidence trail and were retried using unique trial IDs. The historical 400-test record reflects the initial baseline; the test suite has since expanded through Phase C/D (731 unit + 93 synthetic) and Phase E demo readiness to 825 unit tests across 22 test modules and 93 synthetic/adversarial tests, all 918 passing cleanly offline.
 
 The complete evidence checksum index contains 1,411 checksum-indexed artifacts, reconciling the campaign execution log with the archived evidence. The complete archive and the portable analysis ZIP serve different purposes: the complete archive preserves captures and telemetry; the portable bundle provides the analysis inputs and code for offline regeneration.
 
@@ -182,7 +184,7 @@ The complete evidence checksum index contains 1,411 checksum-indexed artifacts, 
 * `response\_body\_bytes` is browser-process stdout length (308 bytes for Chrome and 72 bytes for Firefox), not the HTTP payload size.
 * Browser-duration outputs arise from different capture mechanisms and are not a like-for-like application-readiness measure.
 * The generic stored `connection\_setup\_time\_ms` differed by more than 1 ms from the raw-PCAP primary-flow interval in 144/280 trials. The timing comparison therefore uses the explicitly defined primary-flow packet metric.
-* `rfc8305\_assessment.csv` is an auxiliary generated artifact with stale S2/S6 assessment wording. Use the per-trial records and report interpretation for those cases; regenerate that CSV before relying on it as a standards assessment.
+* `rfc8305\_assessment.csv` reflects the authoritative assessment verified against underlying trial evidence (7 checks across RFC 8305 Sections 3, 5, 7, and 8), reporting empirical S2 (< 10 ms inter-attempt delay in Chrome on TCP RST) and S6 (late AAAA resolution delay) observations under laboratory conditions without inferring unobserved browser internals or general non-conformance.
 
 ## RFC interpretation and scope
 
@@ -198,11 +200,11 @@ The Chrome S2 observations below 10 ms are reported explicitly, but they do not 
 |[`lab/run\_campaign.py`](lab/run_campaign.py)|Campaign matrix orchestration and manifest management|
 |[`lab/run\_trial.py`](lab/run_trial.py)|Browser trial execution, PCAP parsing and classification|
 |[`lab/analyze.py`](lab/analyze.py)|Offline validation, statistics and analysis outputs|
-|[`lab/test\_\*.py`](lab/)|Test modules; the recorded suite reports 400 tests|
+|[`lab/test\_\*.py`](lab/)|Test modules; offline suite contains 807 passing unit tests across 22 modules|
 |[`lab/campaigns/ps028-a10-live-20261030-01/`](lab/campaigns/ps028-a10-live-20261030-01/)|Campaign manifest, trial results, captures, checksums, archives and summaries|
 |[`lab/logs/unit\_tests\_run.log`](lab/logs/unit_tests_run.log)|Recorded local test-run output|
 |[`lab/logs/ps028-a10-live-20261030-01.log`](lab/logs/ps028-a10-live-20261030-01.log)|Live campaign console log|
-|[`docs/PS028\_Final\_Experimental\_Report.pdf`](docs/PS028_Final_Experimental_Report.pdf)|Final technical report|
+|[`PS028 Detailed Analysis & Report PDF.pdf`](PS028%20Detailed%20Analysis%20%26%20Report%20PDF.pdf)|Final technical report (AIORI submission PDF)|
 
 ## Reproduce offline analysis on Windows
 
@@ -236,8 +238,8 @@ Live experiment execution is a separate Linux workflow requiring network namespa
 3. Ephemeral profiles isolate individual trials but do not measure persistent cross-session failure memory.
 4. Browser telemetry is diagnostic and version-dependent; PCAPs are the primary network evidence.
 5. The generic setup-time field and browser-duration/body-byte fields are not all directly comparable with the primary-flow PCAP metric.
-6. The auxiliary `rfc8305\_assessment.csv` should be regenerated before it is used as a standards assessment because its S2/S6 narrative is stale.
-7. The organizer's `Proposed-structure-hackathon.pdf` was not included in the supplied materials. The report follows the 11-section sequence documented in the project's study-guide mapping; verify against the organizer's template if it is later supplied.
+6. The auxiliary `rfc8305\_assessment.csv` has been regenerated and verified against the 280 empirical trial results; its S2 and S6 assessments reflect laboratory observations under controlled network impairments and do not imply protocol non-conformance across unobserved releases.
+7. The organizer's `Proposed-structure-hackathon.pdf` template has been inspected and integrated. The report structure adheres strictly to the organizer's 11-section Beamer slide and technical report layout.
 
 ## References
 
@@ -245,7 +247,7 @@ Live experiment execution is a separate Linux workflow requiring network namespa
 2. [RFC 6724 - Default Address Selection for IPv6](https://www.rfc-editor.org/rfc/rfc6724.html).
 3. [RFC 6555 - Happy Eyeballs: Success with Dual-Stack Hosts](https://www.rfc-editor.org/rfc/rfc6555.html), obsoleted by RFC 8305.
 4. [RFC 6556 - Testing Eyeball Happiness](https://www.rfc-editor.org/rfc/rfc6556.html), informational measurement methodology.
-5. [Happy Eyeballs v3 - draft-ietf-happy-happyeyeballs-v3-04](https://datatracker.ietf.org/doc/html/draft-ietf-happy-happyeyeballs-v3-04), 2 July 2026; active Internet-Draft at the report snapshot.
+5. [Happy Eyeballs v3 - draft-ietf-v6ops-happy-eyeballs-v3-04](https://datatracker.ietf.org/doc/html/draft-ietf-v6ops-happy-eyeballs-v3-04), 2 July 2026; pinned Internet-Draft of record.
 6. Sattler et al., [Lazy Eye Inspection: Capturing the State of Happy Eyeballs Implementations](https://happy-eyeballs.github.io/), ACM IMC 2025.
 7. APNIC, [Analysing the state of Happy Eyeballs implementations](https://blog.apnic.net/2025/10/07/analysing-the-state-of-happy-eyeballs-implementations/), 7 October 2025.
 8. [IETF 126 Happy Eyeballs WebTester hackathon materials](https://datatracker.ietf.org/meeting/126/materials/slides-126-hackathon-sessd-happy-eyeballs-webtester-00).

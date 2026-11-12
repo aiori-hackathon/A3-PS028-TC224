@@ -1,11 +1,22 @@
-.idea
+# Python bytecode and caches
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.coverage
+.agents/
+
+# IDE files
+.idea/
+.vscode/
 
 setup/hosts-staging.yml
-# PS-028 lab runtime artifacts
+# PS-028 Phase E runtime exports
+lab/derived/phase-e/exports/
+
 lab/.lab.lock
 lab/.verify_dns.lock
 lab/.resolv_installed_by_ps028
-lab/__pycache__/
 lab/access.log
 lab/dns.log
 lab/dns_stderr.log
@@ -19,4 +30,5 @@ lab/.trials_failed_chromium/
 lab/trials/
 lab/campaigns/campaign-20261028*
 lab/campaigns/*/.campaign.lock
+
 

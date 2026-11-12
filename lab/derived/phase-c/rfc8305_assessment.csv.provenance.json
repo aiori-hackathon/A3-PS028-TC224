@@ -1,0 +1,18 @@
+{
+  "target_file": "rfc8305_assessment.csv",
+  "sha256": "f1f639aa6d0c96928be7f4cc49d45db44eb63b6af70b1945cdd1febca255d9e7",
+  "row_count": 7,
+  "generated_by_command": "python3 lab/export_campaign_evidence.py",
+  "git_commit": "7c6ab23c2a378bbc8556fcc15f5911f626502576",
+  "git_branch": "regional/ps028-phase-cd",
+  "python_version": "3.12.3",
+  "tshark_version": "4.2.2",
+  "tcpdump_version": "4.99.4",
+  "platform": "Linux-6.18.58.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+  "dissector_flags": [
+    "-o",
+    "tcp.relative_sequence_numbers:FALSE"
+  ],
+  "input_manifest": "lab/campaigns/ps028-a10-live-20261030-01/campaign_manifest.json",
+  "rederived_results_dir": "lab/derived/phase-c/rederived_results"
+}

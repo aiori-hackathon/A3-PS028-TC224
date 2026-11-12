@@ -1,0 +1,284 @@
+{
+  "schema_version": "1.1.0",
+  "trial_id": "trial-20261029215056-07a26797",
+  "campaign_id": "ps028-a10-live-20261030-01",
+  "scenario_id": "S0",
+  "scenario_name": "healthy_baseline",
+  "scenario_description": "Healthy baseline: 10ms netem delay on each server link (~20ms RTT), immediate DNS responses (0ms delay), no packet loss or drops",
+  "hostname": "trial-20261029215056-07a26797.he.test",
+  "target_url": "http://trial-20261029215056-07a26797.he.test/",
+  "browser_name": "google-chrome",
+  "browser_version": "Google Chrome 156.0.8078.73",
+  "execution_mode": "LIVE",
+  "is_simulation": false,
+  "validity_category": "VALID_LIVE",
+  "classification": "DIRECT_IPV6",
+  "classification_reason": "Direct IPv6 connection established successfully without IPv4 fallback.",
+  "timestamps": {
+    "start_time": "2026-10-29T21:50:56.433374+00:00",
+    "scenario_applied_time": "2026-10-29T21:51:01.085723+00:00",
+    "capture_start_time": "2026-10-29T21:51:01.085749+00:00",
+    "browser_start_time": "2026-10-29T21:51:01.238705+00:00",
+    "browser_end_time": "2026-10-29T21:51:02.429201+00:00",
+    "capture_stop_time": "2026-10-29T21:51:02.833438+00:00",
+    "baseline_restored_time": "2026-10-29T21:51:02.956089+00:00",
+    "end_time": "2026-10-29T21:51:07.731387+00:00",
+    "total_duration_ms": 11298.02
+  },
+  "browser": {
+    "name": "google-chrome",
+    "executable": "/usr/bin/google-chrome",
+    "version": "Google Chrome 156.0.8078.73",
+    "exit_code": 0,
+    "timed_out": false,
+    "duration_ms": 1181.56,
+    "profile_cleaned": true
+  },
+  "http_outcome": {
+    "status_code": 200,
+    "success": true,
+    "winning_address_family": "IPv6",
+    "winning_ip": "2001:db8:2::10",
+    "response_body_bytes": 308
+  },
+  "metrics": {
+    "t_connect_ms": 20.43,
+    "t_setup_total_ms": 20.43,
+    "syn_to_synack_ms": 20.34,
+    "connection_attempt_delay_ms": null,
+    "retransmitted_syn_count_ipv6": 0,
+    "retransmitted_syn_count_ipv4": 0,
+    "dns_query_to_first_payload_ms": 57.92,
+    "dns_last_positive_response_to_first_payload_ms": 43.9,
+    "dns_resolution_time_ms": 14.03,
+    "dns_latency_a_ms": 13.87,
+    "dns_latency_aaaa_ms": 13.03,
+    "null_reasons": {
+      "connection_attempt_delay_ms": "NOT_APPLICABLE_HEALTHY_PATH"
+    }
+  },
+  "primary_flow": {
+    "stream_id": "0",
+    "family": "IPv6",
+    "winning_family": "ipv6",
+    "client_endpoint": [
+      "2001:db8:1::2",
+      40888
+    ],
+    "server_endpoint": [
+      "2001:db8:2::10",
+      80
+    ],
+    "syn_frame": 117,
+    "syn_time": 1793310662.192064,
+    "syn_ack_frame": 119,
+    "syn_ack_time": 1793310662.212408,
+    "final_ack_frame": 120,
+    "final_ack_time": 1793310662.212495,
+    "handshake_completed": true,
+    "http_request_frame": 121,
+    "http_response_frame": 127,
+    "http_status_code": 200,
+    "pcap_sha256": "4ad3d07db2a23091c03e7eb1528e2fb284dc8748b18826ccb13908bc5c59704e",
+    "validity": "VALID",
+    "t_connect_ms": 20.43,
+    "t_setup_total_ms": 20.43,
+    "syn_to_synack_ms": 20.34
+  },
+  "dns_transactions": [
+    {
+      "dns_id": 52242,
+      "qname": "trial-20261029215056-07a26797.he.test",
+      "qtype": "AAAA",
+      "rcode": "NOERROR",
+      "transport": "UDP",
+      "query_frame": 112,
+      "query_time": 1793310662.176333,
+      "response_frame": 115,
+      "response_time": 1793310662.189364,
+      "duration_ms": 13.03,
+      "answers": [
+        "2001:db8:2::10"
+      ]
+    },
+    {
+      "dns_id": 52378,
+      "qname": "trial-20261029215056-07a26797.he.test",
+      "qtype": "A",
+      "rcode": "NOERROR",
+      "transport": "UDP",
+      "query_frame": 113,
+      "query_time": 1793310662.176486,
+      "response_frame": 116,
+      "response_time": 1793310662.190359,
+      "duration_ms": 13.87,
+      "answers": [
+        "10.0.2.10"
+      ]
+    }
+  ],
+  "https_svcb_queries": [
+    {
+      "dns_id": 53265,
+      "qname": "trial-20261029215056-07a26797.he.test",
+      "qtype": "HTTPS",
+      "rcode": "NOERROR",
+      "transport": "UDP",
+      "query_frame": 111,
+      "query_time": 1793310662.176035,
+      "response_frame": 114,
+      "response_time": 1793310662.177512,
+      "duration_ms": 1.48,
+      "answers": []
+    }
+  ],
+  "dns_metrics": {
+    "dns_transactions": [
+      {
+        "dns_id": 52242,
+        "qname": "trial-20261029215056-07a26797.he.test",
+        "qtype": "AAAA",
+        "rcode": "NOERROR",
+        "transport": "UDP",
+        "query_frame": 112,
+        "query_time": 1793310662.176333,
+        "response_frame": 115,
+        "response_time": 1793310662.189364,
+        "duration_ms": 13.03,
+        "answers": [
+          "2001:db8:2::10"
+        ]
+      },
+      {
+        "dns_id": 52378,
+        "qname": "trial-20261029215056-07a26797.he.test",
+        "qtype": "A",
+        "rcode": "NOERROR",
+        "transport": "UDP",
+        "query_frame": 113,
+        "query_time": 1793310662.176486,
+        "response_frame": 116,
+        "response_time": 1793310662.190359,
+        "duration_ms": 13.87,
+        "answers": [
+          "10.0.2.10"
+        ]
+      }
+    ],
+    "https_svcb_queries": [
+      {
+        "dns_id": 53265,
+        "qname": "trial-20261029215056-07a26797.he.test",
+        "qtype": "HTTPS",
+        "rcode": "NOERROR",
+        "transport": "UDP",
+        "query_frame": 111,
+        "query_time": 1793310662.176035,
+        "response_frame": 114,
+        "response_time": 1793310662.177512,
+        "duration_ms": 1.48,
+        "answers": []
+      }
+    ],
+    "dns_resolution_time_ms": 14.03,
+    "dns_latency_a_ms": 13.87,
+    "dns_latency_aaaa_ms": 13.03,
+    "dns_query_to_first_payload_ms": 57.92,
+    "dns_last_positive_response_to_first_payload_ms": 43.9,
+    "null_reasons": {}
+  },
+  "evidence_provenance": {
+    "vantage_point": "ps028-cl:ps028-cl-rt",
+    "tshark_version": "4.2.2",
+    "tcpdump_version": "4.99.4",
+    "parser_version": "1.1.0",
+    "dissector_flags": [
+      "-o",
+      "tcp.relative_sequence_numbers:FALSE"
+    ]
+  },
+  "dns_observations": {
+    "queries": [
+      {
+        "qname": "trial-20261029215056-07a26797.he.test",
+        "qtype": "65",
+        "timestamp": 1793310662.176035
+      },
+      {
+        "qname": "trial-20261029215056-07a26797.he.test",
+        "qtype": "AAAA",
+        "timestamp": 1793310662.176333
+      },
+      {
+        "qname": "trial-20261029215056-07a26797.he.test",
+        "qtype": "A",
+        "timestamp": 1793310662.176486
+      }
+    ],
+    "responses": [
+      {
+        "qname": "trial-20261029215056-07a26797.he.test",
+        "qtype": "65",
+        "address": "",
+        "timestamp": 1793310662.177512
+      },
+      {
+        "qname": "trial-20261029215056-07a26797.he.test",
+        "qtype": "AAAA",
+        "address": "2001:db8:2::10",
+        "timestamp": 1793310662.189364
+      },
+      {
+        "qname": "trial-20261029215056-07a26797.he.test",
+        "qtype": "A",
+        "address": "10.0.2.10",
+        "timestamp": 1793310662.190359
+      }
+    ]
+  },
+  "network_observations": {
+    "ipv6_attempt": true,
+    "ipv4_attempt": false,
+    "ipv6_success": true,
+    "ipv4_success": false,
+    "connection_attempt_delay_ms": null,
+    "connection_setup_time_ms": 20.34,
+    "fallback_occurred": false,
+    "classification": "DIRECT_IPV6",
+    "classification_reason": "Direct IPv6 connection established successfully without IPv4 fallback."
+  },
+  "capture_metadata": {
+    "pcap_path": "/home/indrani/projects/he-webtester/lab/campaigns/ps028-a10-live-20261030-01/trials/trial-20261029215056-07a26797/capture.pcap",
+    "pcap_sha256": "4ad3d07db2a23091c03e7eb1528e2fb284dc8748b18826ccb13908bc5c59704e",
+    "pcap_size_bytes": 17255,
+    "pcap_valid": true,
+    "packet_count": 158,
+    "validation_message": "Valid PCAP",
+    "tcpdump_log_path": "/home/indrani/projects/he-webtester/lab/campaigns/ps028-a10-live-20261030-01/trials/trial-20261029215056-07a26797/tcpdump.log",
+    "packets_captured": 158,
+    "packets_received_by_filter": 158,
+    "packets_dropped_by_kernel": 0,
+    "packets_dropped_by_interface": 0,
+    "total_packets_dropped": 0,
+    "capture_loss": false,
+    "capture_loss_message": null,
+    "interface": "ps028-cl-rt",
+    "bpf_filter": "(host 10.0.1.1 and port 53) or (host 10.0.2.10 and tcp port 80) or (host 2001:db8:2::10 and tcp port 80)",
+    "buffer_size_kb": 8192
+  },
+  "evidence_paths": {
+    "trial_dir": "/home/indrani/projects/he-webtester/lab/campaigns/ps028-a10-live-20261030-01/trials/trial-20261029215056-07a26797",
+    "result_json": "/home/indrani/projects/he-webtester/lab/campaigns/ps028-a10-live-20261030-01/trials/trial-20261029215056-07a26797/result.json",
+    "capture_pcap": "/home/indrani/projects/he-webtester/lab/campaigns/ps028-a10-live-20261030-01/trials/trial-20261029215056-07a26797/capture.pcap",
+    "tcpdump_log": "/home/indrani/projects/he-webtester/lab/campaigns/ps028-a10-live-20261030-01/trials/trial-20261029215056-07a26797/tcpdump.log",
+    "browser_log": "/home/indrani/projects/he-webtester/lab/campaigns/ps028-a10-live-20261030-01/trials/trial-20261029215056-07a26797/browser.log",
+    "browser_netlog": "/home/indrani/projects/he-webtester/lab/campaigns/ps028-a10-live-20261030-01/trials/trial-20261029215056-07a26797/netlog.json"
+  },
+  "cleanup_status": {
+    "scenario_restored": true,
+    "baseline_verified": true,
+    "profile_cleaned": true,
+    "lock_released": true,
+    "errors": []
+  }
+}

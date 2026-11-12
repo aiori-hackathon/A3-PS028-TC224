@@ -19,24 +19,44 @@ LIFECYCLE GUARANTEE:
 
 import argparse
 import concurrent.futures
+import csv
+from datetime import datetime, timezone
+import hashlib
 import json
+import math
 import os
 from pathlib import Path
+import platform
 import re
 import socket
+import subprocess
 import sys
 import time
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+import uuid
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
 DEFAULT_SCENARIOS_PATH = SCRIPT_DIR / "scenarios.yaml"
+DEFAULT_EVIDENCE_DIR = REPO_ROOT / "lab" / "derived" / "phase-c" / "self_tests"
 
 # Safe imports supporting both module and direct script execution
 try:
     import lab.impair as impair
 except ImportError:
     import impair
+
+try:
+    import lab.concurrency as concurrency
+except ImportError:
+    import concurrency
+
+lab_concurrency = concurrency
+
+try:
+    import lab.identity as identity
+except ImportError:
+    import identity
 
 CLIENT_NETNS = "ps028-cl"
 ROUTER_NETNS = "ps028-rt"
@@ -320,22 +340,42 @@ def setup_s5_nftables_counters(
         impair.log_info(f"[DRY-RUN] Would configure project-scoped nftables counters in {impair.NFT_NAMESPACE}")
         return
 
-    impair.require_root(dry_run=dry_run)
+    # Unprivileged path: route via privileged_helper
+    if not impair.is_root():
+        import lab.privileged_helper as priv_helper
+        priv_helper.run_helper_action(
+            "setup-s5-counters",
+            extra_args=[
+                "--port", str(port),
+                "--target-ip", str(target_ip),
+                "--client-ip", str(client_ip),
+                "--oifname", str(oifname),
+            ],
+            caller_holds_lock=lab_concurrency.is_lock_held_by_current_thread(impair.LAB_LOCK_FILE),
+            lock_file=impair.LAB_LOCK_FILE
+        )
+        impair.log_ok(f"Configured project-scoped nftables counters via helper in {impair.NFT_NAMESPACE}.")
+        return
+
+    # Privileged in-process path (when running as root in helper or test fixture)
+    ip_prefix = "ip6" if ":" in target_ip or ":" in client_ip else "ip"
     common_filter = (
-        f"oifname \"{oifname}\" ip6 saddr {client_ip} ip6 daddr {target_ip} "
-        f"tcp dport {port} tcp flags syn / syn,ack"
+        f'oifname "{oifname}" {ip_prefix} saddr {client_ip} {ip_prefix} daddr {target_ip} '
+        f'tcp dport {port} tcp flags syn / syn,ack'
     )
     nft_script = (
+        f"add table {impair.NFT_FAMILY} {impair.NFT_TABLE_NAME}\n"
+        f"add chain {impair.NFT_FAMILY} {impair.NFT_TABLE_NAME} forward {{ type filter hook forward priority 0; policy accept; }}\n"
         f"add counter {impair.NFT_FAMILY} {impair.NFT_TABLE_NAME} syn_total\n"
         f"add counter {impair.NFT_FAMILY} {impair.NFT_TABLE_NAME} syn_dropped\n"
         f"add counter {impair.NFT_FAMILY} {impair.NFT_TABLE_NAME} syn_not_dropped\n"
         f"flush chain {impair.NFT_FAMILY} {impair.NFT_TABLE_NAME} forward\n"
         f"add rule {impair.NFT_FAMILY} {impair.NFT_TABLE_NAME} forward {common_filter} "
-        f"counter name \"syn_total\"\n"
+        f'counter name "syn_total"\n'
         f"add rule {impair.NFT_FAMILY} {impair.NFT_TABLE_NAME} forward {common_filter} "
-        f"numgen random mod 100 < 50 counter name \"syn_dropped\" drop\n"
+        f'numgen random mod 100 < 50 counter name "syn_dropped" drop\n'
         f"add rule {impair.NFT_FAMILY} {impair.NFT_TABLE_NAME} forward {common_filter} "
-        f"counter name \"syn_not_dropped\"\n"
+        f'counter name "syn_not_dropped"\n'
     )
     impair.execute_netns_cmd(
         impair.NFT_NAMESPACE,
@@ -354,9 +394,24 @@ def read_s5_nftables_counters(dry_run: bool = False) -> Dict[str, int]:
     Supports both JSON format and standard text output fallback.
     Raises ImpairmentError if any required named counter is missing, malformed,
     or cannot be read through either supported output format.
+    Delegates to privileged_helper when running unprivileged.
     """
     if dry_run:
         return {"syn_total": 0, "syn_dropped": 0, "syn_not_dropped": 0}
+
+    # Unprivileged path: route via privileged_helper
+    if not impair.is_root():
+        import lab.privileged_helper as priv_helper
+        res = priv_helper.run_helper_action(
+            "read-s5-counters",
+            caller_holds_lock=lab_concurrency.is_lock_held_by_current_thread(impair.LAB_LOCK_FILE),
+            lock_file=impair.LAB_LOCK_FILE
+        )
+        return {
+            "syn_total": int(res["syn_total"]),
+            "syn_dropped": int(res["syn_dropped"]),
+            "syn_not_dropped": int(res["syn_not_dropped"])
+        }
 
     json_err: Optional[str] = None
     # 1. Attempt JSON query first
@@ -469,6 +524,66 @@ def build_s5_probe_script() -> str:
     )
 
 
+def calculate_clopper_pearson_ci(k: int, n: int, confidence: float = 0.99) -> Tuple[float, float]:
+    """
+    Calculate exact Clopper-Pearson confidence interval for a binomial proportion.
+    Pure Python implementation using regularized incomplete beta inversion via bisection.
+    Returns (lower_bound_pct, upper_bound_pct) in percentage [0.0, 100.0].
+    """
+    if n <= 0:
+        return 0.0, 100.0
+    if k < 0:
+        k = 0
+    if k > n:
+        k = n
+
+    alpha = 1.0 - confidence
+
+    def binom_cdf(x_val: int, n_val: int, p_val: float) -> float:
+        if x_val < 0:
+            return 0.0
+        if x_val >= n_val:
+            return 1.0
+        total = 0.0
+        for j in range(x_val + 1):
+            log_comb = math.lgamma(n_val + 1) - math.lgamma(j + 1) - math.lgamma(n_val - j + 1)
+            term = (
+                math.exp(log_comb + j * math.log(p_val) + (n_val - j) * math.log(1.0 - p_val))
+                if 0.0 < p_val < 1.0
+                else (1.0 if (j == 0 and p_val == 0.0) or (j == n_val and p_val == 1.0) else 0.0)
+            )
+            total += term
+        return total
+
+    # Lower bound: P(X >= k) = alpha / 2  => 1 - binom_cdf(k - 1, n, p) = alpha / 2
+    if k == 0:
+        lower = 0.0
+    else:
+        lo, hi = 0.0, 1.0
+        for _ in range(50):
+            mid = (lo + hi) / 2.0
+            if (1.0 - binom_cdf(k - 1, n, mid)) > alpha / 2.0:
+                hi = mid
+            else:
+                lo = mid
+        lower = (lo + hi) / 2.0
+
+    # Upper bound: P(X <= k) = alpha / 2  => binom_cdf(k, n, p) = alpha / 2
+    if k == n:
+        upper = 1.0
+    else:
+        lo, hi = 0.0, 1.0
+        for _ in range(50):
+            mid = (lo + hi) / 2.0
+            if binom_cdf(k, n, mid) < alpha / 2.0:
+                hi = mid
+            else:
+                lo = mid
+        upper = (lo + hi) / 2.0
+
+    return round(lower * 100.0, 4), round(upper * 100.0, 4)
+
+
 def measure_syn_loss(
     target_ip: str = SERVER_IPV6,
     port: int = 80,
@@ -477,22 +592,14 @@ def measure_syn_loss(
     concurrency: int = 10,
     netns: str = CLIENT_NETNS,
     dry_run: bool = False,
-    simulated_loss_pct: Optional[float] = None
+    simulated_loss_pct: Optional[float] = None,
+    jsonl_output_path: Optional[Path] = None
 ) -> Dict[str, Any]:
     """
     Measure SYN packet count, dropped packets, and observed loss percentage
     using evidence-based project-scoped nftables counters.
-    Clearly defines:
-      - total_syn_count: Total TCP SYN packets arriving at router matching filter
-      - dropped_packets: SYN packets dropped by the 50% random-drop impairment rule
-      - not_dropped_packets: SYN packets forwarded/accepted to destination
-      - observed_loss_pct: Exact packet-level loss ratio (dropped / total * 100)
-      - extra_syn_packets: Inferred count of extra SYN packets beyond initial probe count
-        (calculated as max(0, total_syn_count - total_probes); inferred from packet count
-        delta rather than directly measured via sequence tracking)
-    Ensures unrelated traffic cannot contaminate the measurement by applying
-    consistent client IP, server IP, destination port, SYN flags, and outgoing-interface
-    filters across all counters, and does NOT label failed TCP connections as dropped packets.
+    Fully unprivileged: delegates privileged counter setup and in-namespace
+    probes to privileged_helper without requiring ambient root.
     """
     validate_probe_count(total_probes)
 
@@ -501,10 +608,11 @@ def measure_syn_loss(
         dropped = int(round(total_probes * (sim_pct / 100.0)))
         accepted = total_probes - dropped
         loss_pct = (dropped / total_probes * 100.0) if total_probes > 0 else 0.0
+        ci_lower, ci_upper = calculate_clopper_pearson_ci(dropped, total_probes, confidence=0.99)
         impair.log_info(
             f"[DRY-RUN] S5 SYN Loss (simulated counts): simulated_total={total_probes}, "
             f"simulated_dropped={dropped}, simulated_accepted={accepted}, "
-            f"simulated_not_dropped={accepted}, simulated_loss={loss_pct:.1f}%"
+            f"simulated_not_dropped={accepted}, simulated_loss={loss_pct:.1f}%, 99% CI=[{ci_lower:.1f}%, {ci_upper:.1f}%]"
         )
         return {
             "total_syn_count": total_probes,
@@ -514,6 +622,7 @@ def measure_syn_loss(
             "extra_syn_packets": 0,
             "initial_probes": total_probes,
             "observed_loss_pct": loss_pct,
+            "clopper_pearson_99_ci": [ci_lower, ci_upper],
             "measurement_method": "dry_run_simulation",
             "evidence": {
                 "source": "simulation",
@@ -527,21 +636,47 @@ def measure_syn_loss(
             }
         }
 
-    impair.require_root(dry_run=dry_run)
-
     # 1. Setup project-scoped nftables counters in ps028-rt
     setup_s5_nftables_counters(port=port, target_ip=target_ip, dry_run=dry_run)
     initial_counters = read_s5_nftables_counters(dry_run=dry_run)
 
     # 2. Transmit probes from client namespace (initiates TCP SYNs on wire)
-    # Failed connections are NOT counted as dropped packets; kernel counters provide ground truth.
-    py_script = build_s5_probe_script()
-    compile(py_script, "<ps028_s5_probe>", "exec")
-
-    cmd = ["python3", "-c", py_script, target_ip, str(port), str(total_probes), str(timeout), str(concurrency)]
-    rc, stdout, stderr = impair.execute_netns_cmd(netns, cmd, check=False)
-    if rc != 0:
-        raise impair.ImpairmentError(f"SYN probe execution failed in {netns}: {stderr.strip()}")
+    # Replaces inline string injection with privileged_helper measure-s5 delegation
+    if not impair.is_root():
+        import lab.privileged_helper as priv_helper
+        helper_args = [
+            "--target-ip", target_ip,
+            "--port", str(port),
+            "--probe-count", str(total_probes),
+            "--timeout", str(timeout),
+            "--concurrency", str(concurrency),
+            "--netns", netns
+        ]
+        if jsonl_output_path:
+            helper_args.extend(["--output-jsonl", str(jsonl_output_path)])
+        probe_res = priv_helper.run_helper_action(
+            "measure-s5",
+            extra_args=helper_args,
+            caller_holds_lock=lab_concurrency.is_lock_held_by_current_thread(impair.LAB_LOCK_FILE),
+            lock_file=impair.LAB_LOCK_FILE
+        )
+        if probe_res.get("status") != "OK":
+            raise impair.ImpairmentError(f"SYN probe execution failed via helper: {probe_res.get('error')}")
+    else:
+        import lab.privileged_helper as priv_helper
+        probe_res = priv_helper.measure_s5_privileged(
+            target_ip=target_ip,
+            port=port,
+            probe_count=total_probes,
+            timeout=timeout,
+            concurrency=concurrency,
+            netns=netns,
+            output_jsonl=jsonl_output_path,
+            caller_holds_lock=lab_concurrency.is_lock_held_by_current_thread(impair.LAB_LOCK_FILE),
+            lock_file=impair.LAB_LOCK_FILE
+        )
+        if probe_res.get("status") != "OK":
+            raise impair.ImpairmentError(f"SYN probe execution failed: {probe_res.get('error')}")
 
     # Allow tiny grace period for in-flight packets or extra SYN probes to reach router
     time.sleep(0.05)
@@ -559,8 +694,6 @@ def measure_syn_loss(
         )
 
     # Validate counter consistency: total must equal dropped + not_dropped.
-    # Preserve raw counter values and fail immediately if they do not match.
-    # Never overwrite a measured counter to force consistency.
     if total_syn_count != (dropped_packets + not_dropped_packets):
         raise impair.ImpairmentError(
             f"S5 Counter accounting mismatch: total_syn_count ({total_syn_count}) != "
@@ -569,11 +702,12 @@ def measure_syn_loss(
 
     loss_pct = (dropped_packets / total_syn_count * 100.0) if total_syn_count > 0 else 0.0
     extra_syn_packets = max(0, total_syn_count - total_probes)
+    ci_lower, ci_upper = calculate_clopper_pearson_ci(dropped_packets, total_syn_count, confidence=0.99)
 
     impair.log_info(
         f"S5 Evidence [nftables counters]: total={total_syn_count} (probes={total_probes}, "
         f"inferred_extra_syn={extra_syn_packets}), dropped={dropped_packets}, "
-        f"not_dropped={not_dropped_packets}, loss={loss_pct:.1f}%"
+        f"not_dropped={not_dropped_packets}, loss={loss_pct:.1f}%, 99% CI=[{ci_lower:.1f}%, {ci_upper:.1f}%]"
     )
 
     return {
@@ -584,6 +718,7 @@ def measure_syn_loss(
         "extra_syn_packets": extra_syn_packets,
         "initial_probes": total_probes,
         "observed_loss_pct": loss_pct,
+        "clopper_pearson_99_ci": [ci_lower, ci_upper],
         "measurement_method": "nftables_counters",
         "evidence": {
             "source": "nftables",
@@ -786,7 +921,7 @@ def verify_s4(dry_run: bool = False) -> Dict[str, Any]:
     return {"ipv4_rtt_ms": v4_rtt, "ipv6_rtt_ms": v6_rtt, "http_ipv4_status": http4_status, "http_ipv6_status": http6_status}
 
 
-def verify_s5(probe_count: int = 50, dry_run: bool = False) -> Dict[str, Any]:
+def verify_s5(probe_count: int = 50, dry_run: bool = False, jsonl_output_path: Optional[Path] = None) -> Dict[str, Any]:
     """
     Verify S5: IPv6 SYN Loss 50%
     - Measure SYN packet count, dropped packets, and observed loss percentage
@@ -805,7 +940,8 @@ def verify_s5(probe_count: int = 50, dry_run: bool = False) -> Dict[str, Any]:
         timeout=0.4,
         concurrency=10,
         dry_run=dry_run,
-        simulated_loss_pct=48.0
+        simulated_loss_pct=48.0,
+        jsonl_output_path=jsonl_output_path
     )
 
     total = data["total_syn_count"]
@@ -907,7 +1043,8 @@ def run_scenario_self_test(
     scenario_id: str,
     scenarios_path: Path = DEFAULT_SCENARIOS_PATH,
     dry_run: bool = False,
-    probe_count: int = 50
+    probe_count: int = 50,
+    output_jsonl: Optional[Path] = None
 ) -> Dict[str, Any]:
     """
     Execute repeatable self-test harness for a single scenario with lifecycle guarantees:
@@ -946,7 +1083,7 @@ def run_scenario_self_test(
 
             # Step 2: Run verification
             if sc_key == "S5":
-                result_details = verifier(probe_count=probe_count, dry_run=dry_run)
+                result_details = verifier(probe_count=probe_count, dry_run=dry_run, jsonl_output_path=output_jsonl)
             else:
                 result_details = verifier(dry_run=dry_run)
 
@@ -1042,6 +1179,427 @@ def run_all_self_tests(
 
 
 # ==============================================================================
+# Machine-Readable Self-Test Evidence Bundle Generation (Amendment A13 / Finding C5-05)
+# ==============================================================================
+
+def generate_run_id() -> str:
+    """Generate canonical unique self-test run ID: st-YYYYMMDDTHHMMSSZ-xxxxxxxx."""
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    short_uuid = uuid.uuid4().hex[:8]
+    return f"st-{timestamp}-{short_uuid}"
+
+
+def get_git_info() -> Dict[str, Any]:
+    """Retrieve git provenance info (commit SHA, branch, dirty status)."""
+    commit = "unknown"
+    branch = "unknown"
+    dirty = False
+    try:
+        res = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, cwd=str(REPO_ROOT), timeout=2.0)
+        if res.returncode == 0:
+            commit = res.stdout.strip()
+    except Exception:
+        pass
+    try:
+        res = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], capture_output=True, text=True, cwd=str(REPO_ROOT), timeout=2.0)
+        if res.returncode == 0:
+            branch = res.stdout.strip()
+    except Exception:
+        pass
+    try:
+        res = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True, cwd=str(REPO_ROOT), timeout=2.0)
+        if res.returncode == 0:
+            dirty = bool(res.stdout.strip())
+    except Exception:
+        pass
+    return {"git_commit": commit, "git_branch": branch, "git_dirty": dirty}
+
+
+def file_sha256(path: Union[str, Path]) -> str:
+    """Calculate SHA-256 digest of a file; returns empty string if unreadable or absent."""
+    p = Path(path)
+    if not p.is_file():
+        return ""
+    try:
+        h = hashlib.sha256()
+        with open(p, "rb") as f:
+            while chunk := f.read(65536):
+                h.update(chunk)
+        return h.hexdigest()
+    except Exception:
+        return ""
+
+
+def format_csv_val(val: Any) -> str:
+    """Format CSV values with fixed 3-decimal float precision and clean string representations."""
+    if val is None:
+        return ""
+    if isinstance(val, bool):
+        return str(val)
+    if isinstance(val, int):
+        return str(val)
+    if isinstance(val, float):
+        return f"{val:.3f}"
+    return str(val)
+
+
+def extract_scenario_metrics(sc_id: str, details: Dict[str, Any]) -> Tuple[str, Any, str, Any]:
+    """Extract canonical primary and secondary metrics per scenario ID."""
+    sc_upper = sc_id.upper()
+    if sc_upper == "S0":
+        return ("ipv4_rtt_ms", details.get("ipv4_rtt_ms"), "ipv6_rtt_ms", details.get("ipv6_rtt_ms"))
+    elif sc_upper == "S1":
+        return ("ipv6_tcp_outcome", details.get("ipv6_tcp_outcome"), "ipv6_timeout_sec", details.get("ipv6_timeout_sec"))
+    elif sc_upper == "S2":
+        return ("ipv6_tcp_outcome", details.get("ipv6_tcp_outcome"), "rst_elapsed_sec", details.get("rst_elapsed_sec"))
+    elif sc_upper == "S3":
+        return ("ipv6_rtt_ms", details.get("ipv6_rtt_ms"), "ipv4_rtt_ms", details.get("ipv4_rtt_ms"))
+    elif sc_upper == "S4":
+        return ("ipv6_rtt_ms", details.get("ipv6_rtt_ms"), "ipv4_rtt_ms", details.get("ipv4_rtt_ms"))
+    elif sc_upper == "S5":
+        return ("observed_loss_pct", details.get("observed_loss_pct"), "total_syn_count", details.get("total_syn_count"))
+    elif sc_upper == "S6":
+        return ("aaaa_delay_ms", details.get("aaaa_delay_ms"), "observed_delay_delta_ms", details.get("observed_delay_delta_ms"))
+    return ("none", None, "none", None)
+
+
+def check_pre_baseline(dry_run: bool = False) -> Dict[str, Any]:
+    """Audit pre-test environment to ensure clean baseline state."""
+    errors: List[str] = []
+    dns_active = False
+    dns_pid = None
+
+    if impair.DNS_PID_FILE.exists():
+        try:
+            pid_str = impair.DNS_PID_FILE.read_text(encoding="utf-8").strip()
+            if pid_str.isdigit() and int(pid_str) > 1:
+                pid = int(pid_str)
+                dns_pid = pid
+                try:
+                    os.kill(pid, 0)
+                    dns_active = True
+                except (OSError, ProcessLookupError):
+                    errors.append(f"DNS process with PID {pid} is not running")
+            else:
+                errors.append(f"DNS PID file contains invalid PID: {pid_str}")
+        except Exception as e:
+            errors.append(f"Failed to read DNS PID file: {e}")
+    else:
+        if not dry_run:
+            errors.append("DNS PID file does not exist")
+        else:
+            dns_active = True
+
+    state_clean = True
+    if impair.STATE_FILE.exists():
+        try:
+            with open(impair.STATE_FILE, "r", encoding="utf-8") as f:
+                state_data = json.load(f)
+                if state_data.get("scenario") is not None:
+                    state_clean = False
+                    errors.append(f"Impairment state file indicates active scenario: {state_data.get('scenario')}")
+        except Exception as e:
+            errors.append(f"Failed to read impairment state file: {e}")
+
+    a_ms = 0
+    aaaa_ms = 0
+    if impair.DNS_CONFIG_FILE.exists():
+        try:
+            content = impair.DNS_CONFIG_FILE.read_text(encoding="utf-8")
+            a_match = re.search(r"delay_a_ms\s*=\s*(\d+)", content)
+            aaaa_match = re.search(r"delay_aaaa_ms\s*=\s*(\d+)", content)
+            if a_match:
+                a_ms = int(a_match.group(1))
+            if aaaa_match:
+                aaaa_ms = int(aaaa_match.group(1))
+        except Exception:
+            pass
+
+    baseline_verified = False
+    try:
+        baseline_verified = impair.self_test_baseline(dry_run=dry_run)
+        if not baseline_verified:
+            errors.append("self_test_baseline reported failure")
+    except Exception as e:
+        errors.append(f"self_test_baseline exception: {e}")
+
+    return {
+        "verified": baseline_verified and len(errors) == 0,
+        "state_file_clean": state_clean,
+        "dns_config_delays": {"A_ms": a_ms, "AAAA_ms": aaaa_ms},
+        "dns_pid_active": dns_active,
+        "dns_pid": dns_pid,
+        "errors": errors
+    }
+
+
+def assemble_evidence_bundle(
+    run_id: str,
+    execution_mode: str,
+    overall_status: str,
+    start_time: datetime,
+    end_time: datetime,
+    scenarios: List[Dict[str, Any]],
+    pre_baseline: Dict[str, Any],
+    post_baseline: Dict[str, Any],
+    lifecycle_guarantees: Dict[str, Any],
+    artifacts: Dict[str, Any],
+    scenarios_path: Path = DEFAULT_SCENARIOS_PATH
+) -> Dict[str, Any]:
+    """Assemble complete machine-readable self-test evidence bundle conforming to v1.0.0 schema."""
+    git_info = get_git_info()
+    scenarios_yaml_hash = file_sha256(scenarios_path)
+    dns_config_hash = file_sha256(impair.DNS_CONFIG_FILE)
+
+    invoking_user = os.environ.get("USER", os.environ.get("LOGNAME", "unknown"))
+    invoking_uid = os.getuid() if hasattr(os, "getuid") else -1
+    overall_elapsed = max(0.0, (end_time - start_time).total_seconds())
+
+    return {
+        "bundle_version": "1.0.0",
+        "run_id": run_id,
+        "execution_mode": execution_mode,
+        "overall_status": overall_status,
+        "overall_elapsed_sec": round(overall_elapsed, 3),
+        "start_time_utc": start_time.isoformat(),
+        "end_time_utc": end_time.isoformat(),
+        "provenance": {
+            "git_commit": git_info["git_commit"],
+            "git_branch": git_info["git_branch"],
+            "git_dirty": git_info["git_dirty"],
+            "scenarios_yaml_sha256": scenarios_yaml_hash,
+            "dns_config_sha256": dns_config_hash,
+            "python_version": platform.python_version(),
+            "platform": platform.platform(),
+            "invoking_user": invoking_user,
+            "invoking_uid": invoking_uid,
+            "is_root": impair.is_root(),
+            "command_argv": list(sys.argv)
+        },
+        "pre_baseline": pre_baseline,
+        "scenarios": scenarios,
+        "post_baseline": post_baseline,
+        "lifecycle_guarantees": lifecycle_guarantees,
+        "artifacts": artifacts
+    }
+
+
+def write_evidence_bundle(bundle: Dict[str, Any], output_dir: Path) -> Dict[str, Path]:
+    """
+    Write machine-readable evidence bundle to disk:
+      - self_test_bundle.json: Full structured evaluation JSON
+      - self_test_summary.csv: Tabular summary without volatile timestamps (Amendment A13)
+      - self_test_summary.csv.provenance.json: Metadata sidecar with SHA-256 and git provenance
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+    bundle_path = output_dir / "self_test_bundle.json"
+    csv_path = output_dir / "self_test_summary.csv"
+    prov_path = output_dir / "self_test_summary.csv.provenance.json"
+
+    # 1. Write self_test_bundle.json
+    with open(bundle_path, "w", encoding="utf-8") as f:
+        json.dump(bundle, f, indent=2)
+        f.write("\n")
+
+    # 2. Write self_test_summary.csv (Amendment A13 invariant: pure data, stable sorting, no timestamps)
+    sorted_scenarios = sorted(
+        bundle.get("scenarios", []),
+        key=lambda s: int(s.get("scenario_id", "S0")[1:]) if s.get("scenario_id", "").startswith("S") and s.get("scenario_id", "")[1:].isdigit() else 999
+    )
+
+    csv_header = [
+        "scenario_id", "execution_mode", "status", "elapsed_sec",
+        "pre_baseline_ok", "post_baseline_ok",
+        "key_metric_name", "key_metric_value",
+        "secondary_metric_name", "secondary_metric_value", "error"
+    ]
+
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f, lineterminator="\n")
+        writer.writerow(csv_header)
+        for sc in sorted_scenarios:
+            k_name, k_val, s_name, s_val = extract_scenario_metrics(
+                sc.get("scenario_id", ""),
+                sc.get("details", {})
+            )
+            err_val = sc.get("error")
+            row = [
+                sc.get("scenario_id", ""),
+                bundle.get("execution_mode", "LIVE"),
+                sc.get("status", "FAIL"),
+                f"{sc.get('elapsed_sec', 0.0):.3f}",
+                str(bundle.get("pre_baseline", {}).get("verified", False)),
+                str(sc.get("post_baseline_verified", False)),
+                k_name,
+                format_csv_val(k_val),
+                s_name,
+                format_csv_val(s_val),
+                "" if err_val is None else str(err_val).replace("\n", " ")
+            ]
+            writer.writerow(row)
+
+    # 3. Write self_test_summary.csv.provenance.json
+    csv_hash = file_sha256(csv_path)
+    prov_data = {
+        "target_file": "self_test_summary.csv",
+        "sha256": csv_hash,
+        "row_count": len(sorted_scenarios),
+        "generated_by_command": " ".join(sys.argv),
+        "git_commit": bundle.get("provenance", {}).get("git_commit", "unknown"),
+        "git_branch": bundle.get("provenance", {}).get("git_branch", "unknown"),
+        "python_version": bundle.get("provenance", {}).get("python_version", platform.python_version()),
+        "platform": bundle.get("provenance", {}).get("platform", platform.platform()),
+        "run_id": bundle.get("run_id", "unknown"),
+        "execution_mode": bundle.get("execution_mode", "LIVE")
+    }
+    with open(prov_path, "w", encoding="utf-8") as f:
+        json.dump(prov_data, f, indent=2)
+        f.write("\n")
+
+    # 4. Create/update latest symlink
+    latest_symlink = output_dir / "latest"
+    try:
+        if latest_symlink.is_symlink() or latest_symlink.exists():
+            latest_symlink.unlink()
+        latest_symlink.symlink_to("self_test_bundle.json")
+    except Exception:
+        pass
+
+    return {
+        "bundle_json": bundle_path,
+        "summary_csv": csv_path,
+        "summary_csv_provenance": prov_path
+    }
+
+
+def run_all_self_tests_with_bundle(
+    scenarios: Optional[List[str]] = None,
+    scenarios_path: Path = DEFAULT_SCENARIOS_PATH,
+    dry_run: bool = False,
+    probe_count: int = 50,
+    output_dir: Path = DEFAULT_EVIDENCE_DIR
+) -> Dict[str, Any]:
+    """
+    Run self-test suite and write full machine-readable evidence bundle.
+    LIFECYCLE GUARANTEE: Wrapped in try ... finally so that bundle JSON and summary CSV
+    are written to disk even if any scenario fails or raises an exception.
+    """
+    validate_probe_count(probe_count)
+    target_scenarios = [s.upper() for s in scenarios] if scenarios else ["S0", "S1", "S2", "S3", "S4", "S5", "S6"]
+    run_id = generate_run_id()
+    start_time = datetime.now(timezone.utc)
+    mode_str = "SIMULATION" if dry_run else "LIVE"
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    s5_jsonl_path = output_dir / "s5_probes.jsonl" if "S5" in target_scenarios else None
+
+    # Pre-baseline check
+    pre_baseline = check_pre_baseline(dry_run=dry_run)
+
+    scenarios_results: List[Dict[str, Any]] = []
+    overall_status = "PASS"
+    captured_exception: Optional[Exception] = None
+
+    cleanups_attempted = 0
+    cleanups_succeeded = 0
+    baselines_verified = 0
+    baseline_failures = 0
+    cleanup_exceptions: List[str] = []
+    baseline_exceptions: List[str] = []
+
+    try:
+        for sc_id in target_scenarios:
+            t_sc_start = time.perf_counter()
+            try:
+                res = run_scenario_self_test(
+                    sc_id,
+                    scenarios_path=scenarios_path,
+                    dry_run=dry_run,
+                    probe_count=probe_count,
+                    output_jsonl=s5_jsonl_path if sc_id == "S5" else None
+                )
+                sc_elapsed = time.perf_counter() - t_sc_start
+                cleanups_attempted += 1
+                cleanups_succeeded += 1
+                baselines_verified += 1
+                scenarios_results.append({
+                    "scenario_id": sc_id,
+                    "scenario_name": f"Scenario {sc_id}",
+                    "status": "PASS",
+                    "elapsed_sec": round(sc_elapsed, 3),
+                    "details": res.get("details", {}),
+                    "post_baseline_verified": res.get("post_baseline_verified", False),
+                    "error": None
+                })
+            except Exception as e:
+                sc_elapsed = time.perf_counter() - t_sc_start
+                overall_status = "FAIL"
+                cleanups_attempted += 1
+                if hasattr(e, "cleanup_error") and e.cleanup_error:
+                    cleanup_exceptions.append(str(e.cleanup_error))
+                else:
+                    cleanups_succeeded += 1
+                if hasattr(e, "baseline_error") and e.baseline_error:
+                    baseline_failures += 1
+                    baseline_exceptions.append(str(e.baseline_error))
+                else:
+                    baselines_verified += 1
+                scenarios_results.append({
+                    "scenario_id": sc_id,
+                    "scenario_name": f"Scenario {sc_id}",
+                    "status": "FAIL",
+                    "elapsed_sec": round(sc_elapsed, 3),
+                    "details": {},
+                    "post_baseline_verified": False,
+                    "error": str(e)
+                })
+                captured_exception = e
+                break
+    finally:
+        end_time = datetime.now(timezone.utc)
+        post_baseline_errors = list(baseline_exceptions)
+        post_baseline = {
+            "verified": len(post_baseline_errors) == 0 and baseline_failures == 0,
+            "errors": post_baseline_errors
+        }
+        lifecycle_guarantees = {
+            "all_cleanups_attempted": cleanups_attempted == len(scenarios_results),
+            "all_baselines_verified": baseline_failures == 0 and baselines_verified == len(scenarios_results),
+            "cleanups_attempted": cleanups_attempted,
+            "cleanups_succeeded": cleanups_succeeded,
+            "baselines_verified": baselines_verified,
+            "baseline_failures": baseline_failures,
+            "cleanup_exceptions": cleanup_exceptions,
+            "baseline_exceptions": baseline_exceptions
+        }
+        artifacts = {
+            "bundle_json": str(output_dir / "self_test_bundle.json"),
+            "summary_csv": str(output_dir / "self_test_summary.csv"),
+            "summary_csv_provenance": str(output_dir / "self_test_summary.csv.provenance.json"),
+            "s5_probes_jsonl": str(s5_jsonl_path) if s5_jsonl_path and s5_jsonl_path.exists() else None
+        }
+        bundle = assemble_evidence_bundle(
+            run_id=run_id,
+            execution_mode=mode_str,
+            overall_status=overall_status,
+            start_time=start_time,
+            end_time=end_time,
+            scenarios=scenarios_results,
+            pre_baseline=pre_baseline,
+            post_baseline=post_baseline,
+            lifecycle_guarantees=lifecycle_guarantees,
+            artifacts=artifacts,
+            scenarios_path=scenarios_path
+        )
+        write_evidence_bundle(bundle, output_dir=output_dir)
+
+    if captured_exception:
+        raise captured_exception
+
+    return bundle
+
+
+# ==============================================================================
 # Standalone CLI Entry Point
 # ==============================================================================
 
@@ -1091,6 +1649,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Simulate operations without executing live network/system modifications"
     )
     parser.add_argument(
+        "--bundle",
+        action="store_true",
+        default=False,
+        help="Generate machine-readable evidence bundle under output directory"
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=DEFAULT_EVIDENCE_DIR,
+        help=f"Directory to save evidence bundle (default: {DEFAULT_EVIDENCE_DIR})"
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         default=False,
@@ -1114,15 +1684,27 @@ def main() -> int:
         selected_scenarios = [s.strip() for s in args.scenarios.split(",") if s.strip()]
 
     try:
-        results = run_all_self_tests(
-            scenarios=selected_scenarios,
-            scenarios_path=args.scenarios_file,
-            dry_run=args.dry_run,
-            probe_count=args.probes
-        )
-        if args.json:
-            print(json.dumps({"status": "PASS", "results": results}, indent=2))
-        return 0
+        if args.bundle:
+            bundle = run_all_self_tests_with_bundle(
+                scenarios=selected_scenarios,
+                scenarios_path=args.scenarios_file,
+                dry_run=args.dry_run,
+                probe_count=args.probes,
+                output_dir=args.output_dir
+            )
+            if args.json:
+                print(json.dumps(bundle, indent=2))
+            return 0 if bundle.get("overall_status") == "PASS" else 1
+        else:
+            results = run_all_self_tests(
+                scenarios=selected_scenarios,
+                scenarios_path=args.scenarios_file,
+                dry_run=args.dry_run,
+                probe_count=args.probes
+            )
+            if args.json:
+                print(json.dumps({"status": "PASS", "results": results}, indent=2))
+            return 0
     except impair.ImpairmentError as e:
         impair.log_error(str(e))
         if args.json:
