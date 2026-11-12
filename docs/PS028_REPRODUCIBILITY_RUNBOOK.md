@@ -211,11 +211,11 @@ The analyzer enforces strict A7/A8 validity rules:
 ### RFC 8305 standards conformance assessment
 
 The analyzer evaluates Happy Eyeballs v2 requirements strictly from observable network evidence, distinguishing **`OBSERVED_CONFORMANCE`**, **`OBSERVED_DEVIATION`**, and **`INDETERMINATE`** results without inferring general browser conformance from individual trials. The assessment explicitly separates mandatory requirements (MUST/MUST NOT) from recommended parameters (SHOULD/SHOULD NOT) via `mandatory_status` and `recommended_status`:
-- **RFC 8305 §3 (IPv6 Preference)**: Verifies whether initial connection attempts prefer IPv6 on dual-stack baseline (S0). In tested live trials, IPv6 was attempted first and won (`OBSERVED_CONFORMANCE`).
+- **RFC 8305 §4 (Sorting Addresses & IPv6 Preference)**: Verifies whether initial connection attempts prefer IPv6 on dual-stack baseline (S0). In tested live trials, IPv6 was attempted first and won (`OBSERVED_CONFORMANCE`).
 - **RFC 8305 §5 (Immediate Reset Fallback & 10 ms Inter-Attempt Floor)**: Evaluates TCP RST rejection (S2). RFC 8305 §5 distinguishes mandatory requirements (*"subsequent connection attempts MUST NOT start within 10 milliseconds of the previous attempt"*) from recommended parameters (minimum CAD timer of 100 ms, maximum CAD of 2 seconds). When an attempt actively fails (TCP RST), Section 5 recommends starting immediately without waiting for the CAD timer to expire, provided the 10 ms mandatory floor is respected. Because the recorded S2 Chrome trial launched its subsequent IPv4 attempt at 2.65 ms (< 10 ms interval between attempt starts), this is classified as an **`OBSERVED_DEVIATION`** specifically for **mandatory-floor violation** (`mandatory_status=OBSERVED_DEVIATION`) scoped to the recorded trial. Delays between 10 ms and 100 ms meet mandatory MUST requirements (`mandatory_status=OBSERVED_CONFORMANCE`) while falling outside recommended parameters (`recommended_status=OBSERVED_DEVIATION`), and are explained as recommended-range deviations without being labeled as MUST violations.
 - **RFC 8305 §5 (CAD SYN Timeout)**: Verifies whether unacknowledged IPv6 SYNs (S1) schedule IPv4 fallback within the 100–2000 ms window (target: 250 ms). In the recorded S1 trial, CAD was 301.19 ms, satisfying both mandatory floor and recommended bounds (`OBSERVED_CONFORMANCE`).
 - **RFC 8305 §5 (High Latency Fallback)**: Verifies whether 600 ms IPv6 latency (S4) allows IPv4 to complete handshake first. In the recorded S4 trial, IPv4 won with CAD 294.87 ms (`OBSERVED_CONFORMANCE`).
-- **RFC 8305 §4 (Resolution Delay)**: Evaluates delayed AAAA behavior (S6). In the recorded Chrome trial (`trial-20261028171417-b2d83f2f`), Chrome waited ~515 ms for late AAAA and connected over IPv6 rather than initiating IPv4 fallback after the RFC 8305 §4 recommended 50 ms Resolution Delay. This is classified as an **`OBSERVED_DEVIATION`** strictly scoped to the recorded trial, without inferring general browser non-conformance.
+- **RFC 8305 §3 (Resolution Delay)**: Evaluates delayed AAAA behavior (S6). In the recorded Chrome trial (`trial-20261028171417-b2d83f2f`), Chrome waited ~515 ms for late AAAA and connected over IPv6 rather than initiating IPv4 fallback after the RFC 8305 §3 recommended 50 ms Resolution Delay. This is classified as an **`OBSERVED_DEVIATION`** strictly scoped to the recorded trial, without inferring general browser non-conformance.
 - **Unsupported Checks**: Features not testable under isolated single-trial protocol (e.g., cross-session cache statefulness in §7) or out of testbed scope (e.g., QUIC/SCTP in §8) are strictly marked **`INDETERMINATE`**.
 
 ## 8. Useful commands
@@ -243,7 +243,10 @@ python3 -m unittest lab.test_campaign_pcap_regression  # authentic October 29 S0
 python3 lab/test_analyze.py
 python3 lab/test_run_campaign.py
 python3 lab/test_run_trial.py
-python3 -m unittest discover lab
+# Run all 725 offline unit tests in lab/
+python3 -m unittest discover -s lab -p "test_*.py"
+# Run all 93 offline E2E and adversarial synthetic tests in tests/
+python3 -m unittest discover -s tests -p "test_*.py"
 ```
 
 A successful automated test suite does not, by itself, prove a live network experiment worked. Use the matching trial JSON, PCAP, and baseline verification as evidence for live claims.
