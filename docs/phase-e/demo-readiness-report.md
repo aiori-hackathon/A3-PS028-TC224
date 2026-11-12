@@ -1,13 +1,13 @@
 # PS-028 Phase E Demo-Readiness Remediation & Verification Report
 
-- **Document Version**: `1.4.0` (Incorporating Batch 1D Final Manifest Identity, Repetition, and Replay Status Consistency)
+- **Document Version**: `1.5.0` (Incorporating Batch 1E Canonical Scenario Identity and Cohort-Key Validation)
 - **Report Date**: 2026-11-12
 - **Lead Role**: Senior Internet Measurement Scientist, Network Protocol Engineer, Test Architect
 - **Working Branch**: `regional/phase-e-demo-readiness`
 - **Source Revision**: `regional/ps028-phase-cd` @ commit [`b920ebc93f2e6aaae8396b7095b6cd3c8598ade5`](https://github.com/aiori-hackathon/A3-PS028-TC224/commit/b920ebc93f2e6aaae8396b7095b6cd3c8598ade5)
 - **Consolidation Target**: `regional/p0-remediation` @ commit [`7c6ab23c2a378bbc8556fcc15f5911f626502576`](https://github.com/aiori-hackathon/A3-PS028-TC224/commit/7c6ab23c2a378bbc8556fcc15f5911f626502576)
 - **Historical Integrity Seal**: `lab/derived/phase-c/historical_integrity_before.sha256` (**705/705 Verified OK — 0 Failures**)
-- **Automated Test Results**: **913 Passing Tests** (0 Failures, 0 Errors, 0 Skips — 100% Pass Rate)
+- **Automated Test Results**: **918 Passing Tests** (0 Failures, 0 Errors, 0 Skips — 100% Pass Rate)
 
 ---
 
@@ -44,12 +44,12 @@ At preflight discovery (Stage 0), the repository was situated on `regional/ps028
 
 ### Files Modified
 1. `lab/demo_replay.py`: Full fail-closed rewrite supporting 14 authentic cases (S0–S6 × Chrome/Firefox); requires rederived JSON records fail-closed with complete identity, primary-flow cross-validation, mandatory rederived PCAP digest verification against canonical checksums, strict integer HTTP 200 outcome validation (rejecting non-200 and fractional/boolean values), and explicit agreement between dissected and rederived HTTP statuses.
-2. `lab/build_demo_bundle.py`: Deterministic data bundle builder; parses canonical checksum manifest, requires non-empty `campaign_id` in `campaign_manifest.json` without fallback, requires 3-way PCAP checksum match (ledger == rederived primary_flow == checksum manifest), enforces strict primary-flow evidence validation (positive integers for frame IDs and strict 200 for HTTP status), cross-checks attempts-ledger campaign ID, classification, and HTTP status, verifies classification-to-family consistency, validates cohort browser versions, strictly validates repetition numbers (exact integers 1..20, requiring all 1..20 present without duplicates in each cohort), preserves null retransmissions, and records all 280 rederived trial hashes and checksum manifest in provenance sidecar.
+2. `lab/build_demo_bundle.py`: Deterministic data bundle builder; parses canonical checksum manifest, requires non-empty `campaign_id` in `campaign_manifest.json` without fallback, requires 3-way PCAP checksum match (ledger == rederived primary_flow == checksum manifest), enforces strict primary-flow evidence validation (positive integers for frame IDs and strict 200 for HTTP status), cross-checks attempts-ledger campaign ID, classification, and HTTP status, enforces canonical scenario ID validation against `CANONICAL_SCENARIOS` (rejecting missing, empty, or unknown scenario IDs), verifies exact canonical cohort keys (`expected_cohort_keys == actual_cohort_keys`), verifies classification-to-family consistency, validates cohort browser versions, strictly validates repetition numbers (exact integers 1..20, requiring all 1..20 present without duplicates in each cohort), preserves null retransmissions, and records all 280 rederived trial hashes and checksum manifest in provenance sidecar.
 3. `lab/demo_export.py`: Security-hardened filtered CSV/JSON exporter; strengthens formula-injection defense for strings with leading whitespace/control characters and prevents symlink traversal.
 4. `.gitignore`: Added `lab/derived/phase-e/exports/`.
-5. `README.md`: Added Phase C revision metadata, PR destination, resolved RFC 8305 assessment warning note, fixed video link text, and refreshed test counts (913 tests).
-6. `PHASE_CD_PROGRESS.md`: Updated Phase E milestones, documented test count reconciliation (913 tests).
-7. `TEST_READY.md`: Added Phase E test count evolution and reconciliation addendum (913 tests).
+5. `README.md`: Added Phase C revision metadata, PR destination, resolved RFC 8305 assessment warning note, fixed video link text, and refreshed test counts (918 tests).
+6. `PHASE_CD_PROGRESS.md`: Updated Phase E milestones, documented test count reconciliation (918 tests).
+7. `TEST_READY.md`: Added Phase E test count evolution and reconciliation addendum (918 tests).
 
 ### Files Created
 1. `lab/test_demo_replay.py`: 31 dedicated unit and acceptance tests for CLI replay engine (including 16 fail-closed rederived record, PCAP digest, and strict integer/status validation tests).
@@ -57,7 +57,7 @@ At preflight discovery (Stage 0), the repository was situated on `regional/ps028
 3. `lab/derived/phase-e/demo_bundle.json`: 9.7MB pre-compiled data bundle reconciling all 280 live trials.
 4. `lab/derived/phase-e/demo_bundle.json.provenance.json`: Sibling provenance sidecar with source input hashes (8 inputs + 280 rederived trial hashes).
 5. `lab/derived/phase-e/metric_registry.json`: Machine-readable metric specifications.
-6. `lab/test_demo_bundle.py`: 47 validation tests covering determinism, counts, simulation exclusion, lineage, 3-way digest checks, ledger cross-checks, classification consistency, strict integer frame IDs, strict HTTP status, repetition rules 1..20, cohort repetition completeness, manifest campaign identity without fallback, provenance digests, null retention, generator provenance revision tracking, and RFC 8305 consistency.
+6. `lab/test_demo_bundle.py`: 52 validation tests covering determinism, counts, simulation exclusion, lineage, 3-way digest checks, ledger cross-checks, classification consistency, strict integer frame IDs, strict HTTP status, repetition rules 1..20, cohort repetition completeness, manifest campaign identity without fallback, unknown scenario rejection, absent cohort rejection, ledger/rederived scenario cross-checks, authentic 14 canonical cohorts validation, provenance digests, null retention, generator provenance revision tracking, and RFC 8305 consistency.
 7. `lab/demo_export.py`: Security-hardened filtered CSV/JSON exporter.
 8. `lab/test_demo_export.py`: 11 tests verifying formula sanitization (including leading whitespace/control chars), path containment, symlink escape rejection, and historical directory protection.
 9. `docs/phase-e/demo-readiness-report.md`: This comprehensive formal report.
@@ -81,7 +81,7 @@ At preflight discovery (Stage 0), the repository was situated on `regional/ps028
 
 ### 4.4 Documentation & Metadata Alignment
 - **Before**: `README.md` listed only `a/lab-foundation` @ `002c4453` and had a mismatched video hyperlink display text.
-- **After**: `README.md` documents both the campaign execution baseline and the Phase C analysis revision (`regional/ps028-phase-cd` @ `b920ebc9`), identifies `regional/p0-remediation` as the PR base, fixes the demonstration video display text, and reconciles test counts across project phases to 913 passing tests.
+- **After**: `README.md` documents both the campaign execution baseline and the Phase C analysis revision (`regional/ps028-phase-cd` @ `b920ebc9`), identifies `regional/p0-remediation` as the PR base, fixes the demonstration video display text, and reconciles test counts across project phases to 918 passing tests.
 
 ---
 
@@ -158,9 +158,9 @@ sha256sum -c lab/derived/phase-c/historical_integrity_before.sha256 | grep -v ':
 
 ### Fresh Test Execution Results
 Executed on branch `regional/phase-e-demo-readiness` via Python 3.12:
-- **`lab/` Unit Test Suite**: **820 executed, 820 passed, 0 failed, 0 errored, 0 skipped** across 22 test modules (40.3s).
-- **`tests/` E2E Test Suite**: **93 executed, 93 passed, 0 failed, 0 errored, 0 skipped** across 5 tiers (0.35s).
-- **Total Passing Automated Tests**: **913 tests (100% pass rate)**.
+- **`lab/` Unit Test Suite**: **825 executed, 825 passed, 0 failed, 0 errored, 0 skipped** across 22 test modules (41.0s).
+- **`tests/` E2E Test Suite**: **93 executed, 93 passed, 0 failed, 0 errored, 0 skipped** across 5 tiers (0.38s).
+- **Total Passing Automated Tests**: **918 tests (100% pass rate)**.
 
 ### Historical Snapshot Reconciliation
 1. **67 Tests (`TEST_READY.md`)**: Initial E2E synthetic testing track baseline covering Tiers 1–4 prior to Batch C5.
@@ -170,11 +170,12 @@ Executed on branch `regional/phase-e-demo-readiness` via Python 3.12:
 5. **871 Tests (`regional/phase-e-demo-readiness` Batch 1 Review Corrections)**: Intermediate Phase E demo-readiness test count incorporating expanded fail-closed, adversarial, and symlink security test suites (778 in `lab/` + 93 in `tests/`).
 6. **886 Tests (`regional/phase-e-demo-readiness` Batch 1B Final Evidence-Lineage Corrections)**: Intermediate Phase E demo-readiness test count incorporating rederived PCAP digests, 3-way checksum cross-checks, complete primary-flow validation, and provenance generator revision tests (793 in `lab/` + 93 in `tests/`).
 7. **900 Tests (`regional/phase-e-demo-readiness` Batch 1C Final Ledger Consistency and Strict Numeric Validation)**: Intermediate Phase E demo-readiness test count incorporating attempts-ledger consistency checks, strict integer frame/status validation, and provenance generator revision regression tests (807 in `lab/` + 93 in `tests/`).
-8. **913 Tests (`regional/phase-e-demo-readiness` Batch 1D Final Manifest Identity, Repetition, and Replay Status Consistency)**: Current Phase E demo-readiness test count incorporating manifest campaign ID verification without fallback, strict repetition identity (1..20 integer validation, cohort repetition set completeness), and exact HTTP 200 replay verification:
-   - `lab/test_demo_replay.py` (31 tests, +4 tests for status 201, 202, dissected/rederived status discrepancy, and authentic 200 replay)
-   - `lab/test_demo_bundle.py` (47 tests, +9 tests for strict repetition rules, manifest campaign identity without fallback, fractional/boolean/out-of-range repetitions, duplicate/missing cohort repetitions, and authentic 1..20 cohort preservation)
+8. **913 Tests (`regional/phase-e-demo-readiness` Batch 1D Final Manifest Identity, Repetition, and Replay Status Consistency)**: Intermediate Phase E demo-readiness test count incorporating manifest campaign ID verification without fallback, strict repetition identity (1..20 integer validation, cohort repetition set completeness), and exact HTTP 200 replay verification (820 in `lab/` + 93 in `tests/`).
+9. **918 Tests (`regional/phase-e-demo-readiness` Batch 1E Canonical Scenario Identity and Cohort-Key Validation)**: Current Phase E demo-readiness test count incorporating canonical scenario ID validation against `CANONICAL_SCENARIOS` (rejecting missing, empty, or unknown scenario IDs) and exact canonical cohort-key validation (`actual_cohort_keys == expected_cohort_keys`):
+   - `lab/test_demo_replay.py` (31 tests)
+   - `lab/test_demo_bundle.py` (52 tests, +5 tests for unknown scenario S7 rejection, missing/empty scenario rejection, absent canonical cohort rejection, attempts ledger scenario mismatch rejection, and authentic 14 canonical cohorts validation)
    - `lab/test_demo_export.py` (11 tests)
-   - $731 + 89 = 820$ in `lab/` + $93$ in `tests/` = **913 total passing tests**.
+   - $731 + 94 = 825$ in `lab/` + $93$ in `tests/` = **918 total passing tests**.
 
 ---
 
@@ -202,7 +203,7 @@ For the upcoming interactive demonstration phase, we recommend:
 - **Working Branch**: `regional/phase-e-demo-readiness`
 - **Source Base**: `b920ebc93f2e6aaae8396b7095b6cd3c8598ade5` (`regional/ps028-phase-cd`)
 - **Target Branch**: `regional/p0-remediation` (`7c6ab23c2a378bbc8556fcc15f5911f626502576`)
-- **Total Commits on Working Branch**: 12 clean, logically grouped commits:
+- **Total Commits on Working Branch**: 14 clean, logically grouped commits:
   1. `e6bf1ed`: `feat(phase-e): repair CLI replay engine, expand to 14 authentic cases, and add fail-closed tests`
   2. `c5715b2`: `feat(phase-e): implement deterministic demo bundle builder and metric registry`
   3. `3cfc49a`: `feat(phase-e): implement safe demonstration export utility with formula defense and path containment`
@@ -214,7 +215,9 @@ For the upcoming interactive demonstration phase, we recommend:
   9. `d7f9d04`: `feat(phase-e): enforce attempt-ledger consistency, strict integer evidence validation, and generator provenance tracking`
   10. `426065b`: `chore(phase-e): regenerate demonstration data bundle and provenance sidecar for commit d7f9d04`
   11. `d7b4afa`: `feat(phase-e): enforce manifest campaign identity, strict 1-20 cohort repetitions, and exact HTTP 200 replay`
-  12. `[latest]`: `chore(phase-e): regenerate demonstration data bundle and provenance sidecar for commit d7b4afa`
+  12. `6953664`: `chore(phase-e): regenerate demonstration data bundle and provenance sidecar for commit d7b4afa`
+  13. `dd010ff`: `feat(phase-e): enforce canonical scenario identity and exact cohort-key validation`
+  14. `[latest]`: `chore(phase-e): regenerate demonstration data bundle and provenance sidecar for commit dd010ff`
 - **Pull Request Base**: Target branch is confirmed as `regional/p0-remediation`.
 - **Merge Gate**: In accordance with instructions, the pull request will **not** be merged autonomously. Final integration is reserved for explicit owner approval.
 

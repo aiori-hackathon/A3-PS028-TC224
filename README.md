@@ -162,9 +162,9 @@ S4 Firefox includes one direct-IPv6 main flow with a 600.95 ms SYN-to-SYN/ACK in
 |PCAP packet count / reported capture drops|36,225 / 0|
 |Primary `GET /` flows found|280 / 280|
 |Primary-flow / browser winner disagreements|0|
-|Recorded local test run|820 unit tests (lab/) + 93 E2E/adversarial tests (tests/) = 913 total; final test-runner status `OK` (100% pass)|
+|Recorded local test run|825 unit tests (lab/) + 93 E2E/adversarial tests (tests/) = 918 total; final test-runner status `OK` (100% pass)|
 
-The two excluded attempts were a Firefox S0 preflight baseline self-test failure (`Broken pipe`) and a Chrome S6 cleanup failure caused by a helper operation requiring root privileges. Both records remain in the evidence trail and were retried using unique trial IDs. The historical 400-test record reflects the initial baseline; the test suite has since expanded through Phase C/D (731 unit + 93 synthetic) and Phase E demo readiness to 820 unit tests across 22 test modules and 93 synthetic/adversarial tests, all 913 passing cleanly offline.
+The two excluded attempts were a Firefox S0 preflight baseline self-test failure (`Broken pipe`) and a Chrome S6 cleanup failure caused by a helper operation requiring root privileges. Both records remain in the evidence trail and were retried using unique trial IDs. The historical 400-test record reflects the initial baseline; the test suite has since expanded through Phase C/D (731 unit + 93 synthetic) and Phase E demo readiness to 825 unit tests across 22 test modules and 93 synthetic/adversarial tests, all 918 passing cleanly offline.
 
 The complete evidence checksum index contains 1,411 checksum-indexed artifacts, reconciling the campaign execution log with the archived evidence. The complete archive and the portable analysis ZIP serve different purposes: the complete archive preserves captures and telemetry; the portable bundle provides the analysis inputs and code for offline regeneration.
 

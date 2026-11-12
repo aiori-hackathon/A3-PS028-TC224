@@ -155,15 +155,15 @@ All tests are discoverable via standard `unittest` and are fully documented in `
 ## 6. Phase E Demo-Readiness Addendum & Test Count Reconciliation
 
 **Addendum Date**: 2026-11-12  
-**Current Test Suite Status**: **100% PASS across 913 total automated tests**
+**Current Test Suite Status**: **100% PASS across 918 total automated tests**
 
 ### 6.1 Evolution of Test Counts in `tests/`
 - **Initial Baseline (67 tests, 2026-11-11)**: Covered Tiers 1–4 (`test_tier1_features.py` [28], `test_tier2_boundaries.py` [26], `test_tier3_combinations.py` [7], `test_tier4_scenarios.py` [6]).
 - **Batch C5 Addition (+26 tests, 2026-11-12)**: Introduced `test_tier5_adversarial_c5.py` (26 adversarial privilege-decoupling and DNS fail-closed tests), expanding `tests/` to **93 tests**.
 - **Current `tests/` Status**: **93 passing tests in ~0.35s** (0 failures, 0 errors, 0 skips).
 
-### 6.2 Overall Repository Test Counts (Phase E Batch 1D Final Manifest Identity, Repetition, and Replay Status Consistency Addendum)
-- **`lab/` Unit Test Suite**: **820 passing tests** across 22 test modules (including Phase E test suites `test_demo_replay` [31], `test_demo_bundle` [47], `test_demo_export` [11]).
+### 6.2 Overall Repository Test Counts (Phase E Batch 1E Canonical Scenario Identity and Cohort-Key Validation Addendum)
+- **`lab/` Unit Test Suite**: **825 passing tests** across 22 test modules (including Phase E test suites `test_demo_replay` [31], `test_demo_bundle` [52], `test_demo_export` [11]).
 - **`tests/` E2E Test Suite**: **93 passing tests** across 5 tiers.
-- **Total Repository Automated Tests**: **913 passing tests** (100% pass rate).
+- **Total Repository Automated Tests**: **918 passing tests** (100% pass rate).
 
