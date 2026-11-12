@@ -410,6 +410,41 @@ VALID_SUCCESSFUL_CLASSIFICATIONS: Dict[str, str] = {
 }
 
 
+def validate_strict_repetition(val: Any, field_name: str, trial_id: str = "") -> int:
+    """
+    Strict integer validation for trial repetition identity.
+    Enforces campaign repetition range: 1..20.
+    Rejects:
+    - None
+    - Booleans (True / False)
+    - Floating point values (e.g. 10.5, 10.0)
+    - Non-numeric strings (e.g. 'abc', '')
+    - Strings containing decimal points (e.g. '10.5', '10.0')
+    - Values < 1 or > 20 (including 0, negative values, and values above 20)
+    Returns int in range 1..20.
+    """
+    prefix = f"Trial {trial_id} " if trial_id else ""
+    if val is None:
+        raise ValueError(f"{prefix}{field_name} is missing or None")
+    if isinstance(val, bool):
+        raise ValueError(f"{prefix}{field_name} cannot be a boolean: {val}")
+    if isinstance(val, float):
+        raise ValueError(f"{prefix}{field_name} cannot be a floating-point number: {val}")
+    if isinstance(val, int):
+        if val < 1 or val > 20:
+            raise ValueError(f"{prefix}{field_name} must be an integer between 1 and 20, got {val}")
+        return val
+    if isinstance(val, str):
+        val_str = val.strip()
+        if not re.fullmatch(r"[0-9]+", val_str):
+            raise ValueError(f"{prefix}{field_name} must be a valid integer string, got '{val}'")
+        val_int = int(val_str)
+        if val_int < 1 or val_int > 20:
+            raise ValueError(f"{prefix}{field_name} must be an integer between 1 and 20, got {val_int}")
+        return val_int
+    raise ValueError(f"{prefix}{field_name} has invalid type {type(val).__name__}: {val}")
+
+
 TRIAL_ID_PATTERN = re.compile(r"trial-\d{14}-[0-9a-f]{8}")
 HEX64_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 
@@ -578,7 +613,12 @@ def build_demonstration_bundle(
     with open(manifest_file, "r", encoding="utf-8") as f:
         manifest_data = json.load(f)
 
-    campaign_id = manifest_data.get("campaign_id", "ps028-a10-live-20261030-01")
+    raw_campaign_id = manifest_data.get("campaign_id")
+    if not raw_campaign_id or not isinstance(raw_campaign_id, str) or not raw_campaign_id.strip():
+        raise ValueError(
+            f"Campaign manifest {manifest_file} is missing or has empty 'campaign_id': {raw_campaign_id!r}"
+        )
+    campaign_id = raw_campaign_id.strip()
 
     # 2. Ingest attempts ledger
     with open(attempts_file, "r", encoding="utf-8") as f:
@@ -800,15 +840,15 @@ def build_demonstration_bundle(
                 f"expected '{cohort_browser['display_name']}' or '{cohort_browser['version']}'"
             )
 
-        # Preserve repetition from attempts ledger; verify agreement if rederived supplies one
-        ledger_rep = parse_int_or_none(row.get("repetition"))
-        if ledger_rep is None or ledger_rep <= 0:
-            raise ValueError(f"Attempt {row.get('attempt_id')} has invalid repetition '{row.get('repetition')}'")
-        reder_rep = parse_int_or_none(reder.get("repetition"))
-        if reder_rep is not None and reder_rep != ledger_rep:
-            raise ValueError(
-                f"Repetition mismatch for trial {tid}: attempts ledger has '{ledger_rep}' but rederived has '{reder_rep}'"
-            )
+        # Strict repetition identity: exact integer in range 1..20
+        ledger_rep = validate_strict_repetition(row.get("repetition"), "attempts ledger repetition", tid)
+        reder_rep_raw = reder.get("repetition")
+        if reder_rep_raw is not None:
+            reder_rep = validate_strict_repetition(reder_rep_raw, "rederived repetition", tid)
+            if reder_rep != ledger_rep:
+                raise ValueError(
+                    f"Repetition mismatch for trial {tid}: attempts ledger has '{ledger_rep}' but rederived has '{reder_rep}'"
+                )
         rep = ledger_rep
 
         if reder.get("validity_category") != "VALID_LIVE":
@@ -952,9 +992,6 @@ def build_demonstration_bundle(
         raise ValueError(
             f"Rederived trial digests count mismatch: {len(rederived_digests)} != {EXPECTED_VALID_LIVE_COUNT}"
         )
-        raise ValueError(
-            f"Valid live trials mismatch: {len(valid_trials)} != {EXPECTED_VALID_LIVE_COUNT}"
-        )
     if len(exclusions) != EXPECTED_EXCLUSIONS_COUNT:
         raise ValueError(
             f"Exclusions count mismatch: {len(exclusions)} != {EXPECTED_EXCLUSIONS_COUNT}"
@@ -964,10 +1001,28 @@ def build_demonstration_bundle(
             f"Cohort count mismatch: {len(cohort_trial_records)} != {EXPECTED_COHORTS_COUNT}"
         )
 
+    expected_repetition_set = set(range(1, EXPECTED_TRIALS_PER_COHORT + 1))
     for cohort_key, c_trials in cohort_trial_records.items():
         if len(c_trials) != EXPECTED_TRIALS_PER_COHORT:
             raise ValueError(
                 f"Cohort {cohort_key} count mismatch: {len(c_trials)} != {EXPECTED_TRIALS_PER_COHORT}"
+            )
+        reps = [t["repetition"] for t in c_trials]
+        if len(set(reps)) != len(reps):
+            seen = set()
+            dups = sorted({r for r in reps if r in seen or seen.add(r)})
+            raise ValueError(
+                f"Cohort {cohort_key} contains duplicate repetition(s): {dups}"
+            )
+        missing_reps = expected_repetition_set - set(reps)
+        if missing_reps:
+            raise ValueError(
+                f"Cohort {cohort_key} missing repetition(s): {sorted(missing_reps)}"
+            )
+        invalid_reps = set(reps) - expected_repetition_set
+        if invalid_reps:
+            raise ValueError(
+                f"Cohort {cohort_key} contains invalid repetition(s) outside 1-20: {sorted(invalid_reps)}"
             )
 
     # Stable sorting

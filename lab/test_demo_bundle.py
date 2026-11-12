@@ -30,6 +30,7 @@ from lab.build_demo_bundle import (
     compute_sha256,
     validate_strict_positive_int,
     validate_strict_http_status,
+    validate_strict_repetition,
 )
 
 
@@ -564,7 +565,7 @@ class TestDemoBundleBuilder(unittest.TestCase):
             shutil.copytree(DEFAULT_PHASE_C_DIR / "rederived_results", tmp_c_dir / "rederived_results")
             target_json = tmp_c_dir / "rederived_results" / "trial-20261029205425-6cb90a54.json"
             data = json.loads(target_json.read_text(encoding="utf-8"))
-            data["repetition"] = 99  # ledger has 1
+            data["repetition"] = 2  # ledger has 1
             target_json.write_text(json.dumps(data), encoding="utf-8")
 
             with self.assertRaises(ValueError) as ctx:
@@ -981,6 +982,310 @@ class TestDemoBundleBuilder(unittest.TestCase):
                 capture_output=True,
             )
             self.assertNotEqual(res.returncode, 0)
+
+    def test_validate_strict_repetition_rules(self):
+        """Correction B: Strict repetition validation rules for integers 1..20."""
+        self.assertEqual(validate_strict_repetition(1, "rep"), 1)
+        self.assertEqual(validate_strict_repetition(20, "rep"), 20)
+        self.assertEqual(validate_strict_repetition("1", "rep"), 1)
+        self.assertEqual(validate_strict_repetition("20", "rep"), 20)
+
+        invalid_cases = [
+            (None, "is missing or None"),
+            (True, "cannot be a boolean"),
+            (False, "cannot be a boolean"),
+            (10.5, "cannot be a floating-point number"),
+            (10.0, "cannot be a floating-point number"),
+            ("10.5", "must be a valid integer string"),
+            ("10.0", "must be a valid integer string"),
+            ("abc", "must be a valid integer string"),
+            ("", "must be a valid integer string"),
+            (0, "must be an integer between 1 and 20"),
+            (21, "must be an integer between 1 and 20"),
+            (-1, "must be an integer between 1 and 20"),
+            ("0", "must be an integer between 1 and 20"),
+            ("21", "must be an integer between 1 and 20"),
+        ]
+        for val, err_fragment in invalid_cases:
+            with self.subTest(val=val):
+                with self.assertRaises(ValueError) as ctx:
+                    validate_strict_repetition(val, "test_rep")
+                self.assertIn(err_fragment, str(ctx.exception))
+
+    def test_manifest_missing_or_empty_campaign_id_fails_closed(self):
+        """Correction A: Missing or empty campaign_id in manifest fails closed without fallback."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_c_dir = Path(tmpdir) / "campaign"
+            tmp_c_dir.mkdir()
+            for item in DEFAULT_CAMPAIGN_DIR.iterdir():
+                if item.name != "campaign_manifest.json":
+                    (tmp_c_dir / item.name).symlink_to(item)
+
+            orig_man = json.loads((DEFAULT_CAMPAIGN_DIR / "campaign_manifest.json").read_text(encoding="utf-8"))
+
+            # Case 1: missing campaign_id
+            man1 = dict(orig_man)
+            man1.pop("campaign_id", None)
+            (tmp_c_dir / "campaign_manifest.json").write_text(json.dumps(man1), encoding="utf-8")
+            with self.assertRaises(ValueError) as ctx:
+                build_demonstration_bundle(
+                    campaign_dir=tmp_c_dir,
+                    phase_c_dir=DEFAULT_PHASE_C_DIR,
+                    output_dir=Path(tmpdir) / "out1",
+                )
+            self.assertIn("missing or has empty 'campaign_id'", str(ctx.exception))
+
+            # Case 2: empty string campaign_id
+            man2 = dict(orig_man)
+            man2["campaign_id"] = "   "
+            (tmp_c_dir / "campaign_manifest.json").write_text(json.dumps(man2), encoding="utf-8")
+            with self.assertRaises(ValueError) as ctx:
+                build_demonstration_bundle(
+                    campaign_dir=tmp_c_dir,
+                    phase_c_dir=DEFAULT_PHASE_C_DIR,
+                    output_dir=Path(tmpdir) / "out2",
+                )
+            self.assertIn("missing or has empty 'campaign_id'", str(ctx.exception))
+
+    def test_fractional_ledger_repetition_fails_closed(self):
+        """Correction B: Fractional repetition in attempts ledger fails closed."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_c_dir = Path(tmpdir) / "phase-c"
+            tmp_c_dir.mkdir()
+            for item in DEFAULT_PHASE_C_DIR.iterdir():
+                if item.name != "attempts.csv":
+                    (tmp_c_dir / item.name).symlink_to(item)
+
+            orig_lines = (DEFAULT_PHASE_C_DIR / "attempts.csv").read_text(encoding="utf-8").splitlines()
+            header = orig_lines[0]
+            first_row = orig_lines[1].split(",")
+            first_row[header.split(",").index("repetition")] = "1.0"
+            corrupted_csv = "\n".join([header, ",".join(first_row)] + orig_lines[2:]) + "\n"
+            (tmp_c_dir / "attempts.csv").write_text(corrupted_csv, encoding="utf-8")
+
+            with self.assertRaises(ValueError) as ctx:
+                build_demonstration_bundle(
+                    campaign_dir=DEFAULT_CAMPAIGN_DIR,
+                    phase_c_dir=tmp_c_dir,
+                    output_dir=Path(tmpdir) / "out",
+                )
+            self.assertIn("must be a valid integer string", str(ctx.exception))
+
+    def test_fractional_rederived_repetition_fails_closed(self):
+        """Correction B: Fractional repetition in rederived trial record fails closed."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_c_dir = Path(tmpdir) / "phase-c"
+            tmp_c_dir.mkdir()
+            for item in DEFAULT_PHASE_C_DIR.iterdir():
+                if item.name != "rederived_results":
+                    (tmp_c_dir / item.name).symlink_to(item)
+            trials_dir = tmp_c_dir / "rederived_results"
+            trials_dir.mkdir()
+            for tfile in (DEFAULT_PHASE_C_DIR / "rederived_results").glob("trial-*.json"):
+                (trials_dir / tfile.name).symlink_to(tfile)
+
+            first_trial = sorted((DEFAULT_PHASE_C_DIR / "rederived_results").glob("trial-*.json"))[0]
+            target_json = trials_dir / first_trial.name
+            target_json.unlink()
+            data = json.loads(first_trial.read_text(encoding="utf-8"))
+            data["repetition"] = 1.5
+            target_json.write_text(json.dumps(data), encoding="utf-8")
+
+            with self.assertRaises(ValueError) as ctx:
+                build_demonstration_bundle(
+                    campaign_dir=DEFAULT_CAMPAIGN_DIR,
+                    phase_c_dir=tmp_c_dir,
+                    output_dir=Path(tmpdir) / "out",
+                )
+            self.assertIn("cannot be a floating-point number", str(ctx.exception))
+
+    def test_boolean_or_invalid_repetition_fails_closed(self):
+        """Correction B: Boolean or non-numeric repetition in rederived record fails closed."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_c_dir = Path(tmpdir) / "phase-c"
+            tmp_c_dir.mkdir()
+            for item in DEFAULT_PHASE_C_DIR.iterdir():
+                if item.name != "rederived_results":
+                    (tmp_c_dir / item.name).symlink_to(item)
+            trials_dir = tmp_c_dir / "rederived_results"
+            trials_dir.mkdir()
+            for tfile in (DEFAULT_PHASE_C_DIR / "rederived_results").glob("trial-*.json"):
+                (trials_dir / tfile.name).symlink_to(tfile)
+
+            first_trial = sorted((DEFAULT_PHASE_C_DIR / "rederived_results").glob("trial-*.json"))[0]
+            target_json = trials_dir / first_trial.name
+            target_json.unlink()
+            data = json.loads(first_trial.read_text(encoding="utf-8"))
+            data["repetition"] = True
+            target_json.write_text(json.dumps(data), encoding="utf-8")
+
+            with self.assertRaises(ValueError) as ctx:
+                build_demonstration_bundle(
+                    campaign_dir=DEFAULT_CAMPAIGN_DIR,
+                    phase_c_dir=tmp_c_dir,
+                    output_dir=Path(tmpdir) / "out",
+                )
+            self.assertIn("cannot be a boolean", str(ctx.exception))
+
+    def test_repetition_out_of_range_0_and_21_fails_closed(self):
+        """Correction B: Repetitions 0 and 21 fail closed."""
+        for bad_rep in ["0", "21"]:
+            with self.subTest(bad_rep=bad_rep):
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    tmp_c_dir = Path(tmpdir) / "phase-c"
+                    tmp_c_dir.mkdir()
+                    for item in DEFAULT_PHASE_C_DIR.iterdir():
+                        if item.name != "attempts.csv":
+                            (tmp_c_dir / item.name).symlink_to(item)
+
+                    orig_lines = (DEFAULT_PHASE_C_DIR / "attempts.csv").read_text(encoding="utf-8").splitlines()
+                    header = orig_lines[0]
+                    first_row = orig_lines[1].split(",")
+                    first_row[header.split(",").index("repetition")] = bad_rep
+                    corrupted_csv = "\n".join([header, ",".join(first_row)] + orig_lines[2:]) + "\n"
+                    (tmp_c_dir / "attempts.csv").write_text(corrupted_csv, encoding="utf-8")
+
+                    with self.assertRaises(ValueError) as ctx:
+                        build_demonstration_bundle(
+                            campaign_dir=DEFAULT_CAMPAIGN_DIR,
+                            phase_c_dir=tmp_c_dir,
+                            output_dir=Path(tmpdir) / "out",
+                        )
+                    self.assertIn("must be an integer between 1 and 20", str(ctx.exception))
+
+    def test_duplicate_repetition_within_cohort_fails_closed(self):
+        """Correction B: Duplicate repetition within scenario-browser cohort fails closed."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_c_dir = Path(tmpdir) / "phase-c"
+            tmp_c_dir.mkdir()
+            for item in DEFAULT_PHASE_C_DIR.iterdir():
+                if item.name not in ("attempts.csv", "rederived_results"):
+                    (tmp_c_dir / item.name).symlink_to(item)
+
+            trials_dir = tmp_c_dir / "rederived_results"
+            trials_dir.mkdir()
+            for tfile in (DEFAULT_PHASE_C_DIR / "rederived_results").glob("trial-*.json"):
+                (trials_dir / tfile.name).symlink_to(tfile)
+
+            orig_lines = (DEFAULT_PHASE_C_DIR / "attempts.csv").read_text(encoding="utf-8").splitlines()
+            header = orig_lines[0]
+            h_cols = header.split(",")
+            rep_idx = h_cols.index("repetition")
+            tid_idx = h_cols.index("trial_id")
+            cat_idx = h_cols.index("validity_category")
+
+            row1 = orig_lines[1].split(",")
+            row2 = None
+            row2_line_idx = -1
+            for idx in range(2, len(orig_lines)):
+                cand = orig_lines[idx].split(",")
+                if cand[cat_idx] == "VALID_LIVE" and cand[h_cols.index("scenario_id")] == row1[h_cols.index("scenario_id")] and cand[h_cols.index("browser")] == row1[h_cols.index("browser")]:
+                    row2 = cand
+                    row2_line_idx = idx
+                    break
+            self.assertIsNotNone(row2)
+
+            dup_rep = row1[rep_idx]
+            row2[rep_idx] = dup_rep
+            new_lines = list(orig_lines)
+            new_lines[row2_line_idx] = ",".join(row2)
+            (tmp_c_dir / "attempts.csv").write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+
+            t2_id = row2[tid_idx]
+            t2_path = trials_dir / f"{t2_id}.json"
+            if t2_path.exists():
+                t2_path.unlink()
+                data2 = json.loads((DEFAULT_PHASE_C_DIR / "rederived_results" / f"{t2_id}.json").read_text(encoding="utf-8"))
+                data2["repetition"] = int(dup_rep)
+                t2_path.write_text(json.dumps(data2), encoding="utf-8")
+
+            with self.assertRaises(ValueError) as ctx:
+                build_demonstration_bundle(
+                    campaign_dir=DEFAULT_CAMPAIGN_DIR,
+                    phase_c_dir=tmp_c_dir,
+                    output_dir=Path(tmpdir) / "out",
+                )
+            self.assertIn("contains duplicate repetition(s)", str(ctx.exception))
+
+    def test_missing_repetition_within_cohort_fails_closed(self):
+        """Correction B: Cohort validation enforces all repetitions 1..20 present."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_c_dir = Path(tmpdir) / "phase-c"
+            tmp_c_dir.mkdir()
+            for item in DEFAULT_PHASE_C_DIR.iterdir():
+                if item.name not in ("attempts.csv", "rederived_results"):
+                    (tmp_c_dir / item.name).symlink_to(item)
+
+            trials_dir = tmp_c_dir / "rederived_results"
+            trials_dir.mkdir()
+            for tfile in (DEFAULT_PHASE_C_DIR / "rederived_results").glob("trial-*.json"):
+                (trials_dir / tfile.name).symlink_to(tfile)
+
+            orig_lines = (DEFAULT_PHASE_C_DIR / "attempts.csv").read_text(encoding="utf-8").splitlines()
+            header = orig_lines[0]
+            h_cols = header.split(",")
+            rep_idx = h_cols.index("repetition")
+            tid_idx = h_cols.index("trial_id")
+            cat_idx = h_cols.index("validity_category")
+
+            row1 = orig_lines[1].split(",")
+            row2 = None
+            row2_line_idx = -1
+            for idx in range(2, len(orig_lines)):
+                cand = orig_lines[idx].split(",")
+                if cand[cat_idx] == "VALID_LIVE" and cand[h_cols.index("scenario_id")] == row1[h_cols.index("scenario_id")] and cand[h_cols.index("browser")] == row1[h_cols.index("browser")]:
+                    row2 = cand
+                    row2_line_idx = idx
+                    break
+            self.assertIsNotNone(row2)
+
+            dup_rep = row1[rep_idx]
+            row2[rep_idx] = dup_rep
+            new_lines = list(orig_lines)
+            new_lines[row2_line_idx] = ",".join(row2)
+            (tmp_c_dir / "attempts.csv").write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+
+            t2_id = row2[tid_idx]
+            t2_path = trials_dir / f"{t2_id}.json"
+            if t2_path.exists():
+                t2_path.unlink()
+                data2 = json.loads((DEFAULT_PHASE_C_DIR / "rederived_results" / f"{t2_id}.json").read_text(encoding="utf-8"))
+                data2["repetition"] = int(dup_rep)
+                t2_path.write_text(json.dumps(data2), encoding="utf-8")
+
+            with self.assertRaises(ValueError) as ctx:
+                build_demonstration_bundle(
+                    campaign_dir=DEFAULT_CAMPAIGN_DIR,
+                    phase_c_dir=tmp_c_dir,
+                    output_dir=Path(tmpdir) / "out",
+                )
+            self.assertTrue(
+                "contains duplicate repetition(s)" in str(ctx.exception)
+                or "missing repetition(s)" in str(ctx.exception)
+            )
+            self.assertTrue(
+                "contains duplicate repetition(s)" in str(ctx.exception)
+                or "missing repetition(s)" in str(ctx.exception)
+            )
+
+    def test_authentic_repetition_preservation_1_to_20(self):
+        """Correction B: Authentic demonstration bundle strictly preserves repetitions 1..20 for all 14 cohorts."""
+        trials = self.bundle_data["trials"]
+        self.assertEqual(len(trials), EXPECTED_VALID_LIVE_COUNT)
+
+        cohorts = {}
+        for t in trials:
+            ck = (t["browser"], t["scenario_id"])
+            cohorts.setdefault(ck, []).append(t["repetition"])
+
+        self.assertEqual(len(cohorts), EXPECTED_COHORTS_COUNT)
+        expected_set = set(range(1, 21))
+
+        for ck, reps in cohorts.items():
+            self.assertEqual(len(reps), 20, f"Cohort {ck} has incorrect trial count")
+            self.assertEqual(set(reps), expected_set, f"Cohort {ck} does not contain exact range 1..20")
+            for r in reps:
+                self.assertIs(type(r), int, f"Repetition {r} in cohort {ck} is not Python int")
 
 
 if __name__ == "__main__":

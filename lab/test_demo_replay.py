@@ -271,7 +271,7 @@ class TestDemoReplayDeterministicUnit(unittest.TestCase):
             rederived_dir=REDERIVED_DIR,
         )
         self.assertEqual(rec["status"], "FAIL")
-        self.assertTrue(any("HTTP status not in 200-299 success range" in err for err in rec["errors"]))
+        self.assertTrue(any("Primary flow HTTP status must be integer 200" in err for err in rec["errors"]))
 
     def test_float_http_status_code_in_rederived_fails_closed(self):
         """Correction B: Replay engine rejects floating-point 200.0 in rederived record."""
@@ -314,7 +314,86 @@ class TestDemoReplayDeterministicUnit(unittest.TestCase):
             rederived_dir=REDERIVED_DIR,
         )
         self.assertEqual(rec["status"], "FAIL")
-        self.assertTrue(any("HTTP status not in 200-299 success range" in err for err in rec["errors"]))
+        self.assertTrue(any("Primary flow HTTP status must be integer 200" in err for err in rec["errors"]))
+
+    @patch("lab.demo_replay.dissect_pcap")
+    def test_dissected_status_201_fails_closed(self, mock_dissect):
+        """Correction C: Replay engine rejects HTTP status 201 Created (must strictly be 200)."""
+        mock_dissect.return_value = {
+            "tcp_streams": {"0": {}},
+            "primary_flow": {
+                "stream_id": "0",
+                "family": "IPv6",
+                "handshake_completed": True,
+                "syn_frame": 1,
+                "final_ack_frame": 3,
+                "http_request_frame": 4,
+                "http_response_frame": 5,
+                "http_status_code": 201,  # 201 is not 200
+            },
+            "metrics": {},
+        }
+        rec = replay_single_trial(
+            demo=self.valid_spec,
+            checksum_map=self.valid_checksum_map,
+            campaign_dir=CAMPAIGN_DIR,
+            rederived_dir=REDERIVED_DIR,
+        )
+        self.assertEqual(rec["status"], "FAIL")
+        self.assertTrue(any("Primary flow HTTP status must be integer 200, got: 201" in err for err in rec["errors"]))
+
+    @patch("lab.demo_replay.dissect_pcap")
+    def test_dissected_status_202_fails_closed(self, mock_dissect):
+        """Correction C: Replay engine rejects HTTP status 202 Accepted (must strictly be 200)."""
+        mock_dissect.return_value = {
+            "tcp_streams": {"0": {}},
+            "primary_flow": {
+                "stream_id": "0",
+                "family": "IPv6",
+                "handshake_completed": True,
+                "syn_frame": 1,
+                "final_ack_frame": 3,
+                "http_request_frame": 4,
+                "http_response_frame": 5,
+                "http_status_code": 202,  # 202 is not 200
+            },
+            "metrics": {},
+        }
+        rec = replay_single_trial(
+            demo=self.valid_spec,
+            checksum_map=self.valid_checksum_map,
+            campaign_dir=CAMPAIGN_DIR,
+            rederived_dir=REDERIVED_DIR,
+        )
+        self.assertEqual(rec["status"], "FAIL")
+        self.assertTrue(any("Primary flow HTTP status must be integer 200, got: 202" in err for err in rec["errors"]))
+
+    @patch("lab.demo_replay.dissect_pcap")
+    def test_dissected_and_rederived_status_discrepancy_fails_closed(self, mock_dissect):
+        """Correction C: Replay engine detects discrepancy between dissected status and rederived status."""
+        # Rederived has 200, mock dissect has 201
+        mock_dissect.return_value = {
+            "tcp_streams": {"0": {}},
+            "primary_flow": {
+                "stream_id": "0",
+                "family": "IPv6",
+                "handshake_completed": True,
+                "syn_frame": 1,
+                "final_ack_frame": 3,
+                "http_request_frame": 4,
+                "http_response_frame": 5,
+                "http_status_code": 201,
+            },
+            "metrics": {},
+        }
+        rec = replay_single_trial(
+            demo=self.valid_spec,
+            checksum_map=self.valid_checksum_map,
+            campaign_dir=CAMPAIGN_DIR,
+            rederived_dir=REDERIVED_DIR,
+        )
+        self.assertEqual(rec["status"], "FAIL")
+        self.assertTrue(any("Dissected HTTP status mismatch with rederived: 201 != 200" in err for err in rec["errors"]))
 
     @patch("lab.demo_replay.dissect_pcap")
     def test_fractional_frame_in_replay_fails_closed(self, mock_dissect):
@@ -488,6 +567,21 @@ class TestDemoReplayAuthenticAcceptance(unittest.TestCase):
 
                 # Verify event timeline extraction
                 self.assertGreater(len(rec["events"]), 0)
+
+    def test_valid_authentic_http_200_replay(self):
+        """Correction C: Authentic PCAP replay strictly verifies integer HTTP 200 outcome."""
+        demo = REPRESENTATIVE_TRIALS[0]
+        rec = replay_single_trial(
+            demo=demo,
+            checksum_map=self.checksum_map,
+            campaign_dir=CAMPAIGN_DIR,
+            rederived_dir=REDERIVED_DIR,
+        )
+        self.assertEqual(rec["status"], "PASS")
+        self.assertEqual(rec["errors"], [])
+        pf = rec["primary_flow"]
+        self.assertIs(type(pf["http_status_code"]), int)
+        self.assertEqual(pf["http_status_code"], 200)
 
     def test_full_replay_demonstration_cli_success(self):
         """Full CLI replay must return exit code 0."""

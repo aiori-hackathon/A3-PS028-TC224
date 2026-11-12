@@ -542,8 +542,15 @@ def replay_single_trial(
     status_code = primary_flow.get("http_status_code")
     if status_code is None:
         record["errors"].append("Primary flow HTTP status code missing (fail-closed, no default)")
-    elif type(status_code) is not int or status_code not in range(200, 300):
-        record["errors"].append(f"Primary flow HTTP status not in 200-299 success range: {status_code}")
+    elif type(status_code) is not int or status_code != 200:
+        record["errors"].append(f"Primary flow HTTP status must be integer 200, got: {status_code}")
+
+    if reder_pf:
+        reder_status = reder_pf.get("http_status_code")
+        if status_code != reder_status:
+            record["errors"].append(
+                f"Dissected HTTP status mismatch with rederived: {status_code} != {reder_status}"
+            )
 
     # Latency metric extraction (preserve zeros, do not coerce missing to zero)
     t_connect = primary_flow.get("t_connect_ms")
