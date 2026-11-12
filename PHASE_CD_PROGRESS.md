@@ -2,8 +2,8 @@
 
 - **Branch**: `regional/phase-e-demo-readiness` (branched from `regional/ps028-phase-cd` @ `b920ebc93f2e6aaae8396b7095b6cd3c8598ade5`)
 - **Base Branch**: `regional/p0-remediation` @ commit `7c6ab23c2a378bbc8556fcc15f5911f626502576`
-- **Last Updated**: 2026-11-12T14:45:00Z
-- **Current Status**: **PHASE C/D SEALED & VERIFIED; PHASE E DEMO-READINESS REMEDIATED (900 PASSING TESTS)**
+- **Last Updated**: 2026-11-12T15:15:00Z
+- **Current Status**: **PHASE C/D SEALED & VERIFIED; PHASE E DEMO-READINESS REMEDIATED (913 PASSING TESTS)**
 
 ---
 
@@ -85,16 +85,16 @@
   - [x] Generated machine-readable metric registry (`lab/derived/phase-e/metric_registry.json`) preserving canonical `connection_attempt_delay_ms` key
   - [x] Implemented safe demonstration export utility (`lab/demo_export.py`) with spreadsheet formula-injection defense and realpath containment checks
   - [x] Verified repository hygiene: updated `.gitignore`, corrected `README.md` metadata and video hyperlink text
-  - [x] Reconciled test snapshots across project history (900 total fresh passing tests)
-  - [x] Verified 100% offline clean test execution (900 passing tests total)
+  - [x] Reconciled test snapshots across project history (913 total fresh passing tests)
+  - [x] Verified 100% offline clean test execution (913 passing tests total)
 
 ---
 
 ## 2. Test Suite Counts & Reconciliation
 
-- **Class A (Deterministic Unit Tests in `lab/`)**: **807 passing** (0 errors, 0 failures, 0 skips) across 22 test modules
+- **Class A (Deterministic Unit Tests in `lab/`)**: **820 passing** (0 errors, 0 failures, 0 skips) across 22 test modules
 - **Class B (Synthetic & Fixture Tests in `tests/`)**: **93 passing** (0 errors, 0 failures, 0 skips) across 5 tiers
-- **Total Passing Automated Tests**: **900 tests (100% pass rate)**
+- **Total Passing Automated Tests**: **913 tests (100% pass rate)**
 
 ### Documented Test Count Reconciliation Across Project History
 - **67 Tests (`TEST_READY.md`)**: Initial E2E synthetic testing track baseline covering Tiers 1–4 prior to Batch C5.
@@ -103,11 +103,12 @@
 - **857 Tests (Initial Phase E PR #9 Submission)**: Pre-review Phase E baseline with `test_demo_replay` (15), `test_demo_bundle` (9), `test_demo_export` (9) (+33 tests in `lab/`).
 - **871 Tests (`regional/phase-e-demo-readiness` Batch 1 Review Corrections)**: Intermediate demo-readiness test count incorporating expanded fail-closed, adversarial, and symlink security test suites (778 in `lab/` + 93 in `tests/`).
 - **886 Tests (`regional/phase-e-demo-readiness` Batch 1B Final Evidence-Lineage Corrections)**: Intermediate demo-readiness test count incorporating rederived PCAP digests, 3-way checksum cross-checks, complete primary-flow validation, and provenance generator revision tests (793 in `lab/` + 93 in `tests/`).
-- **900 Tests (`regional/phase-e-demo-readiness` Batch 1C Final Ledger Consistency and Strict Numeric Validation)**: Current Phase E demo-readiness test count incorporating attempts-ledger consistency checks, strict integer frame/status validation, and provenance generator revision regression tests:
-  - `lab/test_demo_replay.py` (27 tests, +4 float/boolean HTTP status and frame tests)
-  - `lab/test_demo_bundle.py` (38 tests, +10 ledger campaign/classification/HTTP cross-checks, strict integer frame/status tests, and provenance regression tests)
+- **900 Tests (`regional/phase-e-demo-readiness` Batch 1C Final Ledger Consistency and Strict Numeric Validation)**: Intermediate Phase E demo-readiness test count incorporating attempts-ledger consistency checks, strict integer frame/status validation, and provenance generator revision regression tests (807 in `lab/` + 93 in `tests/`).
+- **913 Tests (`regional/phase-e-demo-readiness` Batch 1D Final Manifest Identity, Repetition, and Replay Status Consistency)**: Current Phase E demo-readiness test count incorporating manifest campaign ID verification without fallback, strict repetition identity (1..20 integer validation, cohort repetition set completeness), and exact HTTP 200 replay verification:
+  - `lab/test_demo_replay.py` (31 tests, +4 tests for status 201, 202, dissected/rederived status discrepancy, and authentic 200 replay)
+  - `lab/test_demo_bundle.py` (47 tests, +9 tests for strict repetition rules, manifest campaign identity without fallback, fractional/boolean/out-of-range repetitions, duplicate/missing cohort repetitions, and authentic 1..20 cohort preservation)
   - `lab/test_demo_export.py` (11 tests)
-  - 731 + 76 = 807 in `lab/` + 93 in `tests/` = **900 total passing tests**.
+  - 731 + 89 = 820 in `lab/` + 93 in `tests/` = **913 total passing tests**.
 
 ---
 
