@@ -2106,6 +2106,7 @@
         "http_request_frame": 111,
         "http_response_frame": 117,
         "http_status_code": 200,
+        "pcap_sha256": "69fd09eb63b53f2be42428e40d99ed61eeef4da47bead93fe129ecab1ba47f72",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -2117,7 +2118,7 @@
         "syn_time": 1793307272.069561,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 1,
       "s5_flow_dissection": [],
       "scenario_id": "S0",
       "timeline_events": [
@@ -3362,6 +3363,7 @@
         "http_request_frame": 38,
         "http_response_frame": 49,
         "http_status_code": 200,
+        "pcap_sha256": "b053364fd2c1cd71fb5fc39f28ab0ced92b5a14f4f289323ae8cd30547025e59",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -3373,7 +3375,7 @@
         "syn_time": 1793307571.29201,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 1,
       "s5_flow_dissection": [],
       "scenario_id": "S0",
       "timeline_events": [
@@ -4041,6 +4043,7 @@
         "http_request_frame": 154,
         "http_response_frame": 160,
         "http_status_code": 200,
+        "pcap_sha256": "a58f7e24e002f870f9e457f8a321469a9d3809fa1534be1b0976111a4e4fafe9",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -4052,7 +4055,7 @@
         "syn_time": 1793307587.052805,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 1,
       "s5_flow_dissection": [],
       "scenario_id": "S1",
       "timeline_events": [
@@ -5516,6 +5519,7 @@
         "http_request_frame": 68,
         "http_response_frame": 76,
         "http_status_code": 200,
+        "pcap_sha256": "32a28fdda2b7f40edb8996c911c0d95a324653ce58b8a6137b64e6ec49624a0b",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -5527,7 +5531,7 @@
         "syn_time": 1793307604.863827,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 1,
       "s5_flow_dissection": [],
       "scenario_id": "S1",
       "timeline_events": [
@@ -6197,6 +6201,7 @@
         "http_request_frame": 125,
         "http_response_frame": 131,
         "http_status_code": 200,
+        "pcap_sha256": "8abb73c01f12b43536b4415bb2b8b2ecce95fee05c27f4655472bef883acbb7c",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -6208,7 +6213,7 @@
         "syn_time": 1793307622.896336,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 1,
       "s5_flow_dissection": [],
       "scenario_id": "S2",
       "timeline_events": [
@@ -7557,6 +7562,7 @@
         "http_request_frame": 40,
         "http_response_frame": 55,
         "http_status_code": 200,
+        "pcap_sha256": "44ed0a34f00045aae3c59d0fb0236e5897ebab4b7abebe4408a8f4028881b933",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -7568,7 +7574,7 @@
         "syn_time": 1793307639.837681,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 1,
       "s5_flow_dissection": [],
       "scenario_id": "S2",
       "timeline_events": [
@@ -8226,6 +8232,7 @@
         "http_request_frame": 131,
         "http_response_frame": 147,
         "http_status_code": 200,
+        "pcap_sha256": "c43942d54af024d75bcce9e3142f2669812a23ac1ac4efc8306d2b13ee7375b9",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -8237,7 +8244,7 @@
         "syn_time": 1793307655.162519,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 1,
       "s5_flow_dissection": [],
       "scenario_id": "S3",
       "timeline_events": [
@@ -9599,6 +9606,7 @@
         "http_request_frame": 38,
         "http_response_frame": 82,
         "http_status_code": 200,
+        "pcap_sha256": "d88459129d76564d5a65839c13c45eabcf053fa543f5a563a5511fa3f4ef6279",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -9610,7 +9618,7 @@
         "syn_time": 1793307671.936104,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 1,
       "s5_flow_dissection": [],
       "scenario_id": "S3",
       "timeline_events": [
@@ -10278,6 +10286,7 @@
         "http_request_frame": 144,
         "http_response_frame": 150,
         "http_status_code": 200,
+        "pcap_sha256": "6c1ccd5561f483fac74bdb98898aa6d956888513094e2e07950d019e8127f78b",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -10289,7 +10298,7 @@
         "syn_time": 1793307687.749076,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 1,
       "s5_flow_dissection": [],
       "scenario_id": "S4",
       "timeline_events": [
@@ -11744,6 +11753,7 @@
         "http_request_frame": 76,
         "http_response_frame": 80,
         "http_status_code": 200,
+        "pcap_sha256": "02e0fb098538a54da70cba451125f6daf9adf72b1dfcb07d4814bc57512bdd45",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -11755,7 +11765,7 @@
         "syn_time": 1793307704.726766,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 1,
       "s5_flow_dissection": [],
       "scenario_id": "S4",
       "timeline_events": [
@@ -12440,6 +12450,7 @@
         "http_request_frame": 121,
         "http_response_frame": 125,
         "http_status_code": 200,
+        "pcap_sha256": "700225ed4926738ec20d1d283a20b209c9dc1c806178a1018b74b5e28f7eaedd",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -12451,7 +12462,7 @@
         "syn_time": 1793307720.457529,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 1,
       "s5_flow_dissection": [
         {
           "client_port": null,
@@ -13725,6 +13736,7 @@
         "http_request_frame": 38,
         "http_response_frame": 46,
         "http_status_code": 200,
+        "pcap_sha256": "28258e902cf0992363e6dd6954ed7eb9d3e70a1036230c397cdf6ea33a7a4e5f",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -13736,7 +13748,7 @@
         "syn_time": 1793307736.830033,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 1,
       "s5_flow_dissection": [
         {
           "client_port": null,
@@ -14364,6 +14376,7 @@
         "http_request_frame": 143,
         "http_response_frame": 147,
         "http_status_code": 200,
+        "pcap_sha256": "75eeda0399bfccc5c8d0c51840d12366a4b48d80e09298f0e62b5dcb40d889c3",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -14375,7 +14388,7 @@
         "syn_time": 1793310629.927488,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 1,
       "s5_flow_dissection": [],
       "scenario_id": "S6",
       "timeline_events": [
@@ -15762,6 +15775,7 @@
         "http_request_frame": 77,
         "http_response_frame": 81,
         "http_status_code": 200,
+        "pcap_sha256": "d40bd905344b8ed9db1f7f0ea1117e2b09f74ea48cf4267d1482f295808f47af",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -15773,7 +15787,7 @@
         "syn_time": 1793310646.504774,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 1,
       "s5_flow_dissection": [],
       "scenario_id": "S6",
       "timeline_events": [
@@ -16530,6 +16544,7 @@
         "http_request_frame": 121,
         "http_response_frame": 127,
         "http_status_code": 200,
+        "pcap_sha256": "4ad3d07db2a23091c03e7eb1528e2fb284dc8748b18826ccb13908bc5c59704e",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -16541,7 +16556,7 @@
         "syn_time": 1793310662.192064,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 2,
       "s5_flow_dissection": [],
       "scenario_id": "S0",
       "timeline_events": [
@@ -17858,6 +17873,7 @@
         "http_request_frame": 38,
         "http_response_frame": 42,
         "http_status_code": 200,
+        "pcap_sha256": "962767f17d3d311069eb4fe13c2a42fac84a679f4f026adcbf117de817bd2da6",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -17869,7 +17885,7 @@
         "syn_time": 1793310677.780463,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 2,
       "s5_flow_dissection": [],
       "scenario_id": "S0",
       "timeline_events": [
@@ -18492,6 +18508,7 @@
         "http_request_frame": 146,
         "http_response_frame": 150,
         "http_status_code": 200,
+        "pcap_sha256": "fec998a068943d6aab692c55521086ca3319516c2a87809099532c7b95f4d124",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -18503,7 +18520,7 @@
         "syn_time": 1793310693.220018,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 2,
       "s5_flow_dissection": [],
       "scenario_id": "S1",
       "timeline_events": [
@@ -19985,6 +20002,7 @@
         "http_request_frame": 80,
         "http_response_frame": 84,
         "http_status_code": 200,
+        "pcap_sha256": "fb7e6ae10bbaf542cc39789693a0403879a80ef838e6c7fc28fe8e76d095c5f1",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -19996,7 +20014,7 @@
         "syn_time": 1793310709.533883,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 2,
       "s5_flow_dissection": [],
       "scenario_id": "S1",
       "timeline_events": [
@@ -20666,6 +20684,7 @@
         "http_request_frame": 135,
         "http_response_frame": 141,
         "http_status_code": 200,
+        "pcap_sha256": "44edb561f42ab37020f2f05333404e7ddded350baed6dbe20443e93165784029",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -20677,7 +20696,7 @@
         "syn_time": 1793310724.360769,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 2,
       "s5_flow_dissection": [],
       "scenario_id": "S2",
       "timeline_events": [
@@ -22071,6 +22090,7 @@
         "http_request_frame": 52,
         "http_response_frame": 64,
         "http_status_code": 200,
+        "pcap_sha256": "666696597024d09e8ce6fd60d5acabb389d2dcc64c2b769592eab9292dd37f6e",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -22082,7 +22102,7 @@
         "syn_time": 1793310739.538334,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 2,
       "s5_flow_dissection": [],
       "scenario_id": "S2",
       "timeline_events": [
@@ -22740,6 +22760,7 @@
         "http_request_frame": 141,
         "http_response_frame": 157,
         "http_status_code": 200,
+        "pcap_sha256": "4aa16dc7f9d088705a88353c170f7d9760be8265cf2a11d5750033e79365f0b7",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -22751,7 +22772,7 @@
         "syn_time": 1793310754.222307,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 2,
       "s5_flow_dissection": [],
       "scenario_id": "S3",
       "timeline_events": [
@@ -24140,6 +24161,7 @@
         "http_request_frame": 34,
         "http_response_frame": 78,
         "http_status_code": 200,
+        "pcap_sha256": "6c3415bb8532412737499a9817c1a60f12ddf86390209afb580f9e8503bd3ac8",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -24151,7 +24173,7 @@
         "syn_time": 1793310769.991908,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 2,
       "s5_flow_dissection": [],
       "scenario_id": "S3",
       "timeline_events": [
@@ -24828,6 +24850,7 @@
         "http_request_frame": 144,
         "http_response_frame": 150,
         "http_status_code": 200,
+        "pcap_sha256": "49aec8ebf450220e0387b23f0fe4d07d3f2a39c6f8726901238de91319b24a1b",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -24839,7 +24862,7 @@
         "syn_time": 1793310785.029844,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 2,
       "s5_flow_dissection": [],
       "scenario_id": "S4",
       "timeline_events": [
@@ -26276,6 +26299,7 @@
         "http_request_frame": 68,
         "http_response_frame": 72,
         "http_status_code": 200,
+        "pcap_sha256": "0369e35a420e0c06dd7c8925330d5f313bd048681bd3aef697ae78366487e260",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -26287,7 +26311,7 @@
         "syn_time": 1793310800.02647,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 2,
       "s5_flow_dissection": [],
       "scenario_id": "S4",
       "timeline_events": [
@@ -27098,6 +27122,7 @@
         "http_request_frame": 121,
         "http_response_frame": 127,
         "http_status_code": 200,
+        "pcap_sha256": "716c42661ce0f11b8b534e1ce35bb08bb70d1fa7cc59f314e77afbfff7488c6a",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -27109,7 +27134,7 @@
         "syn_time": 1793310814.442523,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 2,
       "s5_flow_dissection": [
         {
           "client_port": null,
@@ -28410,6 +28435,7 @@
         "http_request_frame": 34,
         "http_response_frame": 54,
         "http_status_code": 200,
+        "pcap_sha256": "2c166f3ec29d25913c653a179f2c776557403a3ee82d23a5679368e028929805",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -28421,7 +28447,7 @@
         "syn_time": 1793310829.042529,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 2,
       "s5_flow_dissection": [
         {
           "client_port": null,
@@ -29058,6 +29084,7 @@
         "http_request_frame": 143,
         "http_response_frame": 147,
         "http_status_code": 200,
+        "pcap_sha256": "c6fb3ba595a3d1f967e79b79b991121ed63577319107cf1f9c3804814e5f5202",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -29069,7 +29096,7 @@
         "syn_time": 1793310843.934663,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 2,
       "s5_flow_dissection": [],
       "scenario_id": "S6",
       "timeline_events": [
@@ -30492,6 +30519,7 @@
         "http_request_frame": 81,
         "http_response_frame": 89,
         "http_status_code": 200,
+        "pcap_sha256": "ad7c4de0d6a3f794ae25722a173e5f8882776a5f4b6fa1b044f6917110ebb64d",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -30503,7 +30531,7 @@
         "syn_time": 1793310859.25553,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 2,
       "s5_flow_dissection": [],
       "scenario_id": "S6",
       "timeline_events": [
@@ -31314,6 +31342,7 @@
         "http_request_frame": 121,
         "http_response_frame": 127,
         "http_status_code": 200,
+        "pcap_sha256": "ecc5ce5822913d9203baa3902e8fe2e3f796e36fc149f93ef49ddb737833c5dc",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -31325,7 +31354,7 @@
         "syn_time": 1793310873.641126,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 3,
       "s5_flow_dissection": [],
       "scenario_id": "S0",
       "timeline_events": [
@@ -32613,6 +32642,7 @@
         "http_request_frame": 38,
         "http_response_frame": 44,
         "http_status_code": 200,
+        "pcap_sha256": "16da89d0d87f9944d619b2c1720fb9ae8bd3e3e0cfbb0ee3545a323c04b9fb26",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -32624,7 +32654,7 @@
         "syn_time": 1793310888.220828,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 3,
       "s5_flow_dissection": [],
       "scenario_id": "S0",
       "timeline_events": [
@@ -33346,6 +33376,7 @@
         "http_request_frame": 144,
         "http_response_frame": 150,
         "http_status_code": 200,
+        "pcap_sha256": "9f971a9554a92c611a7decdd86a4d1eb5c46fc96dacebbb7a10276cdd7417efa",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -33357,7 +33388,7 @@
         "syn_time": 1793310902.966512,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 3,
       "s5_flow_dissection": [],
       "scenario_id": "S1",
       "timeline_events": [
@@ -34794,6 +34825,7 @@
         "http_request_frame": 76,
         "http_response_frame": 80,
         "http_status_code": 200,
+        "pcap_sha256": "7f777287ff7241c89d063b5cd32655eca3f41122c0392d3c1242e9441f4a97d4",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -34805,7 +34837,7 @@
         "syn_time": 1793310918.004806,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 3,
       "s5_flow_dissection": [],
       "scenario_id": "S1",
       "timeline_events": [
@@ -35592,6 +35624,7 @@
         "http_request_frame": 125,
         "http_response_frame": 131,
         "http_status_code": 200,
+        "pcap_sha256": "c5972009be2391e0bdd5fe6a1d51aa7e6967fc9d50fcdfea1a646ef51e1b86f3",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -35603,7 +35636,7 @@
         "syn_time": 1793310932.360077,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 3,
       "s5_flow_dissection": [],
       "scenario_id": "S2",
       "timeline_events": [
@@ -36986,6 +37019,7 @@
         "http_request_frame": 48,
         "http_response_frame": 70,
         "http_status_code": 200,
+        "pcap_sha256": "a8eb7221133ab4876537446cc37352b57bfefeccdf2dcb7827e91debe1353bb1",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -36997,7 +37031,7 @@
         "syn_time": 1793310947.109178,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 3,
       "s5_flow_dissection": [],
       "scenario_id": "S2",
       "timeline_events": [
@@ -37763,6 +37797,7 @@
         "http_request_frame": 141,
         "http_response_frame": 157,
         "http_status_code": 200,
+        "pcap_sha256": "a62832d1a1784c6847c980103f4608a06d9e63c21e4d9f46a1dd51351b2756cc",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -37774,7 +37809,7 @@
         "syn_time": 1793310961.414921,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 3,
       "s5_flow_dissection": [],
       "scenario_id": "S3",
       "timeline_events": [
@@ -39224,6 +39259,7 @@
         "http_request_frame": 38,
         "http_response_frame": 77,
         "http_status_code": 200,
+        "pcap_sha256": "06802a293c826ac380be1c7e69accddf9038f0b642614bdd898dcdb25a88c45a",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -39235,7 +39271,7 @@
         "syn_time": 1793310976.43772,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 3,
       "s5_flow_dissection": [],
       "scenario_id": "S3",
       "timeline_events": [
@@ -40011,6 +40047,7 @@
         "http_request_frame": 144,
         "http_response_frame": 150,
         "http_status_code": 200,
+        "pcap_sha256": "7c3ee6efb0409d6858db22f2dfa71a4a0d9a3d9da77ca0333e685609d2a5d570",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -40022,7 +40059,7 @@
         "syn_time": 1793310991.239025,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 3,
       "s5_flow_dissection": [],
       "scenario_id": "S4",
       "timeline_events": [
@@ -41459,6 +41496,7 @@
         "http_request_frame": 76,
         "http_response_frame": 80,
         "http_status_code": 200,
+        "pcap_sha256": "ed9eb9ab4210c205baa76dd81d609b5976e182efe3a067b81dff551972cf84b2",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -41470,7 +41508,7 @@
         "syn_time": 1793311006.221197,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 3,
       "s5_flow_dissection": [],
       "scenario_id": "S4",
       "timeline_events": [
@@ -42246,6 +42284,7 @@
         "http_request_frame": 132,
         "http_response_frame": 136,
         "http_status_code": 200,
+        "pcap_sha256": "9c16b95c1f643bf6d0edb55b14ff3cbbc5694542cdadae3efab73c25089c5b2d",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -42257,7 +42296,7 @@
         "syn_time": 1793311020.808147,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 3,
       "s5_flow_dissection": [
         {
           "client_port": null,
@@ -43769,6 +43808,7 @@
         "http_request_frame": 35,
         "http_response_frame": 43,
         "http_status_code": 200,
+        "pcap_sha256": "856209867088de986c65ceea3de5323f6b311a5de69d1e3060bf2fe5af2f0800",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -43780,7 +43820,7 @@
         "syn_time": 1793311035.727047,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 3,
       "s5_flow_dissection": [
         {
           "client_port": null,
@@ -44467,6 +44507,7 @@
         "http_request_frame": 151,
         "http_response_frame": 157,
         "http_status_code": 200,
+        "pcap_sha256": "42d3f1836c4629e97cefff9e3031bbada0225cd4cc5c7c26ecaccc3698bb8505",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -44478,7 +44519,7 @@
         "syn_time": 1793311050.567265,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 3,
       "s5_flow_dissection": [],
       "scenario_id": "S6",
       "timeline_events": [
@@ -45883,6 +45924,7 @@
         "http_request_frame": 69,
         "http_response_frame": 81,
         "http_status_code": 200,
+        "pcap_sha256": "1f8bce4eca60aa87615a300386658ff1aec8492483943ed2e3a0eeb5f0446aa8",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -45894,7 +45936,7 @@
         "syn_time": 1793311065.867349,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 3,
       "s5_flow_dissection": [],
       "scenario_id": "S6",
       "timeline_events": [
@@ -46705,6 +46747,7 @@
         "http_request_frame": 121,
         "http_response_frame": 127,
         "http_status_code": 200,
+        "pcap_sha256": "6c45166582b1fd90b9520948f11422dcd0574516856fa9d5a946b1899d2bfaef",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -46716,7 +46759,7 @@
         "syn_time": 1793311080.34162,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 4,
       "s5_flow_dissection": [],
       "scenario_id": "S0",
       "timeline_events": [
@@ -47988,6 +48031,7 @@
         "http_request_frame": 34,
         "http_response_frame": 38,
         "http_status_code": 200,
+        "pcap_sha256": "45889a88341febdffe0b73ea6ab83b950cec7ff9d8484672fa15fb64cfd1dfa3",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -47999,7 +48043,7 @@
         "syn_time": 1793311094.934447,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 4,
       "s5_flow_dissection": [],
       "scenario_id": "S0",
       "timeline_events": [
@@ -48667,6 +48711,7 @@
         "http_request_frame": 144,
         "http_response_frame": 150,
         "http_status_code": 200,
+        "pcap_sha256": "8663a562c6deb2d996611d385d0675065c26366354375a2f028276f14cc3cd8b",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -48678,7 +48723,7 @@
         "syn_time": 1793311109.583563,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 4,
       "s5_flow_dissection": [],
       "scenario_id": "S1",
       "timeline_events": [
@@ -50115,6 +50160,7 @@
         "http_request_frame": 76,
         "http_response_frame": 80,
         "http_status_code": 200,
+        "pcap_sha256": "32cdfbb26d1227f470e9cb5a34dc0bec870998a281422f44cfbc1dcaa827c748",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -50126,7 +50172,7 @@
         "syn_time": 1793311125.227522,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 4,
       "s5_flow_dissection": [],
       "scenario_id": "S1",
       "timeline_events": [
@@ -50796,6 +50842,7 @@
         "http_request_frame": 115,
         "http_response_frame": 121,
         "http_status_code": 200,
+        "pcap_sha256": "cac178c604a5bd434f27d5bbe5abadd83574973e1a51ee2eb1c376b13d647ed0",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -50807,7 +50854,7 @@
         "syn_time": 1793311139.807769,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 4,
       "s5_flow_dissection": [],
       "scenario_id": "S2",
       "timeline_events": [
@@ -52102,6 +52149,7 @@
         "http_request_frame": 48,
         "http_response_frame": 60,
         "http_status_code": 200,
+        "pcap_sha256": "17f01e1c44c1da75fa1ab1f9db30f1b1c24da2ec0ce0d5a6e40df61f1c6cd21a",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -52113,7 +52161,7 @@
         "syn_time": 1793311154.774796,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 4,
       "s5_flow_dissection": [],
       "scenario_id": "S2",
       "timeline_events": [
@@ -52771,6 +52819,7 @@
         "http_request_frame": 133,
         "http_response_frame": 147,
         "http_status_code": 200,
+        "pcap_sha256": "bd023597444ba7d724f9ac8fef801f919f2f79c729c2aa79a741ebe1bb799efe",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -52782,7 +52831,7 @@
         "syn_time": 1793311169.062713,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 4,
       "s5_flow_dissection": [],
       "scenario_id": "S3",
       "timeline_events": [
@@ -54189,6 +54238,7 @@
         "http_request_frame": 46,
         "http_response_frame": 80,
         "http_status_code": 200,
+        "pcap_sha256": "2e636cf570a0bc5fbc77c7ed12e24527da5913b767484ba5073cf26b1ef406cf",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -54200,7 +54250,7 @@
         "syn_time": 1793311185.576235,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 4,
       "s5_flow_dissection": [],
       "scenario_id": "S3",
       "timeline_events": [
@@ -54868,6 +54918,7 @@
         "http_request_frame": 134,
         "http_response_frame": 140,
         "http_status_code": 200,
+        "pcap_sha256": "5f8cdd36d40979867dd080601417a4e556aa5449ca5234314b52d3da452e1dcf",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -54879,7 +54930,7 @@
         "syn_time": 1793311201.242334,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 4,
       "s5_flow_dissection": [],
       "scenario_id": "S4",
       "timeline_events": [
@@ -56289,6 +56340,7 @@
         "http_request_frame": 76,
         "http_response_frame": 80,
         "http_status_code": 200,
+        "pcap_sha256": "a95ec887fc104ad9148f8ef39b790d8ac7664b90d9d5844ee3b83f26f1a0af98",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -56300,7 +56352,7 @@
         "syn_time": 1793311216.323913,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 4,
       "s5_flow_dissection": [],
       "scenario_id": "S4",
       "timeline_events": [
@@ -57111,6 +57163,7 @@
         "http_request_frame": 121,
         "http_response_frame": 125,
         "http_status_code": 200,
+        "pcap_sha256": "e8bef28372e29ce6c7864532392d5e8de8ad9efccc4762353ccdaf6ff91b67a8",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -57122,7 +57175,7 @@
         "syn_time": 1793311230.808871,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 4,
       "s5_flow_dissection": [
         {
           "client_port": null,
@@ -58367,6 +58420,7 @@
         "http_request_frame": 35,
         "http_response_frame": 39,
         "http_status_code": 200,
+        "pcap_sha256": "2c1f3941e5390fbdb16ddee540becfb567a87b2ab50de36b46eb4d9f588a3b8d",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -58378,7 +58432,7 @@
         "syn_time": 1793311246.796562,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 4,
       "s5_flow_dissection": [
         {
           "client_port": null,
@@ -59002,6 +59056,7 @@
         "http_request_frame": 153,
         "http_response_frame": 157,
         "http_status_code": 200,
+        "pcap_sha256": "476543d1fe257c3a7c3ff1f942e1b037f3305f1eb06e5b4414ccb5bb9ac0798f",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -59013,7 +59068,7 @@
         "syn_time": 1793311261.871645,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 4,
       "s5_flow_dissection": [],
       "scenario_id": "S6",
       "timeline_events": [
@@ -60418,6 +60473,7 @@
         "http_request_frame": 85,
         "http_response_frame": 89,
         "http_status_code": 200,
+        "pcap_sha256": "73ff04cbb42c67baf5c297bf491d1bf8ade0f9e5083bf152660ee91f86c49b8b",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -60429,7 +60485,7 @@
         "syn_time": 1793311277.415214,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 4,
       "s5_flow_dissection": [],
       "scenario_id": "S6",
       "timeline_events": [
@@ -61240,6 +61296,7 @@
         "http_request_frame": 121,
         "http_response_frame": 127,
         "http_status_code": 200,
+        "pcap_sha256": "fbdc8aa84be877aa3a766b7ecbdfd44f42e8171e52c6b25789cc5ac1a77fc330",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -61251,7 +61308,7 @@
         "syn_time": 1793311292.300162,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 5,
       "s5_flow_dissection": [],
       "scenario_id": "S0",
       "timeline_events": [
@@ -62523,6 +62580,7 @@
         "http_request_frame": 38,
         "http_response_frame": 50,
         "http_status_code": 200,
+        "pcap_sha256": "20ea05cf0803ec941c7a9befb9fe564fee48bdcd7c405e3e6d198a3c4a782d84",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -62534,7 +62592,7 @@
         "syn_time": 1793311306.938971,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 5,
       "s5_flow_dissection": [],
       "scenario_id": "S0",
       "timeline_events": [
@@ -63211,6 +63269,7 @@
         "http_request_frame": 144,
         "http_response_frame": 150,
         "http_status_code": 200,
+        "pcap_sha256": "ecd135685c556d86ec0abed10ec63ff38771817b989a0e19d408cc54fc492736",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -63222,7 +63281,7 @@
         "syn_time": 1793311321.679711,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 5,
       "s5_flow_dissection": [],
       "scenario_id": "S1",
       "timeline_events": [
@@ -64659,6 +64718,7 @@
         "http_request_frame": 76,
         "http_response_frame": 80,
         "http_status_code": 200,
+        "pcap_sha256": "e983744621226e5fa3eb2611b3795e5e0ef5071626ed3ca182bf8050451410fa",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -64670,7 +64730,7 @@
         "syn_time": 1793311336.713222,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 5,
       "s5_flow_dissection": [],
       "scenario_id": "S1",
       "timeline_events": [
@@ -65358,6 +65418,7 @@
         "http_request_frame": 125,
         "http_response_frame": 131,
         "http_status_code": 200,
+        "pcap_sha256": "780901b4b382056b05f176e876c84227c15c0c857e2314671ecafae4e2e8aa63",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -65369,7 +65430,7 @@
         "syn_time": 1793311351.880369,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 5,
       "s5_flow_dissection": [],
       "scenario_id": "S2",
       "timeline_events": [
@@ -66707,6 +66768,7 @@
         "http_request_frame": 40,
         "http_response_frame": 52,
         "http_status_code": 200,
+        "pcap_sha256": "cd750f89fe10be2501d75650e75188e1971ab0f62ee1761fc49a99263233b2b0",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -66718,7 +66780,7 @@
         "syn_time": 1793311367.058241,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 5,
       "s5_flow_dissection": [],
       "scenario_id": "S2",
       "timeline_events": [
@@ -67412,6 +67474,7 @@
         "http_request_frame": 131,
         "http_response_frame": 147,
         "http_status_code": 200,
+        "pcap_sha256": "e39e5b532ebe362c7d73f9ae6313e931b39aa79e740f3fa43f0ae4b49b4204c2",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -67423,7 +67486,7 @@
         "syn_time": 1793311381.297768,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 5,
       "s5_flow_dissection": [],
       "scenario_id": "S3",
       "timeline_events": [
@@ -68801,6 +68864,7 @@
         "http_request_frame": 34,
         "http_response_frame": 78,
         "http_status_code": 200,
+        "pcap_sha256": "b708c1ebdb8e2c21d73a227a2a158b9cd22a31d6076b20d2a64e817e23bc91f7",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -68812,7 +68876,7 @@
         "syn_time": 1793311396.244912,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 5,
       "s5_flow_dissection": [],
       "scenario_id": "S3",
       "timeline_events": [
@@ -69570,6 +69634,7 @@
         "http_request_frame": 154,
         "http_response_frame": 160,
         "http_status_code": 200,
+        "pcap_sha256": "57fbbd32fc6fa299bdab87b9960d7faccd37fd6624d7a3f6f7da9caaa46c6e12",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -69581,7 +69646,7 @@
         "syn_time": 1793311411.209647,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 5,
       "s5_flow_dissection": [],
       "scenario_id": "S4",
       "timeline_events": [
@@ -71090,6 +71155,7 @@
         "http_request_frame": 76,
         "http_response_frame": 80,
         "http_status_code": 200,
+        "pcap_sha256": "ec41b3657a3097bb3c4ec8a1c8e9f2736caa0fb001d80bb311af2e9fc856c5db",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -71101,7 +71167,7 @@
         "syn_time": 1793311426.218629,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 5,
       "s5_flow_dissection": [],
       "scenario_id": "S4",
       "timeline_events": [
@@ -71958,6 +72024,7 @@
         "http_request_frame": 122,
         "http_response_frame": 136,
         "http_status_code": 200,
+        "pcap_sha256": "4c2dcebc8dcf9f523971aa5abab165a8705d0c2907455f668b94cd614354a160",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -71969,7 +72036,7 @@
         "syn_time": 1793311441.003784,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 5,
       "s5_flow_dissection": [
         {
           "client_port": null,
@@ -73468,6 +73535,7 @@
         "http_request_frame": 47,
         "http_response_frame": 67,
         "http_status_code": 200,
+        "pcap_sha256": "aedc347ded79747e32f85a16db64ca98a014e805d3124b54012bf6d833eecfb8",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -73479,7 +73547,7 @@
         "syn_time": 1793311455.688327,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 5,
       "s5_flow_dissection": [
         {
           "client_port": null,
@@ -74198,6 +74266,7 @@
         "http_request_frame": 153,
         "http_response_frame": 157,
         "http_status_code": 200,
+        "pcap_sha256": "558c0cc7647a2bcaf72dbe38effbad3571b8f1e08e48bdb8e4299faadc0e8bc8",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -74209,7 +74278,7 @@
         "syn_time": 1793311470.542723,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 5,
       "s5_flow_dissection": [],
       "scenario_id": "S6",
       "timeline_events": [
@@ -75614,6 +75683,7 @@
         "http_request_frame": 77,
         "http_response_frame": 81,
         "http_status_code": 200,
+        "pcap_sha256": "0dd68296437c4ba0d6082beabb30e98b0dc2150df6279e9b99b79e9dae56f63f",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -75625,7 +75695,7 @@
         "syn_time": 1793311487.817703,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 5,
       "s5_flow_dissection": [],
       "scenario_id": "S6",
       "timeline_events": [
@@ -76283,6 +76353,7 @@
         "http_request_frame": 121,
         "http_response_frame": 127,
         "http_status_code": 200,
+        "pcap_sha256": "80b2620c2e1cb5e92536c410cbf7ca281d1febb2b95ebf2a7a24aea96b1e60bb",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -76294,7 +76365,7 @@
         "syn_time": 1793311503.218922,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 6,
       "s5_flow_dissection": [],
       "scenario_id": "S0",
       "timeline_events": [
@@ -77611,6 +77682,7 @@
         "http_request_frame": 38,
         "http_response_frame": 42,
         "http_status_code": 200,
+        "pcap_sha256": "e2fa50d10860335ca0fc85fa86eb91fa6e71f28758139845da3ff0c6d2d55a8c",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -77622,7 +77694,7 @@
         "syn_time": 1793311518.179476,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 6,
       "s5_flow_dissection": [],
       "scenario_id": "S0",
       "timeline_events": [
@@ -78227,6 +78299,7 @@
         "http_request_frame": 144,
         "http_response_frame": 150,
         "http_status_code": 200,
+        "pcap_sha256": "dbae7e4a81450719dd45a8f9c9d780cf33ac79b7dfdf4285a9cd2d732cd3a8a4",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -78238,7 +78311,7 @@
         "syn_time": 1793311534.088209,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 6,
       "s5_flow_dissection": [],
       "scenario_id": "S1",
       "timeline_events": [
@@ -79675,6 +79748,7 @@
         "http_request_frame": 68,
         "http_response_frame": 72,
         "http_status_code": 200,
+        "pcap_sha256": "a30b77cebc90cbe35a3b408ff1a42fc021906d1ad08409a08a9ddee19a630f37",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -79686,7 +79760,7 @@
         "syn_time": 1793311549.55516,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 6,
       "s5_flow_dissection": [],
       "scenario_id": "S1",
       "timeline_events": [
@@ -80383,6 +80457,7 @@
         "http_request_frame": 135,
         "http_response_frame": 141,
         "http_status_code": 200,
+        "pcap_sha256": "e34b00177838eef91245b5f5241c2f7a2a4c513e69b27076acd0a9ab3bc1b197",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -80394,7 +80469,7 @@
         "syn_time": 1793311564.145578,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 6,
       "s5_flow_dissection": [],
       "scenario_id": "S2",
       "timeline_events": [
@@ -81743,6 +81818,7 @@
         "http_request_frame": 52,
         "http_response_frame": 68,
         "http_status_code": 200,
+        "pcap_sha256": "b1f314dd5d95539e504c8c4a701b353c127cd0e45432f8b5dd7c667ea6089801",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -81754,7 +81830,7 @@
         "syn_time": 1793311583.649887,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 6,
       "s5_flow_dissection": [],
       "scenario_id": "S2",
       "timeline_events": [
@@ -82412,6 +82488,7 @@
         "http_request_frame": 121,
         "http_response_frame": 161,
         "http_status_code": 200,
+        "pcap_sha256": "d989f881bb74eb7e0881c1c9413ac877ab202eb5b09428bb699c6c94f9cba7e4",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -82423,7 +82500,7 @@
         "syn_time": 1793311601.191622,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 6,
       "s5_flow_dissection": [],
       "scenario_id": "S3",
       "timeline_events": [
@@ -83855,6 +83932,7 @@
         "http_request_frame": 39,
         "http_response_frame": 81,
         "http_status_code": 200,
+        "pcap_sha256": "ffb5a677b425d7e4483adcad6de1641969499cf88823378a8e80c9ed2d6d7cac",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -83866,7 +83944,7 @@
         "syn_time": 1793311618.693673,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 6,
       "s5_flow_dissection": [],
       "scenario_id": "S3",
       "timeline_events": [
@@ -84570,6 +84648,7 @@
         "http_request_frame": 144,
         "http_response_frame": 150,
         "http_status_code": 200,
+        "pcap_sha256": "5aca638600f46edff6f09a4aa25fb04934f30567d0e873f48353493da1beae89",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -84581,7 +84660,7 @@
         "syn_time": 1793311633.662756,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 6,
       "s5_flow_dissection": [],
       "scenario_id": "S4",
       "timeline_events": [
@@ -86018,6 +86097,7 @@
         "http_request_frame": 56,
         "http_response_frame": 60,
         "http_status_code": 200,
+        "pcap_sha256": "2313fefcfbdf01a64fd3ba2495e1d30af14c0595c10f3ce70a3b78f0c53cbfc1",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -86029,7 +86109,7 @@
         "syn_time": 1793311648.792125,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 6,
       "s5_flow_dissection": [],
       "scenario_id": "S4",
       "timeline_events": [
@@ -86822,6 +86902,7 @@
         "http_request_frame": 121,
         "http_response_frame": 125,
         "http_status_code": 200,
+        "pcap_sha256": "6c6334708fe81fc887e7932c24e119e658b22da84915c1f1926747001162e63c",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -86833,7 +86914,7 @@
         "syn_time": 1793311663.381684,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 6,
       "s5_flow_dissection": [
         {
           "client_port": null,
@@ -88078,6 +88159,7 @@
         "http_request_frame": 38,
         "http_response_frame": 48,
         "http_status_code": 200,
+        "pcap_sha256": "da785710fed5151cae25f86f79bb011f556fbcb45a2f8ffba276871dabcbb3cd",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -88089,7 +88171,7 @@
         "syn_time": 1793311678.077371,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 6,
       "s5_flow_dissection": [
         {
           "client_port": null,
@@ -88785,6 +88867,7 @@
         "http_request_frame": 153,
         "http_response_frame": 157,
         "http_status_code": 200,
+        "pcap_sha256": "442e58c1380e997f4a1466fa83d8ead04ef60b7d19d47c8dab576d8828339800",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -88796,7 +88879,7 @@
         "syn_time": 1793311693.316762,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 6,
       "s5_flow_dissection": [],
       "scenario_id": "S6",
       "timeline_events": [
@@ -90201,6 +90284,7 @@
         "http_request_frame": 77,
         "http_response_frame": 81,
         "http_status_code": 200,
+        "pcap_sha256": "624c59491b39b224f16869ee7c91014a0b4d6bea6e067e65c9acdb8ca21ebdbb",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -90212,7 +90296,7 @@
         "syn_time": 1793311708.936275,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 6,
       "s5_flow_dissection": [],
       "scenario_id": "S6",
       "timeline_events": [
@@ -90969,6 +91053,7 @@
         "http_request_frame": 111,
         "http_response_frame": 117,
         "http_status_code": 200,
+        "pcap_sha256": "6942af18f66fe38cf7af57dc4371fb824e62ac6419bec26d01612920c9c0b26e",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -90980,7 +91065,7 @@
         "syn_time": 1793311723.333979,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 7,
       "s5_flow_dissection": [],
       "scenario_id": "S0",
       "timeline_events": [
@@ -92241,6 +92326,7 @@
         "http_request_frame": 34,
         "http_response_frame": 50,
         "http_status_code": 200,
+        "pcap_sha256": "1b58768631a1277742199a31f5ef1bb5c647e53e0b5f15d2e5ca601613bd22de",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -92252,7 +92338,7 @@
         "syn_time": 1793311737.898979,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 7,
       "s5_flow_dissection": [],
       "scenario_id": "S0",
       "timeline_events": [
@@ -92974,6 +93060,7 @@
         "http_request_frame": 134,
         "http_response_frame": 140,
         "http_status_code": 200,
+        "pcap_sha256": "d20162aa157b6e5664ed27d32dacb5cfc9a46dca259b4e651b66870861ad580d",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -92985,7 +93072,7 @@
         "syn_time": 1793311752.696817,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 7,
       "s5_flow_dissection": [],
       "scenario_id": "S1",
       "timeline_events": [
@@ -94395,6 +94482,7 @@
         "http_request_frame": 84,
         "http_response_frame": 88,
         "http_status_code": 200,
+        "pcap_sha256": "d9925d362c0032e15c12805495743290cee7d3e510b29dad9235f42802e5799c",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -94406,7 +94494,7 @@
         "syn_time": 1793311767.76956,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 7,
       "s5_flow_dissection": [],
       "scenario_id": "S1",
       "timeline_events": [
@@ -95166,6 +95254,7 @@
         "http_request_frame": 125,
         "http_response_frame": 131,
         "http_status_code": 200,
+        "pcap_sha256": "a3672c7aa064a9dee31bc8ab78c403c4ef3f03ee93c40f1f83626441a286c022",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -95177,7 +95266,7 @@
         "syn_time": 1793311782.085285,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 7,
       "s5_flow_dissection": [],
       "scenario_id": "S2",
       "timeline_events": [
@@ -96560,6 +96649,7 @@
         "http_request_frame": 44,
         "http_response_frame": 64,
         "http_status_code": 200,
+        "pcap_sha256": "70f638aea3c1afa1156600004c21e761cf3dbf92b73ea2ecc0a8b46f19bb8bce",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -96571,7 +96661,7 @@
         "syn_time": 1793311796.859171,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 7,
       "s5_flow_dissection": [],
       "scenario_id": "S2",
       "timeline_events": [
@@ -97283,6 +97373,7 @@
         "http_request_frame": 143,
         "http_response_frame": 157,
         "http_status_code": 200,
+        "pcap_sha256": "fd28d91f817bc370cfdb72737616e943b86f8a308afc5b8b9e969cc43b0a8a90",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -97294,7 +97385,7 @@
         "syn_time": 1793311811.097968,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 7,
       "s5_flow_dissection": [],
       "scenario_id": "S3",
       "timeline_events": [
@@ -98699,6 +98790,7 @@
         "http_request_frame": 47,
         "http_response_frame": 81,
         "http_status_code": 200,
+        "pcap_sha256": "6485e7550a66b43a05bb4fb68103aa905bb60e22c5225c74c0626f79e545c946",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -98710,7 +98802,7 @@
         "syn_time": 1793311826.104508,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 7,
       "s5_flow_dissection": [],
       "scenario_id": "S3",
       "timeline_events": [
@@ -99486,6 +99578,7 @@
         "http_request_frame": 154,
         "http_response_frame": 160,
         "http_status_code": 200,
+        "pcap_sha256": "fd4fdd298c87d9b39881d88c3732146e01eb1233eee1232e7c72eeabef922056",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -99497,7 +99590,7 @@
         "syn_time": 1793311840.898691,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 7,
       "s5_flow_dissection": [],
       "scenario_id": "S4",
       "timeline_events": [
@@ -100961,6 +101054,7 @@
         "http_request_frame": 76,
         "http_response_frame": 80,
         "http_status_code": 200,
+        "pcap_sha256": "dc70f3f325ff6b38364b4e41cd8e7927316d574f206a3bfa17698530c6a2c8e7",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -100972,7 +101066,7 @@
         "syn_time": 1793311856.009073,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 7,
       "s5_flow_dissection": [],
       "scenario_id": "S4",
       "timeline_events": [
@@ -101675,6 +101769,7 @@
         "http_request_frame": 131,
         "http_response_frame": 135,
         "http_status_code": 200,
+        "pcap_sha256": "981cebc35744340c09d7c4d687c31c15fb614960a542008c13073eb03bdf94cf",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -101686,7 +101781,7 @@
         "syn_time": 1793311870.311239,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 7,
       "s5_flow_dissection": [
         {
           "client_port": null,
@@ -102972,6 +103067,7 @@
         "http_request_frame": 72,
         "http_response_frame": 76,
         "http_status_code": 200,
+        "pcap_sha256": "512a34c6752e704ed2fdec24c01638b827ce5bcb0dea95b735432ea0751adab2",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -102983,7 +103079,7 @@
         "syn_time": 1793311885.284226,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 7,
       "s5_flow_dissection": [
         {
           "client_port": null,
@@ -103783,6 +103879,7 @@
         "http_request_frame": 143,
         "http_response_frame": 147,
         "http_status_code": 200,
+        "pcap_sha256": "22a5a4e2747e8f913e925419aa997fea48e213679d27ffef8eb28ed8fa1f24a0",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -103794,7 +103891,7 @@
         "syn_time": 1793311900.125908,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 7,
       "s5_flow_dissection": [],
       "scenario_id": "S6",
       "timeline_events": [
@@ -105172,6 +105269,7 @@
         "http_request_frame": 73,
         "http_response_frame": 77,
         "http_status_code": 200,
+        "pcap_sha256": "ac47c20e3ca77c927bdc97330bd62e14162d0577ea97c79f083e1d8e26438ddf",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -105183,7 +105281,7 @@
         "syn_time": 1793311915.480372,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 7,
       "s5_flow_dissection": [],
       "scenario_id": "S6",
       "timeline_events": [
@@ -105994,6 +106092,7 @@
         "http_request_frame": 121,
         "http_response_frame": 127,
         "http_status_code": 200,
+        "pcap_sha256": "1a4ba520e8481d8f0eafbb2d107a83fab1c6a83d62a54c6a664e6fdbe63c8d20",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -106005,7 +106104,7 @@
         "syn_time": 1793311929.773809,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 8,
       "s5_flow_dissection": [],
       "scenario_id": "S0",
       "timeline_events": [
@@ -107277,6 +107376,7 @@
         "http_request_frame": 34,
         "http_response_frame": 42,
         "http_status_code": 200,
+        "pcap_sha256": "50dcb9bdd7af7ea375bf1593f4231068a9cd71fb09977adba380dbea7660e260",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -107288,7 +107388,7 @@
         "syn_time": 1793311944.337423,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 8,
       "s5_flow_dissection": [],
       "scenario_id": "S0",
       "timeline_events": [
@@ -107965,6 +108065,7 @@
         "http_request_frame": 154,
         "http_response_frame": 160,
         "http_status_code": 200,
+        "pcap_sha256": "2b71b24a1b41bb0e23c04641cdbdd6d95c95a432000cb7a214a3934cab20acf0",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -107976,7 +108077,7 @@
         "syn_time": 1793311959.099177,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 8,
       "s5_flow_dissection": [],
       "scenario_id": "S1",
       "timeline_events": [
@@ -109440,6 +109541,7 @@
         "http_request_frame": 76,
         "http_response_frame": 88,
         "http_status_code": 200,
+        "pcap_sha256": "13c62c203fbabfab25573f940dddb6e1957653ccae1378c0aa489166e53009de",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -109451,7 +109553,7 @@
         "syn_time": 1793311974.123247,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 8,
       "s5_flow_dissection": [],
       "scenario_id": "S1",
       "timeline_events": [
@@ -110238,6 +110340,7 @@
         "http_request_frame": 125,
         "http_response_frame": 131,
         "http_status_code": 200,
+        "pcap_sha256": "f90a027d2d8c361d070f9bdafb230af44db17949851e3f12a886cd0b584354eb",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -110249,7 +110352,7 @@
         "syn_time": 1793311988.427754,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 8,
       "s5_flow_dissection": [],
       "scenario_id": "S2",
       "timeline_events": [
@@ -111571,6 +111674,7 @@
         "http_request_frame": 52,
         "http_response_frame": 68,
         "http_status_code": 200,
+        "pcap_sha256": "2b1f82c1f280d8469fd533c848f2fbe5ce9de48d8e239dcc2c974f61ac60ea01",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -111582,7 +111686,7 @@
         "syn_time": 1793312003.124163,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 8,
       "s5_flow_dissection": [],
       "scenario_id": "S2",
       "timeline_events": [
@@ -112249,6 +112353,7 @@
         "http_request_frame": 131,
         "http_response_frame": 147,
         "http_status_code": 200,
+        "pcap_sha256": "9d71bc8324548f97c5febf5aac6e5ae735c15eeca181b4dad6457b2c2b3a1912",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -112260,7 +112365,7 @@
         "syn_time": 1793312017.32695,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 8,
       "s5_flow_dissection": [],
       "scenario_id": "S3",
       "timeline_events": [
@@ -113656,6 +113761,7 @@
         "http_request_frame": 39,
         "http_response_frame": 81,
         "http_status_code": 200,
+        "pcap_sha256": "f09bb7804a6407a5a004f5d698554799286b2e18ae23cbe9d9c734dc710198c5",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -113667,7 +113773,7 @@
         "syn_time": 1793312032.118403,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 8,
       "s5_flow_dissection": [],
       "scenario_id": "S3",
       "timeline_events": [
@@ -114452,6 +114558,7 @@
         "http_request_frame": 136,
         "http_response_frame": 140,
         "http_status_code": 200,
+        "pcap_sha256": "c2148c8a33d160f9f4c1f53bf566484bc59d105fdc6d6938049e32902482f8e8",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -114463,7 +114570,7 @@
         "syn_time": 1793312046.950348,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 8,
       "s5_flow_dissection": [],
       "scenario_id": "S4",
       "timeline_events": [
@@ -115873,6 +115980,7 @@
         "http_request_frame": 76,
         "http_response_frame": 80,
         "http_status_code": 200,
+        "pcap_sha256": "d394b35b4c5e3183551008be6e768e631bbb31ca02fbc218b1fb8442dbccb791",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -115884,7 +115992,7 @@
         "syn_time": 1793312062.110913,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 8,
       "s5_flow_dissection": [],
       "scenario_id": "S4",
       "timeline_events": [
@@ -116668,6 +116776,7 @@
         "http_request_frame": 121,
         "http_response_frame": 125,
         "http_status_code": 200,
+        "pcap_sha256": "87d4694cd2d9cbb1922c39076d38bed0532ec4b600ff6ff7de51bcd5581194fc",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -116679,7 +116788,7 @@
         "syn_time": 1793312076.390927,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 8,
       "s5_flow_dissection": [
         {
           "client_port": null,
@@ -117983,6 +118092,7 @@
         "http_request_frame": 78,
         "http_response_frame": 88,
         "http_status_code": 200,
+        "pcap_sha256": "816b2d2555480546b14cb0a9465b7dab1b233b2068c0cfd4054d04251dfc0d0f",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -117994,7 +118104,7 @@
         "syn_time": 1793312091.415817,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 8,
       "s5_flow_dissection": [
         {
           "client_port": null,
@@ -118794,6 +118904,7 @@
         "http_request_frame": 153,
         "http_response_frame": 157,
         "http_status_code": 200,
+        "pcap_sha256": "8c854c6e96eec9b22f65c6f4821178f208a3b0fb62b44b933bd07f617af31fa1",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -118805,7 +118916,7 @@
         "syn_time": 1793312106.265248,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 8,
       "s5_flow_dissection": [],
       "scenario_id": "S6",
       "timeline_events": [
@@ -120255,6 +120366,7 @@
         "http_request_frame": 81,
         "http_response_frame": 85,
         "http_status_code": 200,
+        "pcap_sha256": "ea5c443190b0555a0b5bcc7faab032db10b7acd5812f716d2aa27954422a02ad",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -120266,7 +120378,7 @@
         "syn_time": 1793312121.423444,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 8,
       "s5_flow_dissection": [],
       "scenario_id": "S6",
       "timeline_events": [
@@ -121077,6 +121189,7 @@
         "http_request_frame": 131,
         "http_response_frame": 137,
         "http_status_code": 200,
+        "pcap_sha256": "94a9a034af95dc9b18fecf08a6defb133f6b3279a4d7483fcdba73b646bd56d9",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -121088,7 +121201,7 @@
         "syn_time": 1793312135.762719,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 9,
       "s5_flow_dissection": [],
       "scenario_id": "S0",
       "timeline_events": [
@@ -122403,6 +122516,7 @@
         "http_request_frame": 34,
         "http_response_frame": 46,
         "http_status_code": 200,
+        "pcap_sha256": "9806cecdeb32ff8dd7332ff8260a783a6b25c6867c8e8703bbe6f7ebf379a9e0",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -122414,7 +122528,7 @@
         "syn_time": 1793312150.326334,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 9,
       "s5_flow_dissection": [],
       "scenario_id": "S0",
       "timeline_events": [
@@ -123190,6 +123304,7 @@
         "http_request_frame": 144,
         "http_response_frame": 150,
         "http_status_code": 200,
+        "pcap_sha256": "0d851bbb91b7b004463d364dc62dded26d1271b5786485a718173d1580220a73",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -123201,7 +123316,7 @@
         "syn_time": 1793312165.117103,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 9,
       "s5_flow_dissection": [],
       "scenario_id": "S1",
       "timeline_events": [
@@ -124638,6 +124753,7 @@
         "http_request_frame": 80,
         "http_response_frame": 88,
         "http_status_code": 200,
+        "pcap_sha256": "b7cf3201601e12302cabe43415627473c483bc15440ad3e90877ed61e9d3c631",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -124649,7 +124765,7 @@
         "syn_time": 1793312180.167558,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 9,
       "s5_flow_dissection": [],
       "scenario_id": "S1",
       "timeline_events": [
@@ -125436,6 +125552,7 @@
         "http_request_frame": 135,
         "http_response_frame": 141,
         "http_status_code": 200,
+        "pcap_sha256": "b1d4afd4fb4c701afa40e23cd3e813573cc0f8b4d74b4490583504a091c702e2",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -125447,7 +125564,7 @@
         "syn_time": 1793312194.492752,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 9,
       "s5_flow_dissection": [],
       "scenario_id": "S2",
       "timeline_events": [
@@ -126796,6 +126913,7 @@
         "http_request_frame": 44,
         "http_response_frame": 60,
         "http_status_code": 200,
+        "pcap_sha256": "c24375d91a07a40b7010adedc3af12a582f4354d2a29d28fdb127f9a6d893a6e",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -126807,7 +126925,7 @@
         "syn_time": 1793312209.290968,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 9,
       "s5_flow_dissection": [],
       "scenario_id": "S2",
       "timeline_events": [
@@ -127474,6 +127592,7 @@
         "http_request_frame": 121,
         "http_response_frame": 136,
         "http_status_code": 200,
+        "pcap_sha256": "f71e36d403ceedb423c958608348c71be3b0f1cc5e447f764d5944f546243d97",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -127485,7 +127604,7 @@
         "syn_time": 1793312223.537945,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 9,
       "s5_flow_dissection": [],
       "scenario_id": "S3",
       "timeline_events": [
@@ -128836,6 +128955,7 @@
         "http_request_frame": 47,
         "http_response_frame": 81,
         "http_status_code": 200,
+        "pcap_sha256": "c22ca21dd18bd27327bff823e784b60aa3b37f73f71d7b8392567bee175771c3",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -128847,7 +128967,7 @@
         "syn_time": 1793312238.422981,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 9,
       "s5_flow_dissection": [],
       "scenario_id": "S3",
       "timeline_events": [
@@ -129623,6 +129743,7 @@
         "http_request_frame": 154,
         "http_response_frame": 160,
         "http_status_code": 200,
+        "pcap_sha256": "a127071d7d8a43e86ef6528c729a0ca065fe40222daf8d25a1883be901419788",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -129634,7 +129755,7 @@
         "syn_time": 1793312253.277171,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 9,
       "s5_flow_dissection": [],
       "scenario_id": "S4",
       "timeline_events": [
@@ -131098,6 +131219,7 @@
         "http_request_frame": 76,
         "http_response_frame": 80,
         "http_status_code": 200,
+        "pcap_sha256": "ca89d26080f974883b27c7f698cb7591b895ef580e89f8c53277d6234326469c",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -131109,7 +131231,7 @@
         "syn_time": 1793312268.298251,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 9,
       "s5_flow_dissection": [],
       "scenario_id": "S4",
       "timeline_events": [
@@ -131966,6 +132088,7 @@
         "http_request_frame": 144,
         "http_response_frame": 150,
         "http_status_code": 200,
+        "pcap_sha256": "60b3f2cef7adc5fea6a2d0381d16312fb10692dcecdbdb2a6e62e504f5c56b3f",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -131977,7 +132100,7 @@
         "syn_time": 1793312283.037371,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 9,
       "s5_flow_dissection": [
         {
           "client_port": null,
@@ -133485,6 +133608,7 @@
         "http_request_frame": 39,
         "http_response_frame": 43,
         "http_status_code": 200,
+        "pcap_sha256": "719c487fbd4151ac734af4c2ef8ecb17574c77117d4705bbb28c3db441ee0ad2",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -133496,7 +133620,7 @@
         "syn_time": 1793312297.762631,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 9,
       "s5_flow_dissection": [
         {
           "client_port": null,
@@ -134206,6 +134330,7 @@
         "http_request_frame": 133,
         "http_response_frame": 137,
         "http_status_code": 200,
+        "pcap_sha256": "b1c265c7f96d653a477344f4ec5f4ea3c88b6322f6d54e04a4674bb5817a2f24",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -134217,7 +134342,7 @@
         "syn_time": 1793312312.660252,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 9,
       "s5_flow_dissection": [],
       "scenario_id": "S6",
       "timeline_events": [
@@ -135568,6 +135693,7 @@
         "http_request_frame": 89,
         "http_response_frame": 93,
         "http_status_code": 200,
+        "pcap_sha256": "35348fb0ad8a74c8bf60495165702cfb86fc70ca5668bc6d382aa26270ab67d7",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -135579,7 +135705,7 @@
         "syn_time": 1793312327.896032,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 9,
       "s5_flow_dissection": [],
       "scenario_id": "S6",
       "timeline_events": [
@@ -136390,6 +136516,7 @@
         "http_request_frame": 121,
         "http_response_frame": 127,
         "http_status_code": 200,
+        "pcap_sha256": "a0f255e57aa19366c34f74ec6dc5463603fa330292a8498ecad791233aef25ff",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -136401,7 +136528,7 @@
         "syn_time": 1793312342.360551,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 10,
       "s5_flow_dissection": [],
       "scenario_id": "S0",
       "timeline_events": [
@@ -137689,6 +137816,7 @@
         "http_request_frame": 34,
         "http_response_frame": 52,
         "http_status_code": 200,
+        "pcap_sha256": "b36a48a28e4ed60dcdb9f10b5b9400611b9ca574a2b6dfece0dfa5894b807494",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -137700,7 +137828,7 @@
         "syn_time": 1793312357.134844,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 10,
       "s5_flow_dissection": [],
       "scenario_id": "S0",
       "timeline_events": [
@@ -138476,6 +138604,7 @@
         "http_request_frame": 144,
         "http_response_frame": 150,
         "http_status_code": 200,
+        "pcap_sha256": "2c09bafe8152dad51e0531bd5830cd164f6bd6fe496cf647b6d2d1c34340eb41",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -138487,7 +138616,7 @@
         "syn_time": 1793312371.924546,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 10,
       "s5_flow_dissection": [],
       "scenario_id": "S1",
       "timeline_events": [
@@ -139924,6 +140053,7 @@
         "http_request_frame": 76,
         "http_response_frame": 83,
         "http_status_code": 200,
+        "pcap_sha256": "aef56d4ca1ae458648d5423a911af0f7b6ce8b12b8cd82bdad57a2c161c54f43",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -139935,7 +140065,7 @@
         "syn_time": 1793312386.950538,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 10,
       "s5_flow_dissection": [],
       "scenario_id": "S1",
       "timeline_events": [
@@ -140695,6 +140825,7 @@
         "http_request_frame": 127,
         "http_response_frame": 131,
         "http_status_code": 200,
+        "pcap_sha256": "6f8d9514f5bd15f6920fed0ec4a7d3975071fc7a148294a97e4f55dd2f4513df",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -140706,7 +140837,7 @@
         "syn_time": 1793312401.292973,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 10,
       "s5_flow_dissection": [],
       "scenario_id": "S2",
       "timeline_events": [
@@ -142044,6 +142175,7 @@
         "http_request_frame": 36,
         "http_response_frame": 52,
         "http_status_code": 200,
+        "pcap_sha256": "10b9b50a57264b4a9cb1cb261b5e8ab4318a3ebbb84967b9eaa6590693c92bbf",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -142055,7 +142187,7 @@
         "syn_time": 1793312415.990168,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 10,
       "s5_flow_dissection": [],
       "scenario_id": "S2",
       "timeline_events": [
@@ -142821,6 +142953,7 @@
         "http_request_frame": 121,
         "http_response_frame": 137,
         "http_status_code": 200,
+        "pcap_sha256": "632bcb8e7f4c5e3e06b9cb0876980c07142fdadb2f2d30769b051d1abe0863f3",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -142832,7 +142965,7 @@
         "syn_time": 1793312430.275738,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 10,
       "s5_flow_dissection": [],
       "scenario_id": "S3",
       "timeline_events": [
@@ -144167,6 +144300,7 @@
         "http_request_frame": 34,
         "http_response_frame": 78,
         "http_status_code": 200,
+        "pcap_sha256": "9164135d7219bbaf0b17e569a843f0fd352983c5df0f936900f0b5cb43e8db15",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -144178,7 +144312,7 @@
         "syn_time": 1793312445.155801,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 10,
       "s5_flow_dissection": [],
       "scenario_id": "S3",
       "timeline_events": [
@@ -144855,6 +144989,7 @@
         "http_request_frame": 144,
         "http_response_frame": 150,
         "http_status_code": 200,
+        "pcap_sha256": "affca5aaf59f76db956a0a5baf0b72c0d7570e44cd15ed86bb121f9043271c9d",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -144866,7 +145001,7 @@
         "syn_time": 1793312460.091375,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 10,
       "s5_flow_dissection": [],
       "scenario_id": "S4",
       "timeline_events": [
@@ -146352,6 +146487,7 @@
         "http_request_frame": 38,
         "http_response_frame": 90,
         "http_status_code": 200,
+        "pcap_sha256": "78169b8ea6af5c233229a99d05b5af1b41dfaaa5a82231618d2e3c46de2f4526",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -146363,7 +146499,7 @@
         "syn_time": 1793312479.302799,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 10,
       "s5_flow_dissection": [],
       "scenario_id": "S4",
       "timeline_events": [
@@ -147111,6 +147247,7 @@
         "http_request_frame": 111,
         "http_response_frame": 117,
         "http_status_code": 200,
+        "pcap_sha256": "c3134f75924e2233dd3c34d8ddd1d76cb9ed6cfaa4c9156936b74ed966ef0e63",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -147122,7 +147259,7 @@
         "syn_time": 1793312497.777303,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 10,
       "s5_flow_dissection": [
         {
           "client_port": null,
@@ -148495,6 +148632,7 @@
         "http_request_frame": 38,
         "http_response_frame": 42,
         "http_status_code": 200,
+        "pcap_sha256": "c28f674398b8f7e2b288006820a14033c66a375e4007e45ac14afb259c8cdac4",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -148506,7 +148644,7 @@
         "syn_time": 1793312515.200923,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 10,
       "s5_flow_dissection": [
         {
           "client_port": null,
@@ -149053,6 +149191,7 @@
         "http_request_frame": 143,
         "http_response_frame": 147,
         "http_status_code": 200,
+        "pcap_sha256": "5d2acd89f626334cfcefc4a5f6e912d09443c36c63c817ccce19074882bdd38c",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -149064,7 +149203,7 @@
         "syn_time": 1793312531.020336,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 10,
       "s5_flow_dissection": [],
       "scenario_id": "S6",
       "timeline_events": [
@@ -150442,6 +150581,7 @@
         "http_request_frame": 89,
         "http_response_frame": 93,
         "http_status_code": 200,
+        "pcap_sha256": "f91d2610bbf5ef6dedaf81effab7820e3c578d31f53ed2bf90b0a668bbf8dc3a",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -150453,7 +150593,7 @@
         "syn_time": 1793312546.641992,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 10,
       "s5_flow_dissection": [],
       "scenario_id": "S6",
       "timeline_events": [
@@ -151264,6 +151404,7 @@
         "http_request_frame": 121,
         "http_response_frame": 127,
         "http_status_code": 200,
+        "pcap_sha256": "41124f85e81f5b62b9498ef93389a7e3117428e27d2d09d7eb51b6ba7feaa371",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -151275,7 +151416,7 @@
         "syn_time": 1793312561.499331,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 11,
       "s5_flow_dissection": [],
       "scenario_id": "S0",
       "timeline_events": [
@@ -152547,6 +152688,7 @@
         "http_request_frame": 34,
         "http_response_frame": 38,
         "http_status_code": 200,
+        "pcap_sha256": "02d9b4759275bcb070c51cd327d74379341c33b3699ce4465775f0ad53959342",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -152558,7 +152700,7 @@
         "syn_time": 1793312576.16515,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 11,
       "s5_flow_dissection": [],
       "scenario_id": "S0",
       "timeline_events": [
@@ -153217,6 +153359,7 @@
         "http_request_frame": 146,
         "http_response_frame": 150,
         "http_status_code": 200,
+        "pcap_sha256": "4d8c7eed8b30fd6e3c37f67984607b7f1572a30e2ad75094f096791173b4eb94",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -153228,7 +153371,7 @@
         "syn_time": 1793312590.838718,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 11,
       "s5_flow_dissection": [],
       "scenario_id": "S1",
       "timeline_events": [
@@ -154674,6 +154817,7 @@
         "http_request_frame": 72,
         "http_response_frame": 76,
         "http_status_code": 200,
+        "pcap_sha256": "5de8d1af5bfcb125ebe9f2a9ef998a73f0afa8b0995efa05ff66376106204f53",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -154685,7 +154829,7 @@
         "syn_time": 1793312606.492926,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 11,
       "s5_flow_dissection": [],
       "scenario_id": "S1",
       "timeline_events": [
@@ -155472,6 +155616,7 @@
         "http_request_frame": 125,
         "http_response_frame": 131,
         "http_status_code": 200,
+        "pcap_sha256": "462e4c02539a0255cbbdea571bdc9130f31a4a006e1d408b0206422f8a19ae34",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -155483,7 +155628,7 @@
         "syn_time": 1793312621.123479,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 11,
       "s5_flow_dissection": [],
       "scenario_id": "S2",
       "timeline_events": [
@@ -156805,6 +156950,7 @@
         "http_request_frame": 48,
         "http_response_frame": 60,
         "http_status_code": 200,
+        "pcap_sha256": "a1be2b927922e349cbed85b33363185ef4cdffbc8ec3f61017b1d68355fc62c0",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -156816,7 +156962,7 @@
         "syn_time": 1793312635.926767,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 11,
       "s5_flow_dissection": [],
       "scenario_id": "S2",
       "timeline_events": [
@@ -157483,6 +157629,7 @@
         "http_request_frame": 131,
         "http_response_frame": 147,
         "http_status_code": 200,
+        "pcap_sha256": "e4ed53b95a97399be0a3adaff18888989ea772b748faec4242a534395aee542e",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -157494,7 +157641,7 @@
         "syn_time": 1793312650.222799,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 11,
       "s5_flow_dissection": [],
       "scenario_id": "S3",
       "timeline_events": [
@@ -158872,6 +159019,7 @@
         "http_request_frame": 39,
         "http_response_frame": 81,
         "http_status_code": 200,
+        "pcap_sha256": "8be052a9eb07b5e4d426e0471d3372c7151a4fe72745a78279f1a310c20eab21",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -158883,7 +159031,7 @@
         "syn_time": 1793312665.233676,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 11,
       "s5_flow_dissection": [],
       "scenario_id": "S3",
       "timeline_events": [
@@ -159596,6 +159744,7 @@
         "http_request_frame": 134,
         "http_response_frame": 140,
         "http_status_code": 200,
+        "pcap_sha256": "37b622da62c94f3a17a98f72a7f22a95d37dc14908d86ce556522a9e08985dee",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -159607,7 +159756,7 @@
         "syn_time": 1793312680.113042,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 11,
       "s5_flow_dissection": [],
       "scenario_id": "S4",
       "timeline_events": [
@@ -161017,6 +161166,7 @@
         "http_request_frame": 88,
         "http_response_frame": 92,
         "http_status_code": 200,
+        "pcap_sha256": "fd3d80ba954e6791153e223072bb6bdf686c38d79828e2eb53e51999b5791c98",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -161028,7 +161178,7 @@
         "syn_time": 1793312695.289178,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 11,
       "s5_flow_dissection": [],
       "scenario_id": "S4",
       "timeline_events": [
@@ -161795,6 +161945,7 @@
         "http_request_frame": 144,
         "http_response_frame": 150,
         "http_status_code": 200,
+        "pcap_sha256": "c223424390e777aa5cccca6a1a783e25d26b863d3523d93a546056cb90169cba",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -161806,7 +161957,7 @@
         "syn_time": 1793312710.009949,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 11,
       "s5_flow_dissection": [
         {
           "client_port": null,
@@ -163314,6 +163465,7 @@
         "http_request_frame": 72,
         "http_response_frame": 76,
         "http_status_code": 200,
+        "pcap_sha256": "38061dbcaa6220e4fa84fadb6fcaff845b04b12ac291fb8fe6de09e3e0508234",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -163325,7 +163477,7 @@
         "syn_time": 1793312725.091104,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 11,
       "s5_flow_dissection": [
         {
           "client_port": null,
@@ -164098,6 +164250,7 @@
         "http_request_frame": 133,
         "http_response_frame": 137,
         "http_status_code": 200,
+        "pcap_sha256": "4830c6290f262de4b248a49fdd3ce7dc78192de4af42e74daa2486be2b5d31f9",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -164109,7 +164262,7 @@
         "syn_time": 1793312740.059324,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 11,
       "s5_flow_dissection": [],
       "scenario_id": "S6",
       "timeline_events": [
@@ -165460,6 +165613,7 @@
         "http_request_frame": 77,
         "http_response_frame": 81,
         "http_status_code": 200,
+        "pcap_sha256": "1deaf9d2e7ab56713647c46a59ce4df861ce3ffaadae122a4763d67bb193f508",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -165471,7 +165625,7 @@
         "syn_time": 1793312755.59145,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 11,
       "s5_flow_dissection": [],
       "scenario_id": "S6",
       "timeline_events": [
@@ -166255,6 +166409,7 @@
         "http_request_frame": 121,
         "http_response_frame": 127,
         "http_status_code": 200,
+        "pcap_sha256": "804fb079555e360586783f220f1c854004764c44fb983f059a49401c487d713b",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -166266,7 +166421,7 @@
         "syn_time": 1793312770.398305,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 12,
       "s5_flow_dissection": [],
       "scenario_id": "S0",
       "timeline_events": [
@@ -167538,6 +167693,7 @@
         "http_request_frame": 34,
         "http_response_frame": 50,
         "http_status_code": 200,
+        "pcap_sha256": "449b7c5f6c3fad39a0875fb2005bc5f690a4c6bfb21b1a27eb5ba16046cc03dc",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -167549,7 +167705,7 @@
         "syn_time": 1793312785.051317,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 12,
       "s5_flow_dissection": [],
       "scenario_id": "S0",
       "timeline_events": [
@@ -168181,6 +168337,7 @@
         "http_request_frame": 134,
         "http_response_frame": 140,
         "http_status_code": 200,
+        "pcap_sha256": "185529d6a80d2c9a60511ccd71397f49e77a47d688ebab7dc5d84c8ad2538016",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -168192,7 +168349,7 @@
         "syn_time": 1793312799.756764,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 12,
       "s5_flow_dissection": [],
       "scenario_id": "S1",
       "timeline_events": [
@@ -169602,6 +169759,7 @@
         "http_request_frame": 84,
         "http_response_frame": 88,
         "http_status_code": 200,
+        "pcap_sha256": "e601595433f00775fbfcd9d21a6eaf1c95113c72e3362b47cb721a8e52243659",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -169613,7 +169771,7 @@
         "syn_time": 1793312814.837391,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 12,
       "s5_flow_dissection": [],
       "scenario_id": "S1",
       "timeline_events": [
@@ -170310,6 +170468,7 @@
         "http_request_frame": 125,
         "http_response_frame": 131,
         "http_status_code": 200,
+        "pcap_sha256": "6dccd70d9cf7670dc08b491b8aba201d4c067bb96e2435232145f6ac1af63a39",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -170321,7 +170480,7 @@
         "syn_time": 1793312829.31039,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 12,
       "s5_flow_dissection": [],
       "scenario_id": "S2",
       "timeline_events": [
@@ -171643,6 +171802,7 @@
         "http_request_frame": 54,
         "http_response_frame": 68,
         "http_status_code": 200,
+        "pcap_sha256": "6277b314cf5ed1e17abdc8318cbf8a7105711690368e2435c9419968a3f46e69",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -171654,7 +171814,7 @@
         "syn_time": 1793312843.995811,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 12,
       "s5_flow_dissection": [],
       "scenario_id": "S2",
       "timeline_events": [
@@ -172312,6 +172472,7 @@
         "http_request_frame": 131,
         "http_response_frame": 147,
         "http_status_code": 200,
+        "pcap_sha256": "605d54535a1f0c274887ef1e6332c33e5ef2e43a3749bb445e08f5afeb8d1653",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -172323,7 +172484,7 @@
         "syn_time": 1793312858.140581,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 12,
       "s5_flow_dissection": [],
       "scenario_id": "S3",
       "timeline_events": [
@@ -173746,6 +173907,7 @@
         "http_request_frame": 39,
         "http_response_frame": 81,
         "http_status_code": 200,
+        "pcap_sha256": "735c6b87ae5e8f5466d1456666b75e8f78002e602e39ea1b3db97afa29a0e9f7",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -173757,7 +173919,7 @@
         "syn_time": 1793312872.909647,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 12,
       "s5_flow_dissection": [],
       "scenario_id": "S3",
       "timeline_events": [
@@ -174461,6 +174623,7 @@
         "http_request_frame": 134,
         "http_response_frame": 140,
         "http_status_code": 200,
+        "pcap_sha256": "d177d2851de87d9778199b3ddff65fa629ff41503e465c2c5d072e3a700cfb6a",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -174472,7 +174635,7 @@
         "syn_time": 1793312887.761344,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 12,
       "s5_flow_dissection": [],
       "scenario_id": "S4",
       "timeline_events": [
@@ -175882,6 +176045,7 @@
         "http_request_frame": 84,
         "http_response_frame": 88,
         "http_status_code": 200,
+        "pcap_sha256": "ac453962ac43214e397fb9595f5b7ddc28e9c8511376c12b2a0268df32a26af7",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -175893,7 +176057,7 @@
         "syn_time": 1793312902.83174,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 12,
       "s5_flow_dissection": [],
       "scenario_id": "S4",
       "timeline_events": [
@@ -176677,6 +176841,7 @@
         "http_request_frame": 111,
         "http_response_frame": 115,
         "http_status_code": 200,
+        "pcap_sha256": "8031cef727dc513a25c5b6cd4cefb7efd4def1cab6eba2a34635d60f66d2770e",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -176688,7 +176853,7 @@
         "syn_time": 1793312917.152643,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 12,
       "s5_flow_dissection": [
         {
           "client_port": null,
@@ -177951,6 +178116,7 @@
         "http_request_frame": 38,
         "http_response_frame": 48,
         "http_status_code": 200,
+        "pcap_sha256": "517bc48e41c9cbc7c3277bb0e1878baf7a5e1327a7f2af97ec5e061a2456d19c",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -177962,7 +178128,7 @@
         "syn_time": 1793312931.726265,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 12,
       "s5_flow_dissection": [
         {
           "client_port": null,
@@ -178658,6 +178824,7 @@
         "http_request_frame": 143,
         "http_response_frame": 147,
         "http_status_code": 200,
+        "pcap_sha256": "6c519837428c03ae92234ae11f0057e6314a760939c2aa478bb77e35a993988b",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -178669,7 +178836,7 @@
         "syn_time": 1793312946.717453,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 12,
       "s5_flow_dissection": [],
       "scenario_id": "S6",
       "timeline_events": [
@@ -180047,6 +180214,7 @@
         "http_request_frame": 77,
         "http_response_frame": 81,
         "http_status_code": 200,
+        "pcap_sha256": "d7b5550b3d0f9a753e2d606d973b6762031b2dcf20ae96c5b491ed6fa4418575",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -180058,7 +180226,7 @@
         "syn_time": 1793312962.275746,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 12,
       "s5_flow_dissection": [],
       "scenario_id": "S6",
       "timeline_events": [
@@ -180842,6 +181010,7 @@
         "http_request_frame": 121,
         "http_response_frame": 127,
         "http_status_code": 200,
+        "pcap_sha256": "67c6b6518932b9a03c5bb26ffd8007cd44d91d0b23bd1c3d2179d0260a559a3f",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -180853,7 +181022,7 @@
         "syn_time": 1793312976.66209,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 13,
       "s5_flow_dissection": [],
       "scenario_id": "S0",
       "timeline_events": [
@@ -182141,6 +182310,7 @@
         "http_request_frame": 34,
         "http_response_frame": 50,
         "http_status_code": 200,
+        "pcap_sha256": "dca8c623fab495ab66d6ee2bb0bac52935b5bc7007dc721b2377ab71a7474d1a",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -182152,7 +182322,7 @@
         "syn_time": 1793312991.414535,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 13,
       "s5_flow_dissection": [],
       "scenario_id": "S0",
       "timeline_events": [
@@ -182856,6 +183026,7 @@
         "http_request_frame": 144,
         "http_response_frame": 150,
         "http_status_code": 200,
+        "pcap_sha256": "7f30b123ba3146eeddac83f413aa2a5d441e9dbb4083d73d2d7940d73fd22c84",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -182867,7 +183038,7 @@
         "syn_time": 1793313006.096974,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 13,
       "s5_flow_dissection": [],
       "scenario_id": "S1",
       "timeline_events": [
@@ -184304,6 +184475,7 @@
         "http_request_frame": 84,
         "http_response_frame": 88,
         "http_status_code": 200,
+        "pcap_sha256": "1dcddc4dacabc321d3d44bb169c22954bc079a499e65cc83fd19687ffdc69221",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -184315,7 +184487,7 @@
         "syn_time": 1793313021.235199,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 13,
       "s5_flow_dissection": [],
       "scenario_id": "S1",
       "timeline_events": [
@@ -185075,6 +185247,7 @@
         "http_request_frame": 115,
         "http_response_frame": 121,
         "http_status_code": 200,
+        "pcap_sha256": "15f7c3f663eebb16ec1f3482b79761a1ca01774bfb7ea3018df6b45f84b5a8d7",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -185086,7 +185259,7 @@
         "syn_time": 1793313035.817134,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 13,
       "s5_flow_dissection": [],
       "scenario_id": "S2",
       "timeline_events": [
@@ -186381,6 +186554,7 @@
         "http_request_frame": 36,
         "http_response_frame": 52,
         "http_status_code": 200,
+        "pcap_sha256": "e6d7c4914943b6e005acda0cd0f3da3549e0c241cc0ac7589bd8be9f9c4dff90",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -186392,7 +186566,7 @@
         "syn_time": 1793313050.617573,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 13,
       "s5_flow_dissection": [],
       "scenario_id": "S2",
       "timeline_events": [
@@ -187059,6 +187233,7 @@
         "http_request_frame": 141,
         "http_response_frame": 157,
         "http_status_code": 200,
+        "pcap_sha256": "2f79bba55fec980e7191cc1e7ee52ea9bb2950397862b761674b18e399458253",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -187070,7 +187245,7 @@
         "syn_time": 1793313064.8209,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 13,
       "s5_flow_dissection": [],
       "scenario_id": "S3",
       "timeline_events": [
@@ -188459,6 +188634,7 @@
         "http_request_frame": 34,
         "http_response_frame": 78,
         "http_status_code": 200,
+        "pcap_sha256": "0e1112aebe273205581ea8d3bf233b02d6f6e0dc3be3c43643a494dd398a7468",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -188470,7 +188646,7 @@
         "syn_time": 1793313079.957754,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 13,
       "s5_flow_dissection": [],
       "scenario_id": "S3",
       "timeline_events": [
@@ -189147,6 +189323,7 @@
         "http_request_frame": 144,
         "http_response_frame": 150,
         "http_status_code": 200,
+        "pcap_sha256": "aaf1f3748a042b27ba54b2068b7abafc277d2c595fb3ee0da3648f9f3723afde",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -189158,7 +189335,7 @@
         "syn_time": 1793313095.604026,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 13,
       "s5_flow_dissection": [],
       "scenario_id": "S4",
       "timeline_events": [
@@ -190640,6 +190817,7 @@
         "http_request_frame": 80,
         "http_response_frame": 84,
         "http_status_code": 200,
+        "pcap_sha256": "9089f8f19e230b6f4b13739df0bc196b5d5a3d3c2443528b93ad6dfb4685c36e",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -190651,7 +190829,7 @@
         "syn_time": 1793313110.626219,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 13,
       "s5_flow_dissection": [],
       "scenario_id": "S4",
       "timeline_events": [
@@ -191435,6 +191613,7 @@
         "http_request_frame": 121,
         "http_response_frame": 125,
         "http_status_code": 200,
+        "pcap_sha256": "3e78c55e351979d7d7eab1ed1a87ab65294a64f437c864526c77ac46dcac0acd",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -191446,7 +191625,7 @@
         "syn_time": 1793313125.132236,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 13,
       "s5_flow_dissection": [
         {
           "client_port": null,
@@ -192675,6 +192854,7 @@
         "http_request_frame": 34,
         "http_response_frame": 42,
         "http_status_code": 200,
+        "pcap_sha256": "26459a9ada21fa7a8f8fb950a2055f011572f5e78358f05bd6884913c95bc81f",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -192686,7 +192866,7 @@
         "syn_time": 1793313139.768287,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 13,
       "s5_flow_dissection": [
         {
           "client_port": null,
@@ -193332,6 +193512,7 @@
         "http_request_frame": 143,
         "http_response_frame": 147,
         "http_status_code": 200,
+        "pcap_sha256": "7d9cc0d2623571b46d1f65316ef85fbc27515a75160d385851657e58f55de87a",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -193343,7 +193524,7 @@
         "syn_time": 1793313154.946941,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 13,
       "s5_flow_dissection": [],
       "scenario_id": "S6",
       "timeline_events": [
@@ -194721,6 +194902,7 @@
         "http_request_frame": 73,
         "http_response_frame": 77,
         "http_status_code": 200,
+        "pcap_sha256": "1af06311644f537c1e3b1f49fa8ad2490430fbd86c3c4448df8c2bd94a217627",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -194732,7 +194914,7 @@
         "syn_time": 1793313170.426565,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 13,
       "s5_flow_dissection": [],
       "scenario_id": "S6",
       "timeline_events": [
@@ -195525,6 +195707,7 @@
         "http_request_frame": 111,
         "http_response_frame": 117,
         "http_status_code": 200,
+        "pcap_sha256": "0b057301ead3449c48fd578b43c0d754db2387278d62c41e8f3e6b5bcaac559d",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -195536,7 +195719,7 @@
         "syn_time": 1793313185.084241,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 14,
       "s5_flow_dissection": [],
       "scenario_id": "S0",
       "timeline_events": [
@@ -196797,6 +196980,7 @@
         "http_request_frame": 38,
         "http_response_frame": 42,
         "http_status_code": 200,
+        "pcap_sha256": "329b605f8cf8066f571cdbe82dc4228bec241c182bf44724f3d8af82c1c27407",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -196808,7 +196992,7 @@
         "syn_time": 1793313199.726705,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 14,
       "s5_flow_dissection": [],
       "scenario_id": "S0",
       "timeline_events": [
@@ -197575,6 +197759,7 @@
         "http_request_frame": 134,
         "http_response_frame": 140,
         "http_status_code": 200,
+        "pcap_sha256": "951ba781ed5b911df303c6e4f26e08486ee43f37522c286481c16cb8e2372f98",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -197586,7 +197771,7 @@
         "syn_time": 1793313214.647111,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 14,
       "s5_flow_dissection": [],
       "scenario_id": "S1",
       "timeline_events": [
@@ -198996,6 +199181,7 @@
         "http_request_frame": 76,
         "http_response_frame": 80,
         "http_status_code": 200,
+        "pcap_sha256": "c08025a162476b9045a7276a29312c0d5b66b85f8783c536509c3e84581bf79d",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -199007,7 +199193,7 @@
         "syn_time": 1793313229.744606,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 14,
       "s5_flow_dissection": [],
       "scenario_id": "S1",
       "timeline_events": [
@@ -199740,6 +199926,7 @@
         "http_request_frame": 125,
         "http_response_frame": 131,
         "http_status_code": 200,
+        "pcap_sha256": "8b863b394075ba4f31e5c4bc35bb24769d4af55354ec1aefae8949a3f15cd848",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -199751,7 +199938,7 @@
         "syn_time": 1793313244.233671,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 14,
       "s5_flow_dissection": [],
       "scenario_id": "S2",
       "timeline_events": [
@@ -201073,6 +201260,7 @@
         "http_request_frame": 46,
         "http_response_frame": 64,
         "http_status_code": 200,
+        "pcap_sha256": "4ab332e9b5a48b08a33d03c855f13d4c69cfee15e452bc5d53ba457b4a8e138c",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -201084,7 +201272,7 @@
         "syn_time": 1793313259.080766,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 14,
       "s5_flow_dissection": [],
       "scenario_id": "S2",
       "timeline_events": [
@@ -201742,6 +201930,7 @@
         "http_request_frame": 133,
         "http_response_frame": 147,
         "http_status_code": 200,
+        "pcap_sha256": "10bb012d6c0fed0ed3e63fd0d499ac46146ae1d2ad65ed38e407049e35befe40",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -201753,7 +201942,7 @@
         "syn_time": 1793313273.574917,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 14,
       "s5_flow_dissection": [],
       "scenario_id": "S3",
       "timeline_events": [
@@ -203131,6 +203320,7 @@
         "http_request_frame": 39,
         "http_response_frame": 85,
         "http_status_code": 200,
+        "pcap_sha256": "5a2b84a97195ac917b523b906696c5112279b7b6446bea7e5fcc41e2c40a240b",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -203142,7 +203332,7 @@
         "syn_time": 1793313288.458109,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 14,
       "s5_flow_dissection": [],
       "scenario_id": "S3",
       "timeline_events": [
@@ -203945,6 +204135,7 @@
         "http_request_frame": 146,
         "http_response_frame": 150,
         "http_status_code": 200,
+        "pcap_sha256": "1fa839c4bf2ea1140ba0b6deb0877c4562c34f6e6a33b8abc0877a0c0ca22440",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -203956,7 +204147,7 @@
         "syn_time": 1793313303.86838,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 14,
       "s5_flow_dissection": [],
       "scenario_id": "S4",
       "timeline_events": [
@@ -205393,6 +205584,7 @@
         "http_request_frame": 76,
         "http_response_frame": 80,
         "http_status_code": 200,
+        "pcap_sha256": "34514cc330a8688277c326ce82905bf7140b5f7553e61882ffca323cedc85de5",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -205404,7 +205596,7 @@
         "syn_time": 1793313319.705187,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 14,
       "s5_flow_dissection": [],
       "scenario_id": "S4",
       "timeline_events": [
@@ -206224,6 +206416,7 @@
         "http_request_frame": 111,
         "http_response_frame": 117,
         "http_status_code": 200,
+        "pcap_sha256": "fbfba522872645a117837ae89736bbc95137c470ff65daae3f88ca86027cb6aa",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -206235,7 +206428,7 @@
         "syn_time": 1793313334.280528,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 14,
       "s5_flow_dissection": [
         {
           "client_port": null,
@@ -207509,6 +207702,7 @@
         "http_request_frame": 34,
         "http_response_frame": 50,
         "http_status_code": 200,
+        "pcap_sha256": "778ce52923dbc6b9b4742a2cee37e042571fc08e44d7e917ca22f0a58783bd89",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -207520,7 +207714,7 @@
         "syn_time": 1793313348.901208,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 14,
       "s5_flow_dissection": [
         {
           "client_port": null,
@@ -208157,6 +208351,7 @@
         "http_request_frame": 133,
         "http_response_frame": 137,
         "http_status_code": 200,
+        "pcap_sha256": "a70ab1e568019ee2e3cb3c3b2290301677faa76767ca36bd91d6d6f01c9e0422",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -208168,7 +208363,7 @@
         "syn_time": 1793313363.849378,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 14,
       "s5_flow_dissection": [],
       "scenario_id": "S6",
       "timeline_events": [
@@ -209519,6 +209714,7 @@
         "http_request_frame": 57,
         "http_response_frame": 69,
         "http_status_code": 200,
+        "pcap_sha256": "966d3ebaf2e2753e9275b656d8ee792912eef807b70b632a7c69473281007e1e",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -209530,7 +209726,7 @@
         "syn_time": 1793313379.419045,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 14,
       "s5_flow_dissection": [],
       "scenario_id": "S6",
       "timeline_events": [
@@ -210260,6 +210456,7 @@
         "http_request_frame": 121,
         "http_response_frame": 127,
         "http_status_code": 200,
+        "pcap_sha256": "abfbd97ed49ddb191c1a8bf9058ce68eb166ed24d3f61998e635618f4e923231",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -210271,7 +210468,7 @@
         "syn_time": 1793313393.726592,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 15,
       "s5_flow_dissection": [],
       "scenario_id": "S0",
       "timeline_events": [
@@ -211559,6 +211756,7 @@
         "http_request_frame": 34,
         "http_response_frame": 48,
         "http_status_code": 200,
+        "pcap_sha256": "8744d9c0b1160eca8396fdd37c9180a619406bac4b1ed2632ff6577815fa46e6",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -211570,7 +211768,7 @@
         "syn_time": 1793313408.3686,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 15,
       "s5_flow_dissection": [],
       "scenario_id": "S0",
       "timeline_events": [
@@ -212337,6 +212535,7 @@
         "http_request_frame": 144,
         "http_response_frame": 150,
         "http_status_code": 200,
+        "pcap_sha256": "cc01b9e9a1941bbd8525de2bfc5f1d3167c23757ce449c60a64191c4a7b01ba9",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -212348,7 +212547,7 @@
         "syn_time": 1793313423.084057,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 15,
       "s5_flow_dissection": [],
       "scenario_id": "S1",
       "timeline_events": [
@@ -213830,6 +214029,7 @@
         "http_request_frame": 76,
         "http_response_frame": 80,
         "http_status_code": 200,
+        "pcap_sha256": "40220e7b0b33fb9721d34a82e98fa3a2c7a8c4ecfdcada8553be732cdcf73e57",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -213841,7 +214041,7 @@
         "syn_time": 1793313438.396616,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 15,
       "s5_flow_dissection": [],
       "scenario_id": "S1",
       "timeline_events": [
@@ -214574,6 +214774,7 @@
         "http_request_frame": 135,
         "http_response_frame": 141,
         "http_status_code": 200,
+        "pcap_sha256": "818f3d99f28467458fc16dbf4d943f07d407e83d0402ac3a63272876c72f8551",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -214585,7 +214786,7 @@
         "syn_time": 1793313453.04728,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 15,
       "s5_flow_dissection": [],
       "scenario_id": "S2",
       "timeline_events": [
@@ -215887,6 +216088,7 @@
         "http_request_frame": 48,
         "http_response_frame": 66,
         "http_status_code": 200,
+        "pcap_sha256": "d46322d516d9ee0ce3a14d2735d2cde655b5d09c90c43a125aa48b9a7fcba566",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -215898,7 +216100,7 @@
         "syn_time": 1793313467.809627,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 15,
       "s5_flow_dissection": [],
       "scenario_id": "S2",
       "timeline_events": [
@@ -216664,6 +216866,7 @@
         "http_request_frame": 131,
         "http_response_frame": 147,
         "http_status_code": 200,
+        "pcap_sha256": "9c6801c657d08d1ba67da2fbead692325c41f0b8a071be1c3dbb2beeacffee4f",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -216675,7 +216878,7 @@
         "syn_time": 1793313482.145919,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 15,
       "s5_flow_dissection": [],
       "scenario_id": "S3",
       "timeline_events": [
@@ -218053,6 +218256,7 @@
         "http_request_frame": 34,
         "http_response_frame": 78,
         "http_status_code": 200,
+        "pcap_sha256": "73471b676a06cc4a6cc7aa4caaa7bba1f4604abed3fdf0a873bf6652a36f5447",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -218064,7 +218268,7 @@
         "syn_time": 1793313496.981413,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 15,
       "s5_flow_dissection": [],
       "scenario_id": "S3",
       "timeline_events": [
@@ -218822,6 +219026,7 @@
         "http_request_frame": 154,
         "http_response_frame": 160,
         "http_status_code": 200,
+        "pcap_sha256": "2532a20d47624d156a7bc8ec8d7fd75c77144c04d381178c31d9e47c03d8af8d",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -218833,7 +219038,7 @@
         "syn_time": 1793313511.929965,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 15,
       "s5_flow_dissection": [],
       "scenario_id": "S4",
       "timeline_events": [
@@ -220297,6 +220502,7 @@
         "http_request_frame": 72,
         "http_response_frame": 76,
         "http_status_code": 200,
+        "pcap_sha256": "a978b757064c06aad76737a013640258351ad636a7cd50ef8e9a878b708ce7f0",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -220308,7 +220514,7 @@
         "syn_time": 1793313526.924146,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 15,
       "s5_flow_dissection": [],
       "scenario_id": "S4",
       "timeline_events": [
@@ -221119,6 +221325,7 @@
         "http_request_frame": 100,
         "http_response_frame": 137,
         "http_status_code": 200,
+        "pcap_sha256": "c562f02160c124b739d3ba7a3f91b260db88fc9a1f9b876c3ec28f6b959e7b48",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -221130,7 +221337,7 @@
         "syn_time": 1793313541.547873,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 15,
       "s5_flow_dissection": [
         {
           "client_port": null,
@@ -222458,6 +222665,7 @@
         "http_request_frame": 42,
         "http_response_frame": 58,
         "http_status_code": 200,
+        "pcap_sha256": "1f9a1968cbf999056dc2a10eb02224aa4a87d0a4a7ef22650caa01b3ea09e30b",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -222469,7 +222677,7 @@
         "syn_time": 1793313556.170348,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 15,
       "s5_flow_dissection": [
         {
           "client_port": null,
@@ -223115,6 +223323,7 @@
         "http_request_frame": 143,
         "http_response_frame": 147,
         "http_status_code": 200,
+        "pcap_sha256": "922625bcb22e2c41e475ebc7c147cd230e845cb1bd3729032a14b4acf274d6c6",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -223126,7 +223335,7 @@
         "syn_time": 1793313571.187328,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 15,
       "s5_flow_dissection": [],
       "scenario_id": "S6",
       "timeline_events": [
@@ -224504,6 +224713,7 @@
         "http_request_frame": 85,
         "http_response_frame": 89,
         "http_status_code": 200,
+        "pcap_sha256": "a784b57c75df33084b52b8ce365335fa87753c2b03059f609877e284d1020b96",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -224515,7 +224725,7 @@
         "syn_time": 1793313586.337632,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 15,
       "s5_flow_dissection": [],
       "scenario_id": "S6",
       "timeline_events": [
@@ -225326,6 +225536,7 @@
         "http_request_frame": 131,
         "http_response_frame": 137,
         "http_status_code": 200,
+        "pcap_sha256": "148b6e75507c07d799f6749d4060d69e9e0de2dd7c0359ff0a44aa082d988ac0",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -225337,7 +225548,7 @@
         "syn_time": 1793313601.025708,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 16,
       "s5_flow_dissection": [],
       "scenario_id": "S0",
       "timeline_events": [
@@ -226681,6 +226892,7 @@
         "http_request_frame": 34,
         "http_response_frame": 50,
         "http_status_code": 200,
+        "pcap_sha256": "14d0f7a65f204e5109a77b89cbf7013eb59ede99d50402c490eacde683695b39",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -226692,7 +226904,7 @@
         "syn_time": 1793313615.66388,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 16,
       "s5_flow_dissection": [],
       "scenario_id": "S0",
       "timeline_events": [
@@ -227360,6 +227572,7 @@
         "http_request_frame": 144,
         "http_response_frame": 150,
         "http_status_code": 200,
+        "pcap_sha256": "28ce6a96397e795ddf9f076e7a18bad8bc691f078f5b7d33c1469f955a56d38f",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -227371,7 +227584,7 @@
         "syn_time": 1793313630.328016,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 16,
       "s5_flow_dissection": [],
       "scenario_id": "S1",
       "timeline_events": [
@@ -228808,6 +229021,7 @@
         "http_request_frame": 68,
         "http_response_frame": 72,
         "http_status_code": 200,
+        "pcap_sha256": "55d89b73a30a2df8dea674484b331335a4f0f4a46f436c08a544dbc6b5c48cb7",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -228819,7 +229033,7 @@
         "syn_time": 1793313645.376211,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 16,
       "s5_flow_dissection": [],
       "scenario_id": "S1",
       "timeline_events": [
@@ -229606,6 +229820,7 @@
         "http_request_frame": 125,
         "http_response_frame": 131,
         "http_status_code": 200,
+        "pcap_sha256": "9731d32be8f0eabb528bce822cb2f7efc843935ff001e01b9edc3abbf4365a95",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -229617,7 +229832,7 @@
         "syn_time": 1793313659.879172,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 16,
       "s5_flow_dissection": [],
       "scenario_id": "S2",
       "timeline_events": [
@@ -230955,6 +231170,7 @@
         "http_request_frame": 36,
         "http_response_frame": 51,
         "http_status_code": 200,
+        "pcap_sha256": "574169a8db59f2a331eb7d28a685ce8adb5dd4c2093f5d3cbce67cd6612fd173",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -230966,7 +231182,7 @@
         "syn_time": 1793313674.968972,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 16,
       "s5_flow_dissection": [],
       "scenario_id": "S2",
       "timeline_events": [
@@ -231732,6 +231948,7 @@
         "http_request_frame": 131,
         "http_response_frame": 147,
         "http_status_code": 200,
+        "pcap_sha256": "c18dd40f3ef812a99a2277900704af742adcb33ab35d85fefaf0e8e5c4fe8caf",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -231743,7 +231960,7 @@
         "syn_time": 1793313689.427133,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 16,
       "s5_flow_dissection": [],
       "scenario_id": "S3",
       "timeline_events": [
@@ -233121,6 +233338,7 @@
         "http_request_frame": 39,
         "http_response_frame": 85,
         "http_status_code": 200,
+        "pcap_sha256": "3c3197de3181a522bb38fb2f5b6a1b7d24444ddb1a422c5b61038da9da275e31",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -233132,7 +233350,7 @@
         "syn_time": 1793313704.38962,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 16,
       "s5_flow_dissection": [],
       "scenario_id": "S3",
       "timeline_events": [
@@ -233845,6 +234063,7 @@
         "http_request_frame": 146,
         "http_response_frame": 150,
         "http_status_code": 200,
+        "pcap_sha256": "5b654b6993c0107c279d90ed8a1580a98df4ec026298d04c13451f9750cb51f2",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -233856,7 +234075,7 @@
         "syn_time": 1793313719.380469,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 16,
       "s5_flow_dissection": [],
       "scenario_id": "S4",
       "timeline_events": [
@@ -235293,6 +235512,7 @@
         "http_request_frame": 84,
         "http_response_frame": 88,
         "http_status_code": 200,
+        "pcap_sha256": "ace16f3ae6c86af2d65c7fbec8db192f8e13a729b2209fac7309fda6ecd9198e",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -235304,7 +235524,7 @@
         "syn_time": 1793313734.336685,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 16,
       "s5_flow_dissection": [],
       "scenario_id": "S4",
       "timeline_events": [
@@ -236088,6 +236308,7 @@
         "http_request_frame": 121,
         "http_response_frame": 127,
         "http_status_code": 200,
+        "pcap_sha256": "c086019a0887243b24b2f1d2d7e6e4a820348c0ce6e35df5da82e80f661470fe",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -236099,7 +236320,7 @@
         "syn_time": 1793313748.663323,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 16,
       "s5_flow_dissection": [
         {
           "client_port": null,
@@ -237430,6 +237651,7 @@
         "http_request_frame": 76,
         "http_response_frame": 88,
         "http_status_code": 200,
+        "pcap_sha256": "2a441e95c5d8ce26edb7c5a6a4300a82bd253c98ae660ecd0a8411cea5af3b7e",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -237441,7 +237663,7 @@
         "syn_time": 1793313763.652736,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 16,
       "s5_flow_dissection": [
         {
           "client_port": null,
@@ -238241,6 +238463,7 @@
         "http_request_frame": 133,
         "http_response_frame": 137,
         "http_status_code": 200,
+        "pcap_sha256": "ba08af1686017e63fed2080dcbb728862cf32d4f285033c3a5e1effe29de10e6",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -238252,7 +238475,7 @@
         "syn_time": 1793313778.526953,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 16,
       "s5_flow_dissection": [],
       "scenario_id": "S6",
       "timeline_events": [
@@ -239648,6 +239871,7 @@
         "http_request_frame": 77,
         "http_response_frame": 81,
         "http_status_code": 200,
+        "pcap_sha256": "f749a2eb8058c9ebbafaf6f31c268d18b527948c9eb7acaa735209e7fc00ad49",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -239659,7 +239883,7 @@
         "syn_time": 1793313794.123663,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 16,
       "s5_flow_dissection": [],
       "scenario_id": "S6",
       "timeline_events": [
@@ -240470,6 +240694,7 @@
         "http_request_frame": 121,
         "http_response_frame": 127,
         "http_status_code": 200,
+        "pcap_sha256": "177fb541b029a90380f57ba9222d653deaf28949a2108f20559dac43dc231462",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -240481,7 +240706,7 @@
         "syn_time": 1793313808.650348,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 17,
       "s5_flow_dissection": [],
       "scenario_id": "S0",
       "timeline_events": [
@@ -241753,6 +241978,7 @@
         "http_request_frame": 34,
         "http_response_frame": 50,
         "http_status_code": 200,
+        "pcap_sha256": "ab81dfc06d933de2abd17010ee40d344de629f04cc02b36add1e8243d34a2e02",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -241764,7 +241990,7 @@
         "syn_time": 1793313823.509767,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 17,
       "s5_flow_dissection": [],
       "scenario_id": "S0",
       "timeline_events": [
@@ -242441,6 +242667,7 @@
         "http_request_frame": 144,
         "http_response_frame": 150,
         "http_status_code": 200,
+        "pcap_sha256": "c2602f4f75849205082b6becfa79fddfbee6062b038aac15c9e0d2c26c543851",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -242452,7 +242679,7 @@
         "syn_time": 1793313838.239046,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 17,
       "s5_flow_dissection": [],
       "scenario_id": "S1",
       "timeline_events": [
@@ -243943,6 +244170,7 @@
         "http_request_frame": 76,
         "http_response_frame": 80,
         "http_status_code": 200,
+        "pcap_sha256": "120461dfa29a987fcce6c5e1be9e49d978a526acf06ff52df234b75ed861383f",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -243954,7 +244182,7 @@
         "syn_time": 1793313853.273936,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 17,
       "s5_flow_dissection": [],
       "scenario_id": "S1",
       "timeline_events": [
@@ -244660,6 +244888,7 @@
         "http_request_frame": 125,
         "http_response_frame": 131,
         "http_status_code": 200,
+        "pcap_sha256": "2eb97d2881e6861e8b4d9304cc50d1dc234587c73371e4131879d8300e1ff6b8",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -244671,7 +244900,7 @@
         "syn_time": 1793313867.656396,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 17,
       "s5_flow_dissection": [],
       "scenario_id": "S2",
       "timeline_events": [
@@ -245993,6 +246222,7 @@
         "http_request_frame": 54,
         "http_response_frame": 72,
         "http_status_code": 200,
+        "pcap_sha256": "74fcbd8bb9c4a7329bffef9120ca493b8cb4c64b7310a1148b0b09d21930fa21",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -246004,7 +246234,7 @@
         "syn_time": 1793313882.577243,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 17,
       "s5_flow_dissection": [],
       "scenario_id": "S2",
       "timeline_events": [
@@ -246671,6 +246901,7 @@
         "http_request_frame": 131,
         "http_response_frame": 147,
         "http_status_code": 200,
+        "pcap_sha256": "6eeacf888bc712a5024f975f2d9abc0f0dca36b86b0051c19cd2f43a319ae3c2",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -246682,7 +246913,7 @@
         "syn_time": 1793313896.965936,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 17,
       "s5_flow_dissection": [],
       "scenario_id": "S3",
       "timeline_events": [
@@ -248033,6 +248264,7 @@
         "http_request_frame": 35,
         "http_response_frame": 81,
         "http_status_code": 200,
+        "pcap_sha256": "17a1a8eace5de6abb1c3c0308a3ff0fefc453e3e3fde7320a6a00b460eb47c0e",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -248044,7 +248276,7 @@
         "syn_time": 1793313911.828747,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 17,
       "s5_flow_dissection": [],
       "scenario_id": "S3",
       "timeline_events": [
@@ -248793,6 +249025,7 @@
         "http_request_frame": 146,
         "http_response_frame": 150,
         "http_status_code": 200,
+        "pcap_sha256": "3b5ad938db0f3d28741e20e6eeaabcd8de9302c0363961352d78435de37142e7",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -248804,7 +249037,7 @@
         "syn_time": 1793313927.032709,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 17,
       "s5_flow_dissection": [],
       "scenario_id": "S4",
       "timeline_events": [
@@ -250241,6 +250474,7 @@
         "http_request_frame": 76,
         "http_response_frame": 80,
         "http_status_code": 200,
+        "pcap_sha256": "7cacba2975a966d32ad183214fa95488036c48173461a3a3695a6f3b39c33283",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -250252,7 +250486,7 @@
         "syn_time": 1793313941.964568,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 17,
       "s5_flow_dissection": [],
       "scenario_id": "S4",
       "timeline_events": [
@@ -250991,6 +251225,7 @@
         "http_request_frame": 111,
         "http_response_frame": 115,
         "http_status_code": 200,
+        "pcap_sha256": "048c11d2f2c007c48901f6a7bbb445dcacfcf5f58cd5608e5cab2cd18a2af2b6",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -251002,7 +251237,7 @@
         "syn_time": 1793313956.596271,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 17,
       "s5_flow_dissection": [
         {
           "client_port": null,
@@ -252234,6 +252469,7 @@
         "http_request_frame": 92,
         "http_response_frame": 96,
         "http_status_code": 200,
+        "pcap_sha256": "41f462952c63f5893306ea9811aa23cdef8f46e5a53bd4db8fb9eec473c25dc4",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -252245,7 +252481,7 @@
         "syn_time": 1793313972.17127,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 17,
       "s5_flow_dissection": [
         {
           "client_port": null,
@@ -253045,6 +253281,7 @@
         "http_request_frame": 143,
         "http_response_frame": 147,
         "http_status_code": 200,
+        "pcap_sha256": "f17a47cc00d93a16ea8f03806aceeeb3d0ead94d3bb772ca114a7135b6ee1240",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -253056,7 +253293,7 @@
         "syn_time": 1793313987.528052,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 17,
       "s5_flow_dissection": [],
       "scenario_id": "S6",
       "timeline_events": [
@@ -254479,6 +254716,7 @@
         "http_request_frame": 81,
         "http_response_frame": 93,
         "http_status_code": 200,
+        "pcap_sha256": "33dbefa8e4e7db04e4b62f5ed37b758f8fb1f3a6578d3f05a0cbf5e1e652acd8",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -254490,7 +254728,7 @@
         "syn_time": 1793314002.848988,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 17,
       "s5_flow_dissection": [],
       "scenario_id": "S6",
       "timeline_events": [
@@ -255301,6 +255539,7 @@
         "http_request_frame": 121,
         "http_response_frame": 127,
         "http_status_code": 200,
+        "pcap_sha256": "722efad87d492cb1ea5145ac8791fd6b2569a8d4ad2c68516fea72a2aeb277ff",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -255312,7 +255551,7 @@
         "syn_time": 1793314017.239982,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 18,
       "s5_flow_dissection": [],
       "scenario_id": "S0",
       "timeline_events": [
@@ -256584,6 +256823,7 @@
         "http_request_frame": 34,
         "http_response_frame": 46,
         "http_status_code": 200,
+        "pcap_sha256": "7a98570bdcb06c5d98ea4f8b74e665dd97e95948b6979dfc6fa450c4b85a9a4f",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -256595,7 +256835,7 @@
         "syn_time": 1793314031.844189,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 18,
       "s5_flow_dissection": [],
       "scenario_id": "S0",
       "timeline_events": [
@@ -257272,6 +257512,7 @@
         "http_request_frame": 136,
         "http_response_frame": 140,
         "http_status_code": 200,
+        "pcap_sha256": "384a4e5ead5b02fee604498eb429bcf3906712de6f8b506006b011fda55b6d67",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -257283,7 +257524,7 @@
         "syn_time": 1793314046.6255,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 18,
       "s5_flow_dissection": [],
       "scenario_id": "S1",
       "timeline_events": [
@@ -258693,6 +258934,7 @@
         "http_request_frame": 76,
         "http_response_frame": 80,
         "http_status_code": 200,
+        "pcap_sha256": "b6c102f41b9c246212911006d10053998acf0c51abe6bd241560196536d3cacb",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -258704,7 +258946,7 @@
         "syn_time": 1793314061.681492,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 18,
       "s5_flow_dissection": [],
       "scenario_id": "S1",
       "timeline_events": [
@@ -259491,6 +259733,7 @@
         "http_request_frame": 115,
         "http_response_frame": 121,
         "http_status_code": 200,
+        "pcap_sha256": "ee2b952decb7dd0216bd414180addecef7dc9b0dd43ed643b25a2e47d36d5449",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -259502,7 +259745,7 @@
         "syn_time": 1793314076.118937,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 18,
       "s5_flow_dissection": [],
       "scenario_id": "S2",
       "timeline_events": [
@@ -260813,6 +261056,7 @@
         "http_request_frame": 44,
         "http_response_frame": 67,
         "http_status_code": 200,
+        "pcap_sha256": "d4ae3d9aff67bb7b8bbf1b49e0abb844b84b6f9795bb427c8857cf34d69a1883",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -260824,7 +261068,7 @@
         "syn_time": 1793314090.89897,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 18,
       "s5_flow_dissection": [],
       "scenario_id": "S2",
       "timeline_events": [
@@ -261545,6 +261789,7 @@
         "http_request_frame": 121,
         "http_response_frame": 137,
         "http_status_code": 200,
+        "pcap_sha256": "bd2e24ccb76b549689233743e44e6a6065e0651ed5a5a665d5980573f7e6dd01",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -261556,7 +261801,7 @@
         "syn_time": 1793314105.116727,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 18,
       "s5_flow_dissection": [],
       "scenario_id": "S3",
       "timeline_events": [
@@ -262952,6 +263197,7 @@
         "http_request_frame": 41,
         "http_response_frame": 81,
         "http_status_code": 200,
+        "pcap_sha256": "768e605a55bf5cf7c00a3251e363d0dc45d4f1301378368645891c1d71d89ac2",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -262963,7 +263209,7 @@
         "syn_time": 1793314119.991044,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 18,
       "s5_flow_dissection": [],
       "scenario_id": "S3",
       "timeline_events": [
@@ -263739,6 +263985,7 @@
         "http_request_frame": 144,
         "http_response_frame": 150,
         "http_status_code": 200,
+        "pcap_sha256": "079edf11bfac30fcc595aa5cea6c29761085ef6e22cedd43593fb8079c661ae0",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -263750,7 +263997,7 @@
         "syn_time": 1793314134.958332,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 18,
       "s5_flow_dissection": [],
       "scenario_id": "S4",
       "timeline_events": [
@@ -265187,6 +265434,7 @@
         "http_request_frame": 72,
         "http_response_frame": 76,
         "http_status_code": 200,
+        "pcap_sha256": "d730493ce3b4c04feb22737a3363e9d53328a6fe188d058bff623243a4a048e5",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -265198,7 +265446,7 @@
         "syn_time": 1793314150.040868,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 18,
       "s5_flow_dissection": [],
       "scenario_id": "S4",
       "timeline_events": [
@@ -265982,6 +266230,7 @@
         "http_request_frame": 111,
         "http_response_frame": 117,
         "http_status_code": 200,
+        "pcap_sha256": "73b05f0824de73cdb8e348cc22d2e4273638177632c9bbd2f26c15772aa32ce9",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -265993,7 +266242,7 @@
         "syn_time": 1793314164.324734,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 18,
       "s5_flow_dissection": [
         {
           "client_port": null,
@@ -267267,6 +267516,7 @@
         "http_request_frame": 38,
         "http_response_frame": 46,
         "http_status_code": 200,
+        "pcap_sha256": "3540f7d74b5daaaa11f34a09266b9beb73dfe24f9aef1e2563a43f860aff427e",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -267278,7 +267528,7 @@
         "syn_time": 1793314178.986232,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 18,
       "s5_flow_dissection": [
         {
           "client_port": null,
@@ -267924,6 +268174,7 @@
         "http_request_frame": 153,
         "http_response_frame": 157,
         "http_status_code": 200,
+        "pcap_sha256": "329f61f94e3fbc82c45fd3bc5afd9c528c1f62fcfa86f16177eb101366f73e80",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -267935,7 +268186,7 @@
         "syn_time": 1793314193.981359,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 18,
       "s5_flow_dissection": [],
       "scenario_id": "S6",
       "timeline_events": [
@@ -269340,6 +269591,7 @@
         "http_request_frame": 85,
         "http_response_frame": 97,
         "http_status_code": 200,
+        "pcap_sha256": "2c6ebfe6e18e2d48f247b10c454d5df8e465df7f796caa9be6f4f9faf7042bd6",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -269351,7 +269603,7 @@
         "syn_time": 1793314209.380637,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 18,
       "s5_flow_dissection": [],
       "scenario_id": "S6",
       "timeline_events": [
@@ -270162,6 +270414,7 @@
         "http_request_frame": 131,
         "http_response_frame": 137,
         "http_status_code": 200,
+        "pcap_sha256": "6b29134aec209651d3a5d79c00ea7631be4c2dfbde72676c44b252bb6f644389",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -270173,7 +270426,7 @@
         "syn_time": 1793314224.112327,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 19,
       "s5_flow_dissection": [],
       "scenario_id": "S0",
       "timeline_events": [
@@ -271517,6 +271770,7 @@
         "http_request_frame": 34,
         "http_response_frame": 40,
         "http_status_code": 200,
+        "pcap_sha256": "663f54c3bd96cc5ec00dcb45558952f9efcae821e0ed0d325101e449ae116e76",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -271528,7 +271782,7 @@
         "syn_time": 1793314239.152209,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 19,
       "s5_flow_dissection": [],
       "scenario_id": "S0",
       "timeline_events": [
@@ -272196,6 +272450,7 @@
         "http_request_frame": 134,
         "http_response_frame": 140,
         "http_status_code": 200,
+        "pcap_sha256": "8a2f38f90c8788b2417de75b61e06c9163efac02e33e6cc221e580435c30c213",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -272207,7 +272462,7 @@
         "syn_time": 1793314254.299435,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 19,
       "s5_flow_dissection": [],
       "scenario_id": "S1",
       "timeline_events": [
@@ -273617,6 +273872,7 @@
         "http_request_frame": 72,
         "http_response_frame": 76,
         "http_status_code": 200,
+        "pcap_sha256": "2be002a0a40ca5623e3d4dca3a0022da790a3e0527225fb714a64d246c43df14",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -273628,7 +273884,7 @@
         "syn_time": 1793314269.483956,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 19,
       "s5_flow_dissection": [],
       "scenario_id": "S1",
       "timeline_events": [
@@ -274415,6 +274671,7 @@
         "http_request_frame": 115,
         "http_response_frame": 121,
         "http_status_code": 200,
+        "pcap_sha256": "ad0d7c637134a231fb2f8fb8b8fa238c433d50f947acd570a9f1becee65e168b",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -274426,7 +274683,7 @@
         "syn_time": 1793314284.206406,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 19,
       "s5_flow_dissection": [],
       "scenario_id": "S2",
       "timeline_events": [
@@ -275721,6 +275978,7 @@
         "http_request_frame": 42,
         "http_response_frame": 52,
         "http_status_code": 200,
+        "pcap_sha256": "e95a738ef252c4ac6d09b6eff1ee8ac7d84ab47269397efd368129f5c6e26d10",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -275732,7 +275990,7 @@
         "syn_time": 1793314298.971212,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 19,
       "s5_flow_dissection": [],
       "scenario_id": "S2",
       "timeline_events": [
@@ -276399,6 +276657,7 @@
         "http_request_frame": 131,
         "http_response_frame": 147,
         "http_status_code": 200,
+        "pcap_sha256": "340337393807fb107a62767a2a5b869396023d9cd310d3d6a53f7d676134cb03",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -276410,7 +276669,7 @@
         "syn_time": 1793314313.189747,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 19,
       "s5_flow_dissection": [],
       "scenario_id": "S3",
       "timeline_events": [
@@ -277761,6 +278020,7 @@
         "http_request_frame": 45,
         "http_response_frame": 77,
         "http_status_code": 200,
+        "pcap_sha256": "eeed6773f556fb1d9d000646cb2f5e9d0c17956596a3e133363747cf23d79b96",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -277772,7 +278032,7 @@
         "syn_time": 1793314328.096025,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 19,
       "s5_flow_dissection": [],
       "scenario_id": "S3",
       "timeline_events": [
@@ -278485,6 +278745,7 @@
         "http_request_frame": 144,
         "http_response_frame": 150,
         "http_status_code": 200,
+        "pcap_sha256": "7acf6e2bd633da38fc3dff9591e705c7e21f15047e4cbad81339f1754139cd26",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -278496,7 +278757,7 @@
         "syn_time": 1793314343.570078,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 19,
       "s5_flow_dissection": [],
       "scenario_id": "S4",
       "timeline_events": [
@@ -279933,6 +280194,7 @@
         "http_request_frame": 80,
         "http_response_frame": 84,
         "http_status_code": 200,
+        "pcap_sha256": "ace6cddcc41cef3e9eff8b932b5d6030b4f10c8a31955b3ea763661473f271af",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -279944,7 +280206,7 @@
         "syn_time": 1793314359.230093,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 19,
       "s5_flow_dissection": [],
       "scenario_id": "S4",
       "timeline_events": [
@@ -280665,6 +280927,7 @@
         "http_request_frame": 121,
         "http_response_frame": 127,
         "http_status_code": 200,
+        "pcap_sha256": "82dbbea31b4e7062e5d2c7e5d1245abb00f3f95a2a29ed4211d7a82b047fc091",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -280676,7 +280939,7 @@
         "syn_time": 1793314373.60011,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 19,
       "s5_flow_dissection": [
         {
           "client_port": null,
@@ -281993,6 +282256,7 @@
         "http_request_frame": 35,
         "http_response_frame": 43,
         "http_status_code": 200,
+        "pcap_sha256": "60a564944c5014c55d2e726889e16d46204b96af4b583ce344871a155110acc9",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -282004,7 +282268,7 @@
         "syn_time": 1793314388.429025,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 19,
       "s5_flow_dissection": [
         {
           "client_port": null,
@@ -282673,6 +282937,7 @@
         "http_request_frame": 133,
         "http_response_frame": 137,
         "http_status_code": 200,
+        "pcap_sha256": "a42a3966e87815d8f4e7b111a050c1d1f51c0073f8409685ae50cdc8b5c2eb10",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -282684,7 +282949,7 @@
         "syn_time": 1793314403.462664,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 19,
       "s5_flow_dissection": [],
       "scenario_id": "S6",
       "timeline_events": [
@@ -284080,6 +284345,7 @@
         "http_request_frame": 77,
         "http_response_frame": 81,
         "http_status_code": 200,
+        "pcap_sha256": "9f3e8a47d7399d504b072796e032399168c396795d2c884ae79caae01cf38093",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -284091,7 +284357,7 @@
         "syn_time": 1793314419.25347,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 19,
       "s5_flow_dissection": [],
       "scenario_id": "S6",
       "timeline_events": [
@@ -284902,6 +285168,7 @@
         "http_request_frame": 121,
         "http_response_frame": 127,
         "http_status_code": 200,
+        "pcap_sha256": "ad8e9d2b656c875b8258551e47f6c54ac59baf1b1fa6269dd681a20c4a4fbc0a",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -284913,7 +285180,7 @@
         "syn_time": 1793314433.598279,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 20,
       "s5_flow_dissection": [],
       "scenario_id": "S0",
       "timeline_events": [
@@ -286246,6 +286513,7 @@
         "http_request_frame": 34,
         "http_response_frame": 38,
         "http_status_code": 200,
+        "pcap_sha256": "f0ea172a446bb168f69674fcc5278123ec4767764fa3e61b5f9a45a0761903ef",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -286257,7 +286525,7 @@
         "syn_time": 1793314448.226197,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 20,
       "s5_flow_dissection": [],
       "scenario_id": "S0",
       "timeline_events": [
@@ -286961,6 +287229,7 @@
         "http_request_frame": 134,
         "http_response_frame": 140,
         "http_status_code": 200,
+        "pcap_sha256": "f658cccb2d972ce632d0b22594d4dac15636a34f72731771af3d4db3952fe671",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -286972,7 +287241,7 @@
         "syn_time": 1793314463.103082,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 20,
       "s5_flow_dissection": [],
       "scenario_id": "S1",
       "timeline_events": [
@@ -288382,6 +288651,7 @@
         "http_request_frame": 88,
         "http_response_frame": 92,
         "http_status_code": 200,
+        "pcap_sha256": "4475480fcdde47d0350d0ba1f6e694561e76204269d2b1c2b83e85e8b68abfbf",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -288393,7 +288663,7 @@
         "syn_time": 1793314478.128783,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 20,
       "s5_flow_dissection": [],
       "scenario_id": "S1",
       "timeline_events": [
@@ -289180,6 +289450,7 @@
         "http_request_frame": 125,
         "http_response_frame": 131,
         "http_status_code": 200,
+        "pcap_sha256": "cbc7651ec7267d5677c475cabb6ebea5c0d12abcf77969125fa1e87db2bd562e",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -289191,7 +289462,7 @@
         "syn_time": 1793314492.888872,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 20,
       "s5_flow_dissection": [],
       "scenario_id": "S2",
       "timeline_events": [
@@ -290529,6 +290800,7 @@
         "http_request_frame": 48,
         "http_response_frame": 68,
         "http_status_code": 200,
+        "pcap_sha256": "2a39946c23fe0a25f61bc264f73b907cdcce4cb9cffe1fb71239359fe893ece6",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -290540,7 +290812,7 @@
         "syn_time": 1793314507.652163,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 20,
       "s5_flow_dissection": [],
       "scenario_id": "S2",
       "timeline_events": [
@@ -291261,6 +291533,7 @@
         "http_request_frame": 131,
         "http_response_frame": 147,
         "http_status_code": 200,
+        "pcap_sha256": "b47365811716bcb2923560661c7171e8f02d6c90afa0998abb443f064d9c8952",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -291272,7 +291545,7 @@
         "syn_time": 1793314521.954965,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 20,
       "s5_flow_dissection": [],
       "scenario_id": "S3",
       "timeline_events": [
@@ -292650,6 +292923,7 @@
         "http_request_frame": 39,
         "http_response_frame": 77,
         "http_status_code": 200,
+        "pcap_sha256": "c6bdd63faf8fc0f542d5bda4ccc896d5e2743cf8ff4366a3397da31a8b315b7f",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -292661,7 +292935,7 @@
         "syn_time": 1793314536.85683,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 20,
       "s5_flow_dissection": [],
       "scenario_id": "S3",
       "timeline_events": [
@@ -293365,6 +293639,7 @@
         "http_request_frame": 154,
         "http_response_frame": 160,
         "http_status_code": 200,
+        "pcap_sha256": "37314c9a0780abb3ce3a7ea0137b68d93869ec57103dda3e8a8edba941f6529f",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -293376,7 +293651,7 @@
         "syn_time": 1793314551.766248,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 20,
       "s5_flow_dissection": [],
       "scenario_id": "S4",
       "timeline_events": [
@@ -294885,6 +295160,7 @@
         "http_request_frame": 80,
         "http_response_frame": 84,
         "http_status_code": 200,
+        "pcap_sha256": "ec462156b29004482ae7331c62489b505ed0340e301e05e42b5357d881f9bdf8",
         "server_endpoint": [
           "10.0.2.10",
           80
@@ -294896,7 +295172,7 @@
         "syn_time": 1793314567.001814,
         "winning_family": "ipv4"
       },
-      "repetition": null,
+      "repetition": 20,
       "s5_flow_dissection": [],
       "scenario_id": "S4",
       "timeline_events": [
@@ -295753,6 +296029,7 @@
         "http_request_frame": 132,
         "http_response_frame": 146,
         "http_status_code": 200,
+        "pcap_sha256": "5fae008ddc001004aa9fda9d0404d04bc82653df1c455d56c5d30cde791e314d",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -295764,7 +296041,7 @@
         "syn_time": 1793314581.611005,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 20,
       "s5_flow_dissection": [
         {
           "client_port": null,
@@ -297276,6 +297553,7 @@
         "http_request_frame": 34,
         "http_response_frame": 47,
         "http_status_code": 200,
+        "pcap_sha256": "bd393fbb2fdf5c972f2e2ff31510ed349e13cf61aaef0d58bedc0fb39ffca969",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -297287,7 +297565,7 @@
         "syn_time": 1793314596.415902,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 20,
       "s5_flow_dissection": [
         {
           "client_port": null,
@@ -297974,6 +298252,7 @@
         "http_request_frame": 143,
         "http_response_frame": 147,
         "http_status_code": 200,
+        "pcap_sha256": "7a49a88cee49f9999f4fbc9766fd9f5b38c983d671cb44f8a88923570432a6c5",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -297985,7 +298264,7 @@
         "syn_time": 1793314611.43433,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 20,
       "s5_flow_dissection": [],
       "scenario_id": "S6",
       "timeline_events": [
@@ -299363,6 +299642,7 @@
         "http_request_frame": 77,
         "http_response_frame": 89,
         "http_status_code": 200,
+        "pcap_sha256": "ef0721734134f03cbc6647396b27a5215af9fc9fafba98a24900a04a97ff833b",
         "server_endpoint": [
           "2001:db8:2::10",
           80
@@ -299374,7 +299654,7 @@
         "syn_time": 1793314627.054525,
         "winning_family": "ipv6"
       },
-      "repetition": null,
+      "repetition": 20,
       "s5_flow_dissection": [],
       "scenario_id": "S6",
       "timeline_events": [

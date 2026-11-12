@@ -2,7 +2,7 @@
   "bundle_schema_version": "1.0.0",
   "campaign_id": "ps028-a10-live-20261030-01",
   "evidence_type": "HISTORICAL_LIVE",
-  "generator_commit": "9fd0f9fc01e461b5f5e03aa3376751210b07cbd8",
+  "generator_commit": "8118c7d332ee00b721fae838a95c0ec0ef694250",
   "generator_script": "lab/build_demo_bundle.py",
   "generator_version": "1.0.0",
   "input_files_sha256": {
@@ -15,7 +15,7 @@
     "s5_flow_dissection.csv": "73e7b238990e822b30cd926e5f709c36e76730f0c3857747ff78baa6d9ae3ac0",
     "trial_timeline.csv": "8ec432bed4fe7533b82a2735767c90525b95d521d840d5b67fd7024387057de5"
   },
-  "output_bundle_sha256": "226e821207369e0d58e84c1a3f2e14a5755534fc3b31c80ebaffde2d28aa74e6",
+  "output_bundle_sha256": "23170264264be482bf001828b09d4f5a59128f4f8a12be7f2fdf7d7204465c59",
   "rederived_trials_sha256": {
     "trial-20261029205425-6cb90a54.json": "e158923e099f3bd5dd7d95349f4f113c03a0f830ea65de11a5725d76cdc6128d",
     "trial-20261029205924-355df0f7.json": "65ea50d030cfba36843093dcde2216c65abccfb29ab9c0d11205b46173753e39",
