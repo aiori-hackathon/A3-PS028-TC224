@@ -14,6 +14,8 @@ import unittest
 
 from lab.analyze import load_trials_from_directory, assess_rfc8305_conformance
 from lab.build_demo_bundle import (
+    CANONICAL_BROWSERS,
+    CANONICAL_SCENARIOS,
     DEFAULT_CAMPAIGN_DIR,
     DEFAULT_PHASE_C_DIR,
     DEFAULT_OUTPUT_DIR,
@@ -1263,10 +1265,6 @@ class TestDemoBundleBuilder(unittest.TestCase):
                 "contains duplicate repetition(s)" in str(ctx.exception)
                 or "missing repetition(s)" in str(ctx.exception)
             )
-            self.assertTrue(
-                "contains duplicate repetition(s)" in str(ctx.exception)
-                or "missing repetition(s)" in str(ctx.exception)
-            )
 
     def test_authentic_repetition_preservation_1_to_20(self):
         """Correction B: Authentic demonstration bundle strictly preserves repetitions 1..20 for all 14 cohorts."""
@@ -1286,6 +1284,206 @@ class TestDemoBundleBuilder(unittest.TestCase):
             self.assertEqual(set(reps), expected_set, f"Cohort {ck} does not contain exact range 1..20")
             for r in reps:
                 self.assertIs(type(r), int, f"Repetition {r} in cohort {ck} is not Python int")
+
+    def test_unknown_scenario_id_fails_closed(self):
+        """Batch 1E Correction A: Unknown scenario ID (e.g. S7) in ledger and rederived fails closed."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_c_dir = Path(tmpdir) / "phase-c"
+            tmp_c_dir.mkdir()
+            for item in DEFAULT_PHASE_C_DIR.iterdir():
+                if item.name not in ("attempts.csv", "rederived_results"):
+                    (tmp_c_dir / item.name).symlink_to(item)
+
+            trials_dir = tmp_c_dir / "rederived_results"
+            trials_dir.mkdir()
+            for tfile in (DEFAULT_PHASE_C_DIR / "rederived_results").glob("trial-*.json"):
+                (trials_dir / tfile.name).symlink_to(tfile)
+
+            orig_lines = (DEFAULT_PHASE_C_DIR / "attempts.csv").read_text(encoding="utf-8").splitlines()
+            header = orig_lines[0]
+            first_row = orig_lines[1].split(",")
+            scen_idx = header.split(",").index("scenario_id")
+            tid_idx = header.split(",").index("trial_id")
+            target_tid = first_row[tid_idx]
+
+            # Consistently change scenario_id to unknown S7 in both ledger and rederived JSON
+            first_row[scen_idx] = "S7"
+            corrupted_csv = "\n".join([header, ",".join(first_row)] + orig_lines[2:]) + "\n"
+            (tmp_c_dir / "attempts.csv").write_text(corrupted_csv, encoding="utf-8")
+
+            t_path = trials_dir / f"{target_tid}.json"
+            if t_path.exists():
+                t_path.unlink()
+                data = json.loads((DEFAULT_PHASE_C_DIR / "rederived_results" / f"{target_tid}.json").read_text(encoding="utf-8"))
+                data["scenario_id"] = "S7"
+                t_path.write_text(json.dumps(data), encoding="utf-8")
+
+            with self.assertRaises(ValueError) as ctx:
+                build_demonstration_bundle(
+                    campaign_dir=DEFAULT_CAMPAIGN_DIR,
+                    phase_c_dir=tmp_c_dir,
+                    output_dir=Path(tmpdir) / "out",
+                )
+            self.assertIn("Unknown scenario ID 'S7' in attempts ledger", str(ctx.exception))
+
+    def test_missing_or_empty_scenario_id_fails_closed(self):
+        """Batch 1E Correction A: Missing or empty scenario_id in ledger or rederived fails closed."""
+        # Case 1: Empty string in attempts ledger
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_c_dir = Path(tmpdir) / "phase-c"
+            tmp_c_dir.mkdir()
+            for item in DEFAULT_PHASE_C_DIR.iterdir():
+                if item.name != "attempts.csv":
+                    (tmp_c_dir / item.name).symlink_to(item)
+
+            orig_lines = (DEFAULT_PHASE_C_DIR / "attempts.csv").read_text(encoding="utf-8").splitlines()
+            header = orig_lines[0]
+            first_row = orig_lines[1].split(",")
+            scen_idx = header.split(",").index("scenario_id")
+            first_row[scen_idx] = "   "
+            corrupted_csv = "\n".join([header, ",".join(first_row)] + orig_lines[2:]) + "\n"
+            (tmp_c_dir / "attempts.csv").write_text(corrupted_csv, encoding="utf-8")
+
+            with self.assertRaises(ValueError) as ctx:
+                build_demonstration_bundle(
+                    campaign_dir=DEFAULT_CAMPAIGN_DIR,
+                    phase_c_dir=tmp_c_dir,
+                    output_dir=Path(tmpdir) / "out",
+                )
+            self.assertIn("missing or has empty scenario_id in attempts ledger", str(ctx.exception))
+
+        # Case 2: Empty string in rederived record
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_c_dir = Path(tmpdir) / "phase-c"
+            tmp_c_dir.mkdir()
+            for item in DEFAULT_PHASE_C_DIR.iterdir():
+                if item.name != "rederived_results":
+                    (tmp_c_dir / item.name).symlink_to(item)
+
+            trials_dir = tmp_c_dir / "rederived_results"
+            trials_dir.mkdir()
+            for tfile in (DEFAULT_PHASE_C_DIR / "rederived_results").glob("trial-*.json"):
+                (trials_dir / tfile.name).symlink_to(tfile)
+
+            first_trial = sorted((DEFAULT_PHASE_C_DIR / "rederived_results").glob("trial-*.json"))[0]
+            target_json = trials_dir / first_trial.name
+            target_json.unlink()
+            data = json.loads(first_trial.read_text(encoding="utf-8"))
+            data["scenario_id"] = ""
+            target_json.write_text(json.dumps(data), encoding="utf-8")
+
+            with self.assertRaises(ValueError) as ctx:
+                build_demonstration_bundle(
+                    campaign_dir=DEFAULT_CAMPAIGN_DIR,
+                    phase_c_dir=tmp_c_dir,
+                    output_dir=Path(tmpdir) / "out",
+                )
+            self.assertIn("missing or has empty scenario_id in rederived record", str(ctx.exception))
+
+    def test_absent_canonical_cohort_fails_closed(self):
+        """Batch 1E Correction B: Absent canonical scenario/browser cohort fails closed."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_c_dir = Path(tmpdir) / "phase-c"
+            tmp_c_dir.mkdir()
+            for item in DEFAULT_PHASE_C_DIR.iterdir():
+                if item.name != "attempts.csv":
+                    (tmp_c_dir / item.name).symlink_to(item)
+
+            orig_lines = (DEFAULT_PHASE_C_DIR / "attempts.csv").read_text(encoding="utf-8").splitlines()
+            header = orig_lines[0]
+            h_cols = header.split(",")
+            b_idx = h_cols.index("browser")
+            s_idx = h_cols.index("scenario_id")
+            cat_idx = h_cols.index("validity_category")
+            status_idx = h_cols.index("status")
+
+            # Change all rows for ('firefox', 'S6') to CLEANUP_FAILURE / FAILED so valid cohort is absent
+            new_lines = [header]
+            modified_count = 0
+            for line in orig_lines[1:]:
+                cols = line.split(",")
+                if cols[b_idx] == "firefox" and cols[s_idx] == "S6":
+                    cols[cat_idx] = "CLEANUP_FAILURE"
+                    cols[status_idx] = "FAILED"
+                    modified_count += 1
+                new_lines.append(",".join(cols))
+            self.assertEqual(modified_count, 20)
+            (tmp_c_dir / "attempts.csv").write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+
+            with self.assertRaises(ValueError) as ctx:
+                build_demonstration_bundle(
+                    campaign_dir=DEFAULT_CAMPAIGN_DIR,
+                    phase_c_dir=tmp_c_dir,
+                    output_dir=Path(tmpdir) / "out",
+                )
+            self.assertIn("Cohort key mismatch against canonical specifications", str(ctx.exception))
+            self.assertIn("('firefox', 'S6')", str(ctx.exception))
+
+    def test_attempts_ledger_scenario_mismatch_with_rederived_fails_closed(self):
+        """Batch 1E Correction C: Attempts-ledger scenario differing from rederived fails closed."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_c_dir = Path(tmpdir) / "phase-c"
+            tmp_c_dir.mkdir()
+            for item in DEFAULT_PHASE_C_DIR.iterdir():
+                if item.name != "attempts.csv":
+                    (tmp_c_dir / item.name).symlink_to(item)
+
+            orig_lines = (DEFAULT_PHASE_C_DIR / "attempts.csv").read_text(encoding="utf-8").splitlines()
+            header = orig_lines[0]
+            first_row = orig_lines[1].split(",")
+            scen_idx = header.split(",").index("scenario_id")
+            tid_idx = header.split(",").index("trial_id")
+            tid = first_row[tid_idx]
+
+            # Row is S0, change ledger to S1 (rederived remains S0)
+            self.assertEqual(first_row[scen_idx], "S0")
+            first_row[scen_idx] = "S1"
+            corrupted_csv = "\n".join([header, ",".join(first_row)] + orig_lines[2:]) + "\n"
+            (tmp_c_dir / "attempts.csv").write_text(corrupted_csv, encoding="utf-8")
+
+            with self.assertRaises(ValueError) as ctx:
+                build_demonstration_bundle(
+                    campaign_dir=DEFAULT_CAMPAIGN_DIR,
+                    phase_c_dir=tmp_c_dir,
+                    output_dir=Path(tmpdir) / "out",
+                )
+            self.assertIn(f"Scenario mismatch for trial {tid}: attempts ledger has 'S1' but rederived has 'S0'", str(ctx.exception))
+
+    def test_authentic_canonical_cohorts_and_repetitions(self):
+        """Batch 1E Correction C: Normal authentic dataset generates exactly 14 canonical cohorts with 20 repetitions apiece."""
+        expected_cohort_keys = {
+            (browser_name, scenario_id)
+            for browser_name in CANONICAL_BROWSERS
+            for scenario_id in CANONICAL_SCENARIOS
+        }
+        self.assertEqual(len(expected_cohort_keys), 14)
+
+        # Check bundle trials
+        trials = self.bundle_data["trials"]
+        self.assertEqual(len(trials), EXPECTED_VALID_LIVE_COUNT)
+
+        actual_cohorts = {}
+        for t in trials:
+            ck = (t["browser"], t["scenario_id"])
+            actual_cohorts.setdefault(ck, []).append(t["repetition"])
+
+        self.assertEqual(set(actual_cohorts.keys()), expected_cohort_keys)
+        self.assertEqual(len(actual_cohorts), 14)
+
+        expected_reps = set(range(1, 21))
+        for ck in expected_cohort_keys:
+            reps = actual_cohorts[ck]
+            self.assertEqual(len(reps), 20, f"Cohort {ck} has incorrect count")
+            self.assertEqual(set(reps), expected_reps, f"Cohort {ck} does not have exact 1..20 repetitions")
+            self.assertEqual(len(set(reps)), 20, f"Cohort {ck} has duplicate repetitions")
+            for r in reps:
+                self.assertIs(type(r), int)
+
+        # Check statistical summaries in bundle
+        summaries = self.bundle_data["statistical_summaries"]
+        expected_summary_keys = {f"{b}:{s}" for b in CANONICAL_BROWSERS for s in CANONICAL_SCENARIOS}
+        self.assertEqual(set(summaries.keys()), expected_summary_keys)
+        self.assertEqual(len(summaries), 14)
 
 
 if __name__ == "__main__":

@@ -799,10 +799,30 @@ def build_demonstration_bundle(
             raise ValueError(
                 f"Campaign ID mismatch for trial {tid}: rederived has '{reder.get('campaign_id')}'"
             )
-        if reder.get("scenario_id") != row["scenario_id"]:
+        # Validate scenario_id in attempts ledger and rederived record against canonical scenarios
+        ledger_scenario_id = row.get("scenario_id")
+        if not ledger_scenario_id or not isinstance(ledger_scenario_id, str) or not ledger_scenario_id.strip():
             raise ValueError(
-                f"Scenario mismatch for trial {tid}: attempts ledger has '{row['scenario_id']}' but rederived has '{reder.get('scenario_id')}'"
+                f"Trial {tid} is missing or has empty scenario_id in attempts ledger: {ledger_scenario_id!r}"
             )
+        ledger_scenario_id = ledger_scenario_id.strip()
+        if ledger_scenario_id not in CANONICAL_SCENARIOS:
+            raise ValueError(
+                f"Unknown scenario ID '{ledger_scenario_id}' in attempts ledger for trial {tid} "
+                f"(must be one of {sorted(list(CANONICAL_SCENARIOS.keys()))})"
+            )
+
+        reder_scenario_id = reder.get("scenario_id")
+        if not reder_scenario_id or not isinstance(reder_scenario_id, str) or not reder_scenario_id.strip():
+            raise ValueError(
+                f"Trial {tid} is missing or has empty scenario_id in rederived record: {reder_scenario_id!r}"
+            )
+        reder_scenario_id = reder_scenario_id.strip()
+        if reder_scenario_id != ledger_scenario_id:
+            raise ValueError(
+                f"Scenario mismatch for trial {tid}: attempts ledger has '{ledger_scenario_id}' but rederived has '{reder_scenario_id}'"
+            )
+        scen_id = ledger_scenario_id
         if reder.get("browser_name") != row["browser"]:
             raise ValueError(
                 f"Browser mismatch for trial {tid}: attempts ledger has '{row['browser']}' but rederived has '{reder.get('browser_name')}'"
@@ -907,8 +927,6 @@ def build_demonstration_bundle(
                 f"Trial {tid} primary_flow PCAP digest mismatch: '{reder_pcap_digest}' != manifest '{expected_manifest_digest}'"
             )
 
-        scen_id = reder.get("scenario_id")
-
         # Canonical metric preservation: connection_attempt_delay_ms must be retained
         m_in = reder.get("metrics", {})
         cad_val = parse_float_or_none(m_in.get("connection_attempt_delay_ms"))
@@ -982,6 +1000,21 @@ def build_demonstration_bundle(
 
         valid_trials.append(trial_obj)
         cohort_trial_records.setdefault((browser_name, scen_id), []).append(trial_obj)
+
+    # Exact canonical cohort-key validation
+    expected_cohort_keys = {
+        (browser_name, scenario_id)
+        for browser_name in CANONICAL_BROWSERS
+        for scenario_id in CANONICAL_SCENARIOS
+    }
+    actual_cohort_keys = set(cohort_trial_records.keys())
+    if actual_cohort_keys != expected_cohort_keys:
+        missing_cohorts = expected_cohort_keys - actual_cohort_keys
+        extra_cohorts = actual_cohort_keys - expected_cohort_keys
+        raise ValueError(
+            f"Cohort key mismatch against canonical specifications: "
+            f"missing={sorted(missing_cohorts)}, extra={sorted(extra_cohorts)}"
+        )
 
     # Reconciliation assertions
     if len(valid_trials) != EXPECTED_VALID_LIVE_COUNT:
