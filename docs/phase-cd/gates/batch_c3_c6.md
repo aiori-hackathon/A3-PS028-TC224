@@ -37,7 +37,7 @@ Milestone 5 (Batches C3 & C6) resolves all standards evaluation inconsistencies,
   - Updated test counts from stale historical numbers (400, 523, 524) to the active verified count: **725 unit tests** in `lab/` and **93 E2E synthetic tests** in `tests/` (**818 total passing tests**).
   - Fixed malformed nested markdown link in `README.md:9`.
   - Corrected RFC 8305 section citations (§3 vs §4) in runbook.
-  - Updated pinned draft identifier to `draft-ietf-v6ops-happy-eyeballs-v3-04` per Amendment A10.
+  - Updated pinned draft identifier to `draft-ietf-happy-happyeyeballs-v3-04` per Amendment A10.
 
 ### 2.5 Requirements E2 & C6: Official Hackathon Submission Presentation PDF
 - **Resolution**: Implemented `lab/build_submission_report.py` compiling an 11-slide presentation deck adhering strictly to `Proposed-structure-hackathon.pdf` geometry ($160\text{ mm} \times 90\text{ mm}$, 16:9 widescreen, PT Sans typography, `#0000DC` theme).

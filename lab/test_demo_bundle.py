@@ -5,6 +5,7 @@ Verifies authoritative reconciliation, byte-identical determinism, canonical met
 naming, JSON numeric preservation, and Phase D simulation exclusion.
 """
 
+import csv
 import json
 from pathlib import Path
 import shutil
@@ -1484,6 +1485,231 @@ class TestDemoBundleBuilder(unittest.TestCase):
         expected_summary_keys = {f"{b}:{s}" for b in CANONICAL_BROWSERS for s in CANONICAL_SCENARIOS}
         self.assertEqual(set(summaries.keys()), expected_summary_keys)
         self.assertEqual(len(summaries), 14)
+
+    def test_timeline_source_to_bundle_mapping(self):
+        """
+        Regression test: Verify source trial_timeline.csv mapping into Phase E demo_bundle.json.
+        Verifies all 14 requirements:
+        1. Read the original trial_timeline.csv.
+        2. Identify the 280 valid live trial IDs using authoritative campaign data (attempts.csv).
+        3. Verify bundle contains exactly those 280 valid live trial IDs.
+        4. Compare source timeline events with bundle events for every valid trial.
+        5. Verify that timestamp matches event_timestamp_epoch.
+        6. Verify that source matches event_source.
+        7. Verify that event_type and details are preserved.
+        8. Verify that family maps from address_family.
+        9. Verify that stream_id maps from tcp_stream.
+        10. Verify that legitimate empty source values remain null rather than being replaced with fabricated values.
+        11. Verify that valid numeric timestamps are not null and remain numeric.
+        12. Verify that event ordering is preserved within each trial.
+        13. Verify that all source timeline events belonging to valid live trials are represented in the bundle.
+        14. Verify that total event count reconciles with the source data.
+        """
+        # 1. Read original trial_timeline.csv
+        timeline_file = DEFAULT_PHASE_C_DIR / "trial_timeline.csv"
+        self.assertTrue(timeline_file.is_file(), f"Timeline file missing: {timeline_file}")
+        with open(timeline_file, "r", encoding="utf-8") as f:
+            source_timeline_rows = list(csv.DictReader(f))
+
+        self.assertEqual(
+            len(source_timeline_rows),
+            EXPECTED_TIMELINE_EVENTS_COUNT,
+            f"Source timeline event count {len(source_timeline_rows)} != expected {EXPECTED_TIMELINE_EVENTS_COUNT}",
+        )
+
+        # 2. Identify the 280 valid live trial IDs using authoritative campaign data (attempts.csv)
+        attempts_file = DEFAULT_PHASE_C_DIR / "attempts.csv"
+        self.assertTrue(attempts_file.is_file(), f"Attempts file missing: {attempts_file}")
+        with open(attempts_file, "r", encoding="utf-8") as f:
+            attempts_rows = list(csv.DictReader(f))
+
+        valid_trial_ids = {
+            r["trial_id"]
+            for r in attempts_rows
+            if r["validity_category"] == "VALID_LIVE" and r["status"] == "COMPLETED"
+        }
+        self.assertEqual(
+            len(valid_trial_ids),
+            EXPECTED_VALID_LIVE_COUNT,
+            f"Valid live trials count {len(valid_trial_ids)} != expected {EXPECTED_VALID_LIVE_COUNT}",
+        )
+
+        excluded_trial_ids = {
+            r["trial_id"]
+            for r in attempts_rows
+            if r["validity_category"] == "CLEANUP_FAILURE"
+        }
+        self.assertEqual(
+            len(excluded_trial_ids),
+            EXPECTED_EXCLUSIONS_COUNT,
+            f"Exclusions count {len(excluded_trial_ids)} != expected {EXPECTED_EXCLUSIONS_COUNT}",
+        )
+
+        # 3. Verify bundle contains exactly those valid live trial IDs
+        bundle_trials = self.bundle_data["trials"]
+        self.assertEqual(len(bundle_trials), EXPECTED_VALID_LIVE_COUNT)
+        bundle_valid_trial_ids = {t["trial_id"] for t in bundle_trials}
+        self.assertEqual(
+            bundle_valid_trial_ids,
+            valid_trial_ids,
+            "Bundle trial IDs do not match authoritative valid live trial IDs",
+        )
+
+        # Index source events by trial_id (grouped in sequential order)
+        source_events_by_trial: dict = {}
+        for r in source_timeline_rows:
+            source_events_by_trial.setdefault(r["trial_id"], []).append(r)
+
+        bundle_events_by_trial = {t["trial_id"]: t.get("timeline_events", []) for t in bundle_trials}
+
+        # 4-12. Compare source timeline events with bundle events for every valid trial
+        total_valid_source_events = 0
+        total_valid_bundle_events = 0
+
+        for tid in sorted(valid_trial_ids):
+            s_events = source_events_by_trial.get(tid, [])
+            b_events = bundle_events_by_trial.get(tid, [])
+
+            # 13. Verify all source timeline events belonging to valid live trials are represented in the bundle
+            self.assertEqual(
+                len(b_events),
+                len(s_events),
+                f"Timeline event count mismatch for trial {tid}: {len(b_events)} in bundle != {len(s_events)} in source",
+            )
+
+            total_valid_source_events += len(s_events)
+            total_valid_bundle_events += len(b_events)
+
+            # 12. Verify event ordering is preserved within each trial (pair-wise traversal)
+            for idx, (s_ev, b_ev) in enumerate(zip(s_events, b_events)):
+                # 5. Verify timestamp matches event_timestamp_epoch
+                # 11. Verify valid numeric timestamps are not null and remain numeric
+                raw_s_ts = s_ev["event_timestamp_epoch"]
+                self.assertIsNotNone(
+                    b_ev.get("timestamp"),
+                    f"Trial {tid} event {idx}: bundle timestamp must not be null (source: {raw_s_ts})",
+                )
+                self.assertIsInstance(
+                    b_ev["timestamp"],
+                    (int, float),
+                    f"Trial {tid} event {idx}: timestamp must be numeric JSON float, got {type(b_ev['timestamp'])}",
+                )
+                self.assertAlmostEqual(
+                    b_ev["timestamp"],
+                    float(raw_s_ts),
+                    places=5,
+                    msg=f"Trial {tid} event {idx}: timestamp {b_ev['timestamp']} does not match source {raw_s_ts}",
+                )
+
+                # 6. Verify source matches event_source
+                self.assertIsNotNone(
+                    b_ev.get("source"),
+                    f"Trial {tid} event {idx}: bundle source must not be null (source: {s_ev['event_source']})",
+                )
+                self.assertEqual(
+                    b_ev["source"],
+                    s_ev["event_source"],
+                    f"Trial {tid} event {idx}: source {b_ev['source']} != expected {s_ev['event_source']}",
+                )
+
+                # 7. Verify event_type and details are preserved
+                self.assertEqual(
+                    b_ev["event_type"],
+                    s_ev["event_type"],
+                    f"Trial {tid} event {idx}: event_type {b_ev['event_type']} != expected {s_ev['event_type']}",
+                )
+                self.assertEqual(
+                    b_ev["details"],
+                    s_ev["details"],
+                    f"Trial {tid} event {idx}: details {b_ev['details']} != expected {s_ev['details']}",
+                )
+
+                # 8 & 10. Verify family maps from address_family; empty remains null
+                raw_fam = s_ev["address_family"]
+                if not raw_fam:
+                    self.assertIsNone(
+                        b_ev.get("family"),
+                        f"Trial {tid} event {idx}: expected empty address_family to map to null, got {b_ev.get('family')!r}",
+                    )
+                else:
+                    self.assertEqual(
+                        b_ev.get("family"),
+                        raw_fam,
+                        f"Trial {tid} event {idx}: family {b_ev.get('family')} != expected {raw_fam}",
+                    )
+
+                # 9 & 10. Verify stream_id maps from tcp_stream; empty remains null
+                raw_stream = s_ev["tcp_stream"]
+                if not raw_stream:
+                    self.assertIsNone(
+                        b_ev.get("stream_id"),
+                        f"Trial {tid} event {idx}: expected empty tcp_stream to map to null, got {b_ev.get('stream_id')!r}",
+                    )
+                else:
+                    self.assertEqual(
+                        b_ev.get("stream_id"),
+                        raw_stream,
+                        f"Trial {tid} event {idx}: stream_id {b_ev.get('stream_id')} != expected {raw_stream}",
+                    )
+
+                # relative_ms must remain null (Phase C CSV does not provide relative_ms)
+                self.assertIsNone(
+                    b_ev.get("relative_ms"),
+                    f"Trial {tid} event {idx}: relative_ms should remain null as documented",
+                )
+
+        # 13. Reconcile valid-trial event set
+        self.assertEqual(total_valid_bundle_events, total_valid_source_events)
+        self.assertEqual(total_valid_bundle_events, 28326)
+
+        # 14. Reconcile total event count with source data
+        bundle_exclusions = self.bundle_data.get("exclusions", [])
+        total_exclusion_bundle_events = sum(len(e.get("timeline_events", [])) for e in bundle_exclusions)
+        self.assertEqual(total_exclusion_bundle_events, 4)
+
+        total_exclusion_source_events = sum(len(source_events_by_trial.get(tid, [])) for tid in excluded_trial_ids)
+        self.assertEqual(total_exclusion_source_events, 4)
+
+        total_reconciled_bundle_events = total_valid_bundle_events + total_exclusion_bundle_events
+        self.assertEqual(
+            total_reconciled_bundle_events,
+            len(source_timeline_rows),
+            f"Total bundle events {total_reconciled_bundle_events} != source count {len(source_timeline_rows)}",
+        )
+        self.assertEqual(
+            self.bundle_data["reconciliation_summary"]["timeline_events_count"],
+            len(source_timeline_rows),
+        )
+
+    def test_timeline_empty_and_populated_fields_distinction(self):
+        """
+        Verify that legitimate empty fields (harness/DNS) remain null and
+        populated fields (TCP streams) retain authentic values.
+        """
+        bundle_trials = self.bundle_data["trials"]
+        harness_events_found = 0
+        tcp_syn_events_found = 0
+
+        for t in bundle_trials:
+            for ev in t.get("timeline_events", []):
+                # Check Harness lifecycle events
+                if ev.get("source") == "HARNESS":
+                    harness_events_found += 1
+                    self.assertIsNone(ev.get("family"), "Harness event must have null family")
+                    self.assertIsNone(ev.get("stream_id"), "Harness event must have null stream_id")
+                    self.assertIsNotNone(ev.get("timestamp"), "Harness event must have numeric timestamp")
+                    self.assertIsInstance(ev["timestamp"], (int, float))
+
+                # Check TCP_SYN events
+                if ev.get("event_type") == "TCP_SYN":
+                    tcp_syn_events_found += 1
+                    self.assertIn(ev.get("family"), {"IPv4", "IPv6"}, "TCP_SYN must have valid family")
+                    self.assertIsNotNone(ev.get("stream_id"), "TCP_SYN must have stream_id")
+                    self.assertIsNotNone(ev.get("timestamp"), "TCP_SYN must have numeric timestamp")
+                    self.assertEqual(ev.get("source"), "PCAP")
+
+        self.assertGreater(harness_events_found, 0)
+        self.assertGreater(tcp_syn_events_found, 0)
 
 
 if __name__ == "__main__":

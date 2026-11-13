@@ -77,6 +77,17 @@ Key timing parameters specified in RFC 8305 include:
 - **Immediate Fallback on Connection Failure (Section 5):** If the primary connection attempt fails immediately due to an active network rejection (such as an ICMP Port Unreachable or TCP RST), the client **SHOULD** immediately initiate a connection attempt to the next address family without awaiting the CAD timer expiration.
 - **Resolution Delay (Section 3):** When asynchronous DNS responses arrive with the IPv4 (A) response arriving before the IPv6 (AAAA) response, the client **SHOULD** wait for a recommended delay of **50ms** before initiating an IPv4 connection, giving the preferred AAAA response an opportunity to arrive.
 
+### 3.1 Standards References & Specification Baseline
+
+The measurement methodology, experimental metrics, and baseline assessments in this report reference RFC 8305 and the pinned Happy Eyeballs v3 Internet-Draft:
+
+> [!NOTE]
+> **Happy Eyeballs v3 Draft Status and Historical Baseline Notice (as of 13 November 2026)**
+>
+> - **Historical Experimental Baseline**: The October 2026 PS-028 campaign used [`draft-ietf-happy-happyeyeballs-v3-04`](https://datatracker.ietf.org/doc/html/draft-ietf-happy-happyeyeballs-v3-04), published on 1 July 2026. The campaign's methodology and historical RFC/draft assessments retain that revision as their immutable experimental reference.
+> - **Subsequent Revision**: On 2 November 2026, the IETF published [`draft-ietf-happy-happyeyeballs-v3-05`](https://datatracker.ietf.org/doc/html/draft-ietf-happy-happyeyeballs-v3-05). As of 13 November 2026, this revision is an active Internet-Draft in the HAPPY Working Group, with intended status Standards Track (IESG state: I-D Exists, expiring on 6 May 2027). It is not a published RFC or finalized standard.
+> - **Scope Limitation**: The October 2026 campaign predates publication of revision -05. Its historical observations and assessment results have not been evaluated or reclassified against revision -05. Revision -05 does not retroactively alter or invalidate the empirical findings obtained under revision -04.
+
 ---
 
 ## 4. Experimental Architecture and Network Topology
@@ -278,7 +289,7 @@ Statistical metrics were computed across all 280 valid live trials using the PS-
 
 ### Comprehensive Summary Table
 
-| Browser | Scen | $N$ | HTTP 200 | Direct IPv6 | Fallback IPv4 | Setup Time (ms) Median [IQR] | CAD (ms) Median [IQR] | DNS A (ms) Median | DNS AAAA (ms) Median |
+| Browser | Scen | $N$ | HTTP 200 | Direct IPv6 | Fallback IPv4 | Handshake Time (ms) Median [IQR] | CAD (ms) Median [IQR] | DNS A (ms) Median | DNS AAAA (ms) Median |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | **Firefox** | S0 | 20 | 100% | 20 | 0 | 20.64 [392.28] | — | 0.82 | 1.27 |
 | **Firefox** | S1 | 20 | 100% | 0 | 20 | 20.41 [0.38] | 408.45 [149.33] | 0.84 | 1.36 |
@@ -294,6 +305,42 @@ Statistical metrics were computed across all 280 valid live trials using the PS-
 | **Chrome** | S4 | 20 | 100% | 0 | 20 | 25.68 [3.82] | 300.81 [1.02] | 2.98 | 2.04 |
 | **Chrome** | S5 | 20 | 100% | 18 | 2 | 23.88 [4.49] | 300.96 [1.08] | 3.39 | 2.13 |
 | **Chrome** | S6 | 20 | 100% | 20 | 0 | 21.09 [0.46] | — | 4.83 | 505.20 |
+
+*(Note: The Handshake Time column above reflects the winning-stream handshake interval. See Section 10.1 below for the definitive evaluation of Primary Connection Handshake `t_connect_ms` versus Fallback Total Setup Time `t_setup_total_ms` across all 14 cohorts).*
+
+### 10.1 Principal Connection Timing Evaluation: Primary Handshake vs. Fallback Total Setup
+
+To evaluate dual-stack connection performance without obscuring fallback delays, the PS-028 evidence contract (`docs/phase-c-metric-contract.md` §1.2) establishes two distinct, mathematically defined packet-level metrics derived at the client-side capture point:
+
+1. **Primary Connection Completion Time (`t_connect_ms`)**:
+   $$t_{\text{connect}} = \left( t_{\text{final\_ack, primary}} - t_{\text{initial\_syn, primary}} \right) \times 1000$$
+   Measures the strict 3-way handshake duration of the primary HTTP connection stream (RFC 9293 §3.5). In fallback scenarios, this measures only the winning secondary connection (IPv4) once initiated (~20 ms) and excludes the preceding failed or delayed primary attempt.
+
+2. **Fallback Total Setup Time (`t_setup_total_ms`)**:
+   $$t_{\text{setup\_total}} = \left( t_{\text{final\_ack, primary}} - \min_{f \in \{\text{IPv4}, \text{IPv6}\}} \left( t_{\text{first\_syn, } f} \right) \right) \times 1000$$
+   Measures the total trial-level elapsed time from the first target-host TCP SYN observed in **either** address family to the primary connection's final ACK.
+   - **Direct IPv6 Connections (S0, S3, S6)**: $t_{\text{setup\_total\_ms}} \approx t_{\text{connect\_ms}}$ because the initial IPv6 attempt succeeds directly without fallback.
+   - **Fallback Scenarios (S1, S2, S4, S5)**: $t_{\text{setup\_total\_ms}}$ incorporates the initial failed attempt and Connection Attempt Delay (CAD), representing the trial-level transport connection setup interval before the selected primary connection completes.
+
+#### Verified Cohort Timing Medians Across All 280 Valid Trials
+
+The table below reports the median values directly computed from `lab/derived/phase-c/attempts.csv` across all **280 valid live trials** (14 cohorts of 20 repetitions each):
+
+| Scenario | Experimental Condition | Chrome Median `t_connect_ms` | Chrome Median `t_setup_total_ms` | Firefox Median `t_connect_ms` | Firefox Median `t_setup_total_ms` | Valid Trials ($N$) |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: |
+| **S0** | Baseline (10ms link delay, dual-stack) | 20.39 ms | 20.39 ms | 20.49 ms | 20.49 ms | 20 / 20 |
+| **S1** | IPv6 SYN Blackhole (silent drop) | 21.08 ms | 322.00 ms | 20.55 ms | 429.74 ms | 20 / 20 |
+| **S2** | IPv6 TCP RST (active network rejection) | 20.37 ms | 21.12 ms | 20.50 ms | 181.87 ms | 20 / 20 |
+| **S3** | IPv6 RTT 150ms (symmetric link delay) | 150.76 ms | 150.76 ms | 150.45 ms | 150.45 ms | 20 / 20 |
+| **S4** | IPv6 RTT 600ms, IPv4 10ms (delay racing) | 20.82 ms | 321.72 ms | 20.48 ms | 420.07 ms | 20 / 20 |
+| **S5** | IPv6 50% SYN Loss (probabilistic loss) | 20.54 ms | 23.10 ms | 20.58 ms | 86.95 ms | 20 / 20 |
+| **S6** | Delayed AAAA 500ms (Resolution Delay) | 20.71 ms | 20.71 ms | 20.47 ms | 20.58 ms | 20 / 20 |
+
+#### Metric Scope and Boundaries
+- `t_setup_total_ms` strictly measures transport-layer TCP setup.
+- It does **not** include DNS query or resolution latency (which is tracked separately via `dns_transactions` and resolution metrics).
+- It does **not** measure application payload delivery, HTTP processing, TLS negotiation (HTTP/1.1 over cleartext TCP was evaluated per PS-028 scope), or browser page rendering.
+- These medians represent laboratory observations under controlled network impairments and must not be used to claim that one browser is universally superior across unobserved network configurations.
 
 ---
 
@@ -542,10 +589,22 @@ The campaign manifest permanently records two documented mismatches between earl
    sudo python3 lab/impair.py self-test-baseline
    ```
 
-2. **Execute Full Lab Test Suite (test count depends on checkout):**
-   ```bash
-   PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s lab -p "test_*.py"
-   ```
+2. **Execute Automated Test Suites:**
+   - **Offline Synthetic & Fixture Test Suite (Zero Privileges Required, 100% Pass)**:
+     ```bash
+     python3 -m unittest discover -s tests -p "test_*.py" -v
+     ```
+     Runs all 93 tests across Tiers 1–5 in ~0.5s with zero external or privileged dependencies.
+   - **Focused Offline Evidence, Analysis, and Replay Suites (100% Pass)**:
+     ```bash
+     python3 -m unittest lab.test_analyze lab.test_export_campaign_evidence lab.test_demo_bundle lab.test_demo_export lab.test_demo_replay
+     ```
+     Runs all 199 focused offline regression tests in ~35s.
+   - **Test Count Evolution & Current Reconciliation**:
+     - *818 Tests*: Historical Batch C5 sealed gate report snapshot (725 in `lab/` + 93 in `tests/`).
+     - *824 Tests*: Phase C/D baseline at `regional/ps028-phase-cd` HEAD (731 in `lab/` + 93 in `tests/`).
+     - *918 Tests*: Phase E demo-readiness baseline (825 in `lab/` + 93 in `tests/`).
+     - *881 Tests (Current Checkout on `fix/phase-e-bundle-timeline-mapping`)*: Following test-suite deduplication in Task 5C (renaming the Batch C5 re-export runner to eliminate 48 duplicate executions), full repository discovery identifies exactly 881 unique test cases (788 in `lab/` across 21 modules + 93 in `tests/` across 5 tiers; 0 duplicate executions), incorporating 11 regression tests added during Tasks 1–3A and Task 5B (+2 in `test_demo_bundle.py`, +7 in `test_export_campaign_evidence.py`, +1 in `test_analyze.py`, +1 in `test_impair.py`). Executing full unprivileged discovery reveals 866 passing tests, 4 failures, and 11 errors (all 15 failures/errors located in `lab/` due to unprivileged environment constraints: missing root/sudo privileges, absent network namespaces, read-only browser crashpad directories, and unrouted blackhole sockets; 5 cross-device link errors were resolved by creating temporary state files within `STATE_FILE.parent`, and the stale synthetic fixture was repaired to enforce fail-closed telemetry validation; `tests/` passes 93/93). The 199 focused offline regression tests (subset of `lab/`) pass with 100% pass rate.
 
 3. **Re-Run Statistical Analysis on Campaign Evidence:**
    ```bash

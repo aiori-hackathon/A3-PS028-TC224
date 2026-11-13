@@ -162,9 +162,9 @@ S4 Firefox includes one direct-IPv6 main flow with a 600.95 ms SYN-to-SYN/ACK in
 |PCAP packet count / reported capture drops|36,225 / 0|
 |Primary `GET /` flows found|280 / 280|
 |Primary-flow / browser winner disagreements|0|
-|Recorded local test run|825 unit tests (lab/) + 93 E2E/adversarial tests (tests/) = 918 total; final test-runner status `OK` (100% pass)|
+|Recorded local test run|881 unique automated tests discovered across repository (788 in lab/ across 21 test modules, 93 in tests/ across 5 tiers; 0 duplicate executions): 866 passed, 4 failed, 11 errors in unprivileged environment; 199 focused offline tests passing 100%|
 
-The two excluded attempts were a Firefox S0 preflight baseline self-test failure (`Broken pipe`) and a Chrome S6 cleanup failure caused by a helper operation requiring root privileges. Both records remain in the evidence trail and were retried using unique trial IDs. The historical 400-test record reflects the initial baseline; the test suite has since expanded through Phase C/D (731 unit + 93 synthetic) and Phase E demo readiness to 825 unit tests across 22 test modules and 93 synthetic/adversarial tests, all 918 passing cleanly offline.
+The two excluded attempts were a Firefox S0 preflight baseline self-test failure (`Broken pipe`) and a Chrome S6 cleanup failure caused by a helper operation requiring root privileges. Both records remain in the evidence trail and were retried using unique trial IDs. The historical 400-test record reflects the initial baseline. The test suite expanded through Phase C/D Batch C5 (725 unit + 93 synthetic = 818 tests), Phase C/D baseline (731 unit + 93 synthetic = 824 tests), and Phase E demo readiness (825 unit + 93 synthetic = 918 tests). Following test-suite deduplication in Task 5C (renaming the Batch C5 re-export runner to eliminate 48 duplicate executions), full repository discovery identifies exactly 881 unique test cases (788 in `lab/` across 21 modules, 93 in `tests/` across 5 tiers; 0 duplicate executions), incorporating 11 regression tests added during Tasks 1–3A and Task 5B (+2 in `test_demo_bundle.py`, +7 in `test_export_campaign_evidence.py`, +1 in `test_analyze.py`, +1 in `test_impair.py`): 866 passed, 4 failed, 11 errors in an unprivileged environment (all 15 failures/errors in `lab/` due to missing root/sudo privileges, unconfigured network namespaces, and read-only browser crashpad directories; 5 cross-device link errors were resolved by creating temporary state files within `STATE_FILE.parent`, and the stale synthetic fixture was repaired to enforce fail-closed telemetry validation; `tests/` passes 93/93). A focused offline regression suite of 199 tests (subset of `lab/`) executes with a 100% pass rate.
 
 The complete evidence checksum index contains 1,411 checksum-indexed artifacts, reconciling the campaign execution log with the archived evidence. The complete archive and the portable analysis ZIP serve different purposes: the complete archive preserves captures and telemetry; the portable bundle provides the analysis inputs and code for offline regeneration.
 
@@ -179,6 +179,26 @@ The complete evidence checksum index contains 1,411 checksum-indexed artifacts, 
 |Proportion confidence interval in analyzer outputs|Ordinary Wilson score interval, without continuity correction|
 |Inter-family first-SYN interval|Descriptive first IPv6/IPv4 SYN spacing; not necessarily a fallback delay if an observed connection is ancillary or speculative|
 
+### Principal Connection Timing Metrics (`t_connect_ms` vs `t_setup_total_ms`)
+
+The analysis distinguishes two complementary packet-derived timing metrics defined strictly at the client-side capture vantage point (`ps028-cl`, interface `ps028-cl-rt`):
+
+- **Primary Handshake Completion Time (`t_connect_ms`)**: Measures the primary TCP stream duration from its initial client SYN to its matching final ACK transitioning the socket to `ESTABLISHED` (RFC 9293 §3.5). On winning fallback streams, this captures only the secondary IPv4 handshake (~20 ms) and excludes prior failed attempts.
+- **Fallback Total Setup Time (`t_setup_total_ms`)**: Measures the trial-level elapsed time from the client's first target-host SYN of **any** address family (IPv4 or IPv6) to the primary connection's final ACK:
+  $$t_{\text{setup\_total}} = \left( t_{\text{final\_ack, primary}} - \min_{f \in \{\text{IPv4}, \text{IPv6}\}} \left( t_{\text{first\_syn, } f} \right) \right) \times 1000$$
+- **Why they differ**: In direct IPv6 connections (S0, S3, S6), $t_{\text{setup\_total\_ms}} \approx t_{\text{connect\_ms}}$ because the initial attempt establishes immediately. In fallback scenarios (S1, S2, S4, S5), $t_{\text{connect\_ms}}$ reflects only the secondary IPv4 handshake (~20 ms), whereas $t_{\text{setup\_total\_ms}}$ includes the initial failed/delayed IPv6 attempt and Connection Attempt Delay (CAD), representing the trial-level transport connection setup interval before the selected primary connection completes.
+- **Population & Cohort Structure**: Evaluated across all **280 valid live trials** in campaign `ps028-a10-live-20261030-01` across 14 balanced cohorts (7 scenarios $\times$ 2 browsers $\times$ $n = 20$ repetitions per cohort). Neither metric measures DNS resolution duration, application response, or full browser page load.
+
+| Scenario | Network Condition | Chrome Median `t_connect_ms` | Chrome Median `t_setup_total_ms` | Firefox Median `t_connect_ms` | Firefox Median `t_setup_total_ms` | Valid Trials ($N$) |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: |
+| **S0** | Baseline (10ms RTT, dual-stack) | 20.39 ms | 20.39 ms | 20.49 ms | 20.49 ms | 20 / 20 |
+| **S1** | IPv6 SYN Blackhole (silent drop) | 21.08 ms | 322.00 ms | 20.55 ms | 429.74 ms | 20 / 20 |
+| **S2** | IPv6 TCP RST (active rejection) | 20.37 ms | 21.12 ms | 20.50 ms | 181.87 ms | 20 / 20 |
+| **S3** | IPv6 RTT 150ms (symmetric delay) | 150.76 ms | 150.76 ms | 150.45 ms | 150.45 ms | 20 / 20 |
+| **S4** | IPv6 RTT 600ms, IPv4 10ms (racing) | 20.82 ms | 321.72 ms | 20.48 ms | 420.07 ms | 20 / 20 |
+| **S5** | IPv6 50% SYN Loss (probabilistic) | 20.54 ms | 23.10 ms | 20.58 ms | 86.95 ms | 20 / 20 |
+| **S6** | Delayed AAAA 500ms (Resolution Delay) | 20.71 ms | 20.71 ms | 20.47 ms | 20.58 ms | 20 / 20 |
+
 **Metric cautions**
 
 * `response\_body\_bytes` is browser-process stdout length (308 bytes for Chrome and 72 bytes for Firefox), not the HTTP payload size.
@@ -190,7 +210,7 @@ The complete evidence checksum index contains 1,411 checksum-indexed artifacts, 
 
 [RFC 8305](https://www.rfc-editor.org/rfc/rfc8305.html) Section 3 covers asynchronous hostname resolution and recommends a 50 ms Resolution Delay when A arrives before AAAA. Section 5 specifies that a subsequent connection attempt **MUST NOT** begin within 10 ms of the previous attempt. The recommended minimum Connection Attempt Delay is 100 ms, the recommended default is 250 ms and the recommended maximum is 2 seconds.
 
-The Chrome S2 observations below 10 ms are reported explicitly, but they do not support a general conformance verdict for Chrome or other browsers. The pinned HEv3 reference is [`draft-ietf-happy-happyeyeballs-v3-04`](https://datatracker.ietf.org/doc/html/draft-ietf-happy-happyeyeballs-v3-04), dated 2 July 2026; it was an active Internet-Draft, not an RFC, at the 31 October 2026 report snapshot. This campaign primarily evaluates HTTP/1.1 over TCP. It does not test HTTP/3/QUIC, SVCB/HTTPS processing, cross-session statefulness or all HEv3 features.
+The Chrome S2 observations below 10 ms are reported explicitly, but they do not support a general conformance verdict for Chrome or other browsers. The pinned HEv3 reference is [`draft-ietf-happy-happyeyeballs-v3-04`](https://datatracker.ietf.org/doc/html/draft-ietf-happy-happyeyeballs-v3-04), published on 1 July 2026; it was an active Internet-Draft, not an RFC, at the 31 October 2026 report snapshot. This campaign primarily evaluates HTTP/1.1 over TCP. It does not test HTTP/3/QUIC, SVCB/HTTPS processing, cross-session statefulness or all HEv3 features.
 
 ## Repository guide
 
@@ -200,7 +220,7 @@ The Chrome S2 observations below 10 ms are reported explicitly, but they do not 
 |[`lab/run\_campaign.py`](lab/run_campaign.py)|Campaign matrix orchestration and manifest management|
 |[`lab/run\_trial.py`](lab/run_trial.py)|Browser trial execution, PCAP parsing and classification|
 |[`lab/analyze.py`](lab/analyze.py)|Offline validation, statistics and analysis outputs|
-|[`lab/test\_\*.py`](lab/)|Test modules; offline suite contains 807 passing unit tests across 22 modules|
+|[`lab/test\_\*.py`](lab/)|Test modules; suite contains 788 unit and regression tests across 21 modules (0 duplicate discovery)|
 |[`lab/campaigns/ps028-a10-live-20261030-01/`](lab/campaigns/ps028-a10-live-20261030-01/)|Campaign manifest, trial results, captures, checksums, archives and summaries|
 |[`lab/logs/unit\_tests\_run.log`](lab/logs/unit_tests_run.log)|Recorded local test-run output|
 |[`lab/logs/ps028-a10-live-20261030-01.log`](lab/logs/ps028-a10-live-20261030-01.log)|Live campaign console log|
@@ -247,7 +267,7 @@ Live experiment execution is a separate Linux workflow requiring network namespa
 2. [RFC 6724 - Default Address Selection for IPv6](https://www.rfc-editor.org/rfc/rfc6724.html).
 3. [RFC 6555 - Happy Eyeballs: Success with Dual-Stack Hosts](https://www.rfc-editor.org/rfc/rfc6555.html), obsoleted by RFC 8305.
 4. [RFC 6556 - Testing Eyeball Happiness](https://www.rfc-editor.org/rfc/rfc6556.html), informational measurement methodology.
-5. [Happy Eyeballs v3 - draft-ietf-v6ops-happy-eyeballs-v3-04](https://datatracker.ietf.org/doc/html/draft-ietf-v6ops-happy-eyeballs-v3-04), 2 July 2026; pinned Internet-Draft of record.
+5. [Happy Eyeballs v3 - draft-ietf-happy-happyeyeballs-v3-04](https://datatracker.ietf.org/doc/html/draft-ietf-happy-happyeyeballs-v3-04), 1 July 2026; pinned Internet-Draft of record.
 6. Sattler et al., [Lazy Eye Inspection: Capturing the State of Happy Eyeballs Implementations](https://happy-eyeballs.github.io/), ACM IMC 2025.
 7. APNIC, [Analysing the state of Happy Eyeballs implementations](https://blog.apnic.net/2025/10/07/analysing-the-state-of-happy-eyeballs-implementations/), 7 October 2025.
 8. [IETF 126 Happy Eyeballs WebTester hackathon materials](https://datatracker.ietf.org/meeting/126/materials/slides-126-hackathon-sessd-happy-eyeballs-webtester-00).
@@ -255,6 +275,13 @@ Live experiment execution is a separate Linux workflow requiring network namespa
 10. [Chromium NetLog documentation](https://chromium.googlesource.com/chromium/src/+/main/net/docs/net-log.md).
 11. [Firefox networking and HTTP logging documentation](https://firefox-source-docs.mozilla.org/networking/http/logging.html).
 12. [`tc-netem` manual](https://man7.org/linux/man-pages/man8/tc-netem.8.html).
+
+> [!NOTE]
+> **Happy Eyeballs v3 Draft Status and Historical Baseline Notice (as of 13 November 2026)**
+>
+> - **Historical Experimental Baseline**: The October 2026 PS-028 campaign used [`draft-ietf-happy-happyeyeballs-v3-04`](https://datatracker.ietf.org/doc/html/draft-ietf-happy-happyeyeballs-v3-04), published on 1 July 2026. The campaign's methodology and historical RFC/draft assessments retain that revision as their immutable experimental reference.
+> - **Subsequent Revision**: On 2 November 2026, the IETF published [`draft-ietf-happy-happyeyeballs-v3-05`](https://datatracker.ietf.org/doc/html/draft-ietf-happy-happyeyeballs-v3-05). As of 13 November 2026, this revision is an active Internet-Draft in the HAPPY Working Group, with intended status Standards Track (IESG state: I-D Exists, expiring on 6 May 2027). It is not a published RFC or finalized standard.
+> - **Scope Limitation**: The October 2026 campaign predates publication of revision -05. Its historical observations and assessment results have not been evaluated or reclassified against revision -05. Revision -05 does not retroactively alter or invalidate the empirical findings obtained under revision -04.
 
 \---
 

@@ -3,10 +3,13 @@
   "type": "module",
   "version": "1.0.0",
   "scripts": {
-    "dev": "astro dev",
-    "build": "astro build",
+    "prepare:data": "node scripts/prepare-historical-data.mjs",
+    "dev": "npm run prepare:data && astro dev",
+    "build": "npm run prepare:data && astro build",
     "preview": "astro preview",
-    "check": "astro check",
+    "check": "npm run prepare:data && astro check",
+    "test": "node --test test/historical-evidence.test.mjs",
+    "test:smoke": "node scripts/smoke-test-preview.mjs",
     "format": "prettier --write .",
     "astro": "astro"
   },

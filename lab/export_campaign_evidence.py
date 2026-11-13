@@ -25,6 +25,7 @@ import csv
 from datetime import datetime, timezone
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import platform
@@ -693,6 +694,151 @@ def export_s5_flow_dissection(
 
 
 # ==============================================================================
+# Helper: Validate Campaign Timeline Invariants (Amendment A9 & Rule R5)
+# ==============================================================================
+
+def validate_campaign_timeline(
+    timeline_rows: List[Dict[str, Any]],
+    manifest: Dict[str, Any],
+) -> Dict[str, int]:
+    """
+    Validates complete campaign timeline against authoritative manifest before writing CSV.
+    Enforces fail-closed rules:
+    - Exactly all valid live trials represented.
+    - Full source coverage (HARNESS, PCAP, BROWSER_TELEMETRY) for each valid live trial.
+    - Full event field validity across all rows (not just a sample).
+    - Chronological event ordering and deterministic indexing.
+    - Population event-count reconciliation (valid + exclusions == total).
+    """
+    valid_trial_ids = set()
+    exclusion_trial_ids = set()
+    all_attempt_ids = set()
+
+    for slot in manifest.get("matrix_slots", []):
+        for att in slot.get("attempts", []):
+            tid = att["trial_id"]
+            all_attempt_ids.add(tid)
+            status = att.get("status", "FAILED")
+            validity = att.get("validity", "MEASUREMENT_FAILURE")
+            if status == "COMPLETED" and validity == "VALID_LIVE":
+                valid_trial_ids.add(tid)
+            elif validity == "CLEANUP_FAILURE":
+                exclusion_trial_ids.add(tid)
+
+    # Index timeline rows by trial_id
+    timeline_by_trial: Dict[str, List[Dict[str, Any]]] = {}
+    for r in timeline_rows:
+        tid = r.get("trial_id")
+        if not tid or tid not in all_attempt_ids:
+            raise ValueError(f"Timeline event has unknown or missing trial_id: {tid!r}")
+        timeline_by_trial.setdefault(tid, []).append(r)
+
+    # A. Valid-trial identity
+    timeline_trial_ids = set(timeline_by_trial.keys())
+    missing_valid = valid_trial_ids - timeline_trial_ids
+    if missing_valid:
+        raise ValueError(
+            f"Timeline validation failed: {len(missing_valid)} valid live trials missing from timeline: {sorted(missing_valid)}"
+        )
+
+    unexpected_trials = timeline_trial_ids - (valid_trial_ids | exclusion_trial_ids)
+    if unexpected_trials:
+        raise ValueError(
+            f"Timeline validation failed: unexpected trials found in timeline: {sorted(unexpected_trials)}"
+        )
+
+    # B. Per-trial source coverage
+    required_valid_sources = {
+        EventSource.HARNESS.value,
+        EventSource.PCAP.value,
+        EventSource.BROWSER_TELEMETRY.value,
+    }
+    for tid in valid_trial_ids:
+        trial_events = timeline_by_trial.get(tid, [])
+        sources_present = {ev.get("event_source") for ev in trial_events}
+        missing_sources = required_valid_sources - sources_present
+        if missing_sources:
+            raise ValueError(
+                f"Trial {tid}: missing mandatory event source(s) {sorted(missing_sources)}; "
+                f"only found {sorted(sources_present)}"
+            )
+
+    # C. Event validity across entire generated timeline
+    valid_source_enums = {s.value for s in EventSource}
+    for idx, ev in enumerate(timeline_rows):
+        tid = ev.get("trial_id")
+        ev_type = ev.get("event_type")
+        if not ev_type or not isinstance(ev_type, str) or not ev_type.strip():
+            raise ValueError(f"Row {idx} (trial {tid}): missing or empty event_type")
+
+        ev_source = ev.get("event_source")
+        if ev_source not in valid_source_enums:
+            raise ValueError(f"Row {idx} (trial {tid}): invalid event_source '{ev_source}'")
+
+        raw_ts = ev.get("event_timestamp_epoch")
+        try:
+            ts_val = float(raw_ts)
+            if not math.isfinite(ts_val):
+                raise ValueError("non-finite timestamp")
+        except (TypeError, ValueError) as err:
+            raise ValueError(f"Row {idx} (trial {tid}): invalid numeric timestamp '{raw_ts}': {err}")
+
+        fam = ev.get("address_family")
+        if fam is not None and fam != "" and fam not in ("IPv4", "IPv6"):
+            raise ValueError(f"Row {idx} (trial {tid}): invalid address_family '{fam}'")
+
+        stream = ev.get("tcp_stream")
+        if stream is not None and stream != "" and not str(stream).isdigit():
+            raise ValueError(f"Row {idx} (trial {tid}): invalid tcp_stream '{stream}'")
+
+        src_path = ev.get("source_path")
+        if not src_path or not isinstance(src_path, str) or not src_path.strip():
+            raise ValueError(f"Row {idx} (trial {tid}): missing or empty source_path")
+
+        if ev_source == EventSource.PCAP.value:
+            pcap_sha = ev.get("pcap_sha256")
+            if not pcap_sha or not re.fullmatch(r"[0-9a-fA-F]{64}", pcap_sha):
+                raise ValueError(
+                    f"Row {idx} (trial {tid}): PCAP event missing valid 64-char hex pcap_sha256 digest: '{pcap_sha}'"
+                )
+
+    # D. Chronological ordering within each trial
+    for tid, t_events in timeline_by_trial.items():
+        prev_ts = -1.0
+        for seq, ev in enumerate(t_events, start=1):
+            cur_idx = int(ev.get("event_index", 0))
+            if cur_idx != seq:
+                raise ValueError(
+                    f"Trial {tid}: event index mismatch at sequence {seq}: expected {seq}, got {cur_idx}"
+                )
+            cur_ts = float(ev["event_timestamp_epoch"])
+            if cur_ts < prev_ts:
+                raise ValueError(
+                    f"Trial {tid}: chronological ordering inversion at index {cur_idx}: {cur_ts} < {prev_ts}"
+                )
+            prev_ts = cur_ts
+
+    # E. Event-count reconciliation
+    valid_events_count = sum(len(timeline_by_trial.get(tid, [])) for tid in valid_trial_ids)
+    exclusion_events_count = sum(len(timeline_by_trial.get(tid, [])) for tid in exclusion_trial_ids)
+    total_events_count = len(timeline_rows)
+
+    if valid_events_count + exclusion_events_count != total_events_count:
+        raise ValueError(
+            f"Event count reconciliation mismatch: valid ({valid_events_count}) + "
+            f"exclusion ({exclusion_events_count}) != total ({total_events_count})"
+        )
+
+    return {
+        "valid_trial_events": valid_events_count,
+        "exclusion_events": exclusion_events_count,
+        "total_events": total_events_count,
+        "valid_trials_count": len(valid_trial_ids),
+        "exclusion_trials_count": len(exclusion_trial_ids),
+    }
+
+
+# ==============================================================================
 # Export 4: trial_timeline.csv (Multi-Source Unified Timeline)
 # ==============================================================================
 
@@ -730,6 +876,7 @@ def export_trial_timeline(
     ]
 
     for slot in slots:
+        browser_name = slot.get("browser")
         for att in slot.get("attempts", []):
             trial_id = att["trial_id"]
             tdir = trials_dir / trial_id
@@ -743,11 +890,50 @@ def export_trial_timeline(
             # ------------------------------------------------------------------
             if status == "COMPLETED" and validity_cat == "VALID_LIVE":
                 rjson_path = tdir / "result.json"
-                if rjson_path.is_file():
+                if not rjson_path.is_file():
+                    raise FileNotFoundError(
+                        f"Trial {trial_id}: mandatory result file missing at {rjson_path} for COMPLETED/VALID_LIVE trial"
+                    )
+                try:
                     with open(rjson_path, "r", encoding="utf-8") as rf:
                         rdata = json.load(rf)
-                else:
-                    rdata = {}
+                except Exception as e:
+                    raise ValueError(
+                        f"Trial {trial_id}: invalid JSON in result record at {rjson_path}: {e}"
+                    )
+                ts_dict = rdata.get("timestamps")
+                if not isinstance(ts_dict, dict) or not ts_dict:
+                    raise ValueError(
+                        f"Trial {trial_id}: mandatory timestamps dictionary missing or empty in {rjson_path}"
+                    )
+
+                pcap_path = tdir / "capture.pcap"
+                if not pcap_path.is_file():
+                    raise FileNotFoundError(
+                        f"Trial {trial_id}: mandatory packet capture missing at {pcap_path} for VALID_LIVE trial"
+                    )
+                pcap_sha = compute_sha256(pcap_path)
+
+            elif validity_cat == "CLEANUP_FAILURE":
+                rjson_path = tdir / "failed_attempt_record.json"
+                if not rjson_path.is_file():
+                    raise FileNotFoundError(
+                        f"Trial {trial_id}: mandatory failed attempt record missing at {rjson_path} for CLEANUP_FAILURE exclusion"
+                    )
+                try:
+                    with open(rjson_path, "r", encoding="utf-8") as rf:
+                        rdata = json.load(rf)
+                except Exception as e:
+                    raise ValueError(
+                        f"Trial {trial_id}: invalid JSON in failed attempt record at {rjson_path}: {e}"
+                    )
+                ts_dict = rdata.get("timestamps")
+                if not isinstance(ts_dict, dict) or not ts_dict:
+                    raise ValueError(
+                        f"Trial {trial_id}: mandatory timestamps dictionary missing or empty in {rjson_path}"
+                    )
+                pcap_path = tdir / "capture.pcap"
+                pcap_sha = ""
             else:
                 rjson_path = tdir / "failed_attempt_record.json"
                 if rjson_path.is_file():
@@ -755,8 +941,10 @@ def export_trial_timeline(
                         rdata = json.load(rf)
                 else:
                     rdata = {}
+                ts_dict = rdata.get("timestamps", {})
+                pcap_path = tdir / "capture.pcap"
+                pcap_sha = ""
 
-            ts_dict = rdata.get("timestamps", {})
             harness_lifecycle_map = [
                 ("start_time", "TRIAL_START", "Harness initiates trial setup"),
                 ("scenario_applied_time", "SCENARIO_APPLIED", "Impairment rules applied"),
@@ -768,15 +956,13 @@ def export_trial_timeline(
                 ("end_time", "TRIAL_END", "Trial execution complete"),
             ]
 
-            pcap_path = tdir / "capture.pcap"
-            pcap_sha = compute_sha256(pcap_path) if pcap_path.is_file() else ""
             try:
                 source_rel_result = str(rjson_path.resolve().relative_to(REPO_ROOT.resolve())) if rjson_path.is_file() else f"trials/{trial_id}/result.json"
             except ValueError:
                 source_rel_result = str(rjson_path)
 
             try:
-                source_rel_pcap = str(pcap_path.resolve().relative_to(REPO_ROOT.resolve())) if pcap_path.is_file() else ""
+                source_rel_pcap = str(pcap_path.resolve().relative_to(REPO_ROOT.resolve())) if pcap_path and pcap_path.is_file() else ""
             except ValueError:
                 source_rel_pcap = str(pcap_path)
 
@@ -797,13 +983,13 @@ def export_trial_timeline(
                             "pcap_sha256": pcap_sha,
                             "source_path": source_rel_result,
                         })
-                    except Exception:
-                        pass
+                    except Exception as err:
+                        raise ValueError(f"Trial {trial_id}: invalid ISO timestamp for {key} in {rjson_path}: {err}")
 
             # ------------------------------------------------------------------
             # 2. PCAP Events (from authentic capture.pcap)
             # ------------------------------------------------------------------
-            if pcap_path.is_file():
+            if status == "COMPLETED" and validity_cat == "VALID_LIVE":
                 hostname = f"{trial_id}.he.test"
                 dissection = get_or_dissect_pcap(tdir, trial_id, hostname, dissections_cache)
 
@@ -966,12 +1152,21 @@ def export_trial_timeline(
             # ------------------------------------------------------------------
             # 3. BROWSER_TELEMETRY Events
             # ------------------------------------------------------------------
-            # Chrome NetLog
-            netlog_path = tdir / "netlog.json"
-            if netlog_path.is_file():
-                try:
-                    with open(netlog_path, "r", encoding="utf-8") as nf:
-                        ndata = json.load(nf)
+            if status == "COMPLETED" and validity_cat == "VALID_LIVE":
+                effective_browser = browser_name or rdata.get("browser", {}).get("name")
+                if effective_browser == "google-chrome":
+                    netlog_path = tdir / "netlog.json"
+                    if not netlog_path.is_file():
+                        raise FileNotFoundError(
+                            f"Trial {trial_id}: mandatory Chrome NetLog file missing at {netlog_path} for VALID_LIVE trial"
+                        )
+                    try:
+                        with open(netlog_path, "r", encoding="utf-8") as nf:
+                            ndata = json.load(nf)
+                    except Exception as err:
+                        raise ValueError(
+                            f"Trial {trial_id}: invalid JSON in Chrome NetLog at {netlog_path}: {err}"
+                        )
                     offset_ms = ndata.get("constants", {}).get("timeTickOffset", 0)
                     evt_types = ndata.get("constants", {}).get("logEventTypes", {})
                     evt_inv = {v: k for k, v in evt_types.items()}
@@ -1006,13 +1201,13 @@ def export_trial_timeline(
                                 "pcap_sha256": pcap_sha,
                                 "source_path": source_rel_netlog,
                             })
-                except Exception:
-                    pass
 
-            # Firefox Telemetry Log
-            ff_log = tdir / "browser_telemetry.log"
-            if ff_log.is_file():
-                try:
+                elif effective_browser == "firefox":
+                    ff_log = tdir / "browser_telemetry.log"
+                    if not ff_log.is_file():
+                        raise FileNotFoundError(
+                            f"Trial {trial_id}: mandatory Firefox telemetry log missing at {ff_log} for VALID_LIVE trial"
+                        )
                     try:
                         source_rel_ff = str(ff_log.resolve().relative_to(REPO_ROOT.resolve()))
                     except ValueError:
@@ -1041,8 +1236,93 @@ def export_trial_timeline(
                                         "pcap_sha256": pcap_sha,
                                         "source_path": source_rel_ff,
                                     })
-                except Exception:
-                    pass
+                else:
+                    netlog_path = tdir / "netlog.json"
+                    ff_log = tdir / "browser_telemetry.log"
+                    if netlog_path.is_file():
+                        try:
+                            with open(netlog_path, "r", encoding="utf-8") as nf:
+                                ndata = json.load(nf)
+                        except Exception as err:
+                            raise ValueError(
+                                f"Trial {trial_id}: invalid JSON in Chrome NetLog at {netlog_path}: {err}"
+                            )
+                        offset_ms = ndata.get("constants", {}).get("timeTickOffset", 0)
+                        evt_types = ndata.get("constants", {}).get("logEventTypes", {})
+                        evt_inv = {v: k for k, v in evt_types.items()}
+                        chrome_salient = {
+                            "URL_REQUEST_START_JOB",
+                            "HOST_RESOLVER_MANAGER_REQUEST",
+                            "TCP_CONNECT_JOB_CONNECT",
+                            "SOCKET_CONNECT",
+                            "HTTP_TRANSACTION_SEND_REQUEST",
+                            "HTTP_TRANSACTION_READ_RESPONSE_HEADERS",
+                        }
+                        try:
+                            source_rel_netlog = str(netlog_path.resolve().relative_to(REPO_ROOT.resolve()))
+                        except ValueError:
+                            source_rel_netlog = str(netlog_path)
+                        for ev in ndata.get("events", []):
+                            ename = evt_inv.get(ev.get("type"))
+                            if ename in chrome_salient:
+                                tick = int(ev.get("time", 0))
+                                epoch_sec = (offset_ms + tick) / 1000.0
+                                phase = ev.get("phase", 0)
+                                trial_events.append({
+                                    "timestamp": epoch_sec,
+                                    "event_source": EventSource.BROWSER_TELEMETRY.value,
+                                    "event_type": ename,
+                                    "address_family": "",
+                                    "tcp_stream": "",
+                                    "frame_number": "",
+                                    "details": f"NetLog {ename} (phase={phase})",
+                                    "pcap_sha256": pcap_sha,
+                                    "source_path": source_rel_netlog,
+                                })
+                    elif ff_log.is_file():
+                        try:
+                            source_rel_ff = str(ff_log.resolve().relative_to(REPO_ROOT.resolve()))
+                        except ValueError:
+                            source_rel_ff = str(ff_log)
+                        with open(ff_log, "r", encoding="utf-8", errors="replace") as ff:
+                            for line in ff:
+                                matched_type = None
+                                for name, pat in ff_patterns:
+                                    if pat.search(line):
+                                        matched_type = name
+                                        break
+                                if matched_type:
+                                    match_ts = re.match(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+)\s+UTC", line)
+                                    if match_ts:
+                                        dt = datetime.strptime(match_ts.group(1), "%Y-%m-%d %H:%M:%S.%f")
+                                        epoch_sec = dt.replace(tzinfo=timezone.utc).timestamp()
+                                        trial_events.append({
+                                            "timestamp": epoch_sec,
+                                            "event_source": EventSource.BROWSER_TELEMETRY.value,
+                                            "event_type": matched_type,
+                                            "address_family": "",
+                                            "tcp_stream": "",
+                                            "frame_number": "",
+                                            "details": line.strip()[:160],
+                                            "pcap_sha256": pcap_sha,
+                                            "source_path": source_rel_ff,
+                                        })
+                    else:
+                        raise FileNotFoundError(
+                            f"Trial {trial_id}: mandatory browser telemetry file missing at {tdir} for VALID_LIVE trial"
+                        )
+
+                # Ensure valid live trial produced all 3 expected event sources
+                trial_sources = {ev["event_source"] for ev in trial_events}
+                missing_trial_sources = {
+                    EventSource.HARNESS.value,
+                    EventSource.PCAP.value,
+                    EventSource.BROWSER_TELEMETRY.value,
+                } - trial_sources
+                if missing_trial_sources:
+                    raise ValueError(
+                        f"Trial {trial_id}: missing mandatory event source(s) {sorted(missing_trial_sources)} for VALID_LIVE trial"
+                    )
 
             # Sort events chronologically within trial
             trial_events.sort(key=lambda e: float(e["timestamp"]))
@@ -1065,6 +1345,9 @@ def export_trial_timeline(
 
     # Stable global sort: trial_id, event_index
     all_timeline_rows.sort(key=lambda r: (r["trial_id"], int(r["event_index"])))
+
+    # Comprehensive fail-closed campaign timeline validation before writing CSV
+    validate_campaign_timeline(all_timeline_rows, manifest)
 
     csv_path = output_dir / "trial_timeline.csv"
     write_deterministic_csv(csv_path, TRIAL_TIMELINE_CSV_HEADER, all_timeline_rows)

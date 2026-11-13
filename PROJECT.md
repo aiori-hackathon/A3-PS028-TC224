@@ -50,7 +50,7 @@ Every requirement, finding, and deliverable identified in the Step 0 Survey is i
 | 25 | Sudoers Documentation | Document exact non-interactive sudoers rules in docs/runbook without editing system files | M4 | R2, C5-05, Rule R11 |
 | 26 | RFC 8305 Citation Crosswalk | Audit RFC 8305 §3 (Resolution Delay), §4 (Sorting), §5 (Racing), §8 (Timers); fix runbook line 218 & CSV | M5 | R2, C3-01 |
 | 27 | Boundary Fixtures & Re-issued RFC Assessment | Evaluate <10ms, 10–100ms, 100–2000ms, >2000ms boundary fixtures; re-issue RFC assessment CSV with R7 neutral wording | M5 | R2, C3-02, C3-03 |
-| 28 | HEv3 Draft Pin Status Check | Pinned draft revision of record `draft-ietf-v6ops-happy-eyeballs-v3-04`; informational status check for `-05` | M5 | R2, Amendment A10 |
+| 28 | HEv3 Draft Pin Status Check | Pinned draft revision of record `draft-ietf-happy-happyeyeballs-v3-04`; informational status check for `-05` | M5 | R2, Amendment A10 |
 | 29 | Documentation Correction & PDF Alignment | Correct stale test counts, broken links, paths; align technical report with `Proposed-structure-hackathon.pdf` | M5 | R2, C6-01, E2 |
 | 30 | Constrained Research Runner | Build dedicated research sweep runner preserving canonical S0–S6 lifecycles and fail-stop handling | M6 | R3, D1–D5 |
 | 31 | Target IPv6 Delay Sweep (D1) | Screening 0–800ms, refinement 25–50ms around transition, n ≥ 20 per condition, symmetric delay, identical netem qdiscs | M6 | R3, D1, Decisions 4–5, A2, A6 |
@@ -109,7 +109,7 @@ Every requirement, finding, and deliverable identified in the Step 0 Survey is i
   - `impair.py`: Netem and nftables impairment controls
   - `dns_server.py`: Custom DNS responder with per-family delay injection
   - `scenarios.yaml`: Canonical definition of scenarios S0–S6
-  - `test_*.py`: 17 offline unit and regression test modules (725 tests)
+  - `test_*.py`: 21 unit and regression test modules in `lab/` (788 unique tests discovered, 773 passed; 881 unique tests discovered across repository, 0 duplicate executions, 866 passed; 199 focused regression tests passing 100%)
 - `lab/derived/`: All newly generated derived artifacts
   - `lab/derived/phase-c/`: Phase C re-derived metrics, integrity checksums, exports, RFC assessments
   - `lab/derived/phase-d/`: Phase D sweep condition manifests, raw traces, long-form datasets, figures

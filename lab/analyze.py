@@ -1736,18 +1736,19 @@ def assess_rfc8305_conformance(
     browser: Optional[str] = None
 ) -> List[Dict[str, Any]]:
     """
-    Evaluates Happy Eyeballs v2 (RFC 8305) conformance based strictly on observable trial evidence:
+    Evaluates Happy Eyeballs v2 (RFC 8305) and Happy Eyeballs v3 (draft-ietf-happy-happyeyeballs-v3-04)
+    assessment criteria based strictly on observable trial evidence:
     - Address Order & IPv6 Preference (RFC 8305 §3) -> S0
-    - Immediate Reset Fallback (RFC 8305 §5) -> S2
-    - Connection Attempt Delay on SYN Timeout (RFC 8305 §5) -> S1
-    - Latency-Driven Alternative Path Selection (RFC 8305 §5) -> S4 vs S3
+    - Active Failure Inter-Attempt Spacing (RFC 8305 §5 / v3 draft -04 §6) -> S2
+    - Connection Attempt Delay on SYN Timeout (RFC 8305 §5 / v3 draft -04 §6) -> S1
+    - Latency-Driven Alternative Path Selection (RFC 8305 §5 / v3 draft -04 §6) -> S4 vs S3
     - Resolution Delay on Asynchronous DNS (RFC 8305 §3) -> S6
-    - Statefulness and Failure Caching (RFC 8305 §7) -> INDETERMINATE (profiles wiped per trial)
-    - Non-TCP Transports / QUIC (RFC 8305 §8) -> INDETERMINATE (out of lab scope)
+    - Historical Sorting & State Persistence (RFC 8305 §4 / v3 draft -04 §5.3) -> NOT_ASSESSED (clean profiles per trial)
+    - Transport Applicability / QUIC (v3 draft -04 §6.1) -> OUT_OF_SCOPE (HTTP/1.1 over TCP campaign)
 
-    Distinguishes observed conformance (OBSERVED_CONFORMANCE), observed deviation
-    (OBSERVED_DEVIATION), and indeterminate checks (INDETERMINATE).
-    Does not infer general client/browser compliance from single or small trial samples.
+    Uses neutral, evidence-specific assessment statuses:
+    OBSERVED_BEHAVIOR, POTENTIAL_CRITERION_MISMATCH, NOT_ASSESSED, OUT_OF_SCOPE.
+    Does not issue global browser conformance verdicts from limited experimental samples.
     """
     trials = [t for t in valid_trials if t.validity_category == "VALID_LIVE"]
     if browser:
@@ -1765,38 +1766,38 @@ def assess_rfc8305_conformance(
     if s0_trials:
         v6_first_count = sum(1 for t in s0_trials if t.winning_address_family == "IPv6")
         if v6_first_count == len(s0_trials):
-            status = "OBSERVED_CONFORMANCE"
+            status = "OBSERVED_BEHAVIOR"
             mandatory_floor_status = "NOT_APPLICABLE"
             recommendation_alignment_status = "ALIGNED"
-            overall_observation_status = "OBSERVED_CONFORMANCE"
+            overall_observation_status = "OBSERVED_BEHAVIOR"
             summary = (
                 f"Observed alignment with RFC 8305 Section 3 recommendation: 40/40 (100.0%) valid live trials "
                 f"established primary connection over IPv6 on dual-stack baseline without fallback. "
                 f"Scoped to recorded trials under lab conditions; does not infer general client behavior."
                 if (len(s0_trials) == 40 and v6_first_count == 40) else
-                f"Observed conformance in tested trial(s): {v6_first_count}/{len(s0_trials)} ({round(v6_first_count/len(s0_trials)*100, 1)}%) "
+                f"Observed behavior in tested trial(s): {v6_first_count}/{len(s0_trials)} ({round(v6_first_count/len(s0_trials)*100, 1)}%) "
                 f"trials established IPv6 connection on dual-stack baseline without fallback. "
                 f"Scoped to recorded trial(s); does not infer general client compliance."
             )
         else:
-            status = "OBSERVED_DEVIATION"
+            status = "POTENTIAL_CRITERION_MISMATCH"
             mandatory_floor_status = "NOT_APPLICABLE"
             recommendation_alignment_status = "OUTSIDE_RECOMMENDED_RANGE"
-            overall_observation_status = "OBSERVED_DEVIATION"
+            overall_observation_status = "POTENTIAL_CRITERION_MISMATCH"
             summary = (
-                f"Observed deviation in tested trial(s): Only {v6_first_count}/{len(s0_trials)} trials established IPv6 connection "
+                f"Observed potential criterion mismatch in tested trial(s): Only {v6_first_count}/{len(s0_trials)} trials established IPv6 connection "
                 f"on healthy dual-stack baseline."
             )
         mandatory_status = "NOT_APPLICABLE"
         recommended_status = status
     else:
-        status = "INDETERMINATE"
-        mandatory_status = "INDETERMINATE"
-        recommended_status = "INDETERMINATE"
-        mandatory_floor_status = "NOT_APPLICABLE"
-        recommendation_alignment_status = "INDETERMINATE"
-        overall_observation_status = "INDETERMINATE"
-        summary = "Indeterminate: No valid S0 baseline trials available to evaluate IPv6 preference."
+        status = "NOT_ASSESSED"
+        mandatory_status = "NOT_ASSESSED"
+        recommended_status = "NOT_ASSESSED"
+        mandatory_floor_status = "NOT_ASSESSED"
+        recommendation_alignment_status = "NOT_ASSESSED"
+        overall_observation_status = "NOT_ASSESSED"
+        summary = "Not assessed: No valid S0 baseline trials available to evaluate IPv6 preference."
 
     assessments.append({
         "check_id": "RFC8305-SEC3-IPV6-PREFERENCE",
@@ -1810,10 +1811,11 @@ def assess_rfc8305_conformance(
         "evidence_summary": summary,
         "reasoning": (
             "RFC 8305 Section 3 specifies that implementations SHOULD prefer IPv6 for the first "
-            "connection attempt when both A and AAAA resource records are resolved."
+            "connection attempt when both A and AAAA resource records are resolved. "
+            "draft-ietf-happy-happyeyeballs-v3-04 Section 5.3 also prioritizes IPv6 destination endpoints."
         ),
         "target_parameter": "Dual-Stack IPv6 Preference",
-        "rfc_specification_requirement": "SHOULD prefer IPv6 for initial connection attempt",
+        "rfc_specification_requirement": "SHOULD prefer IPv6 for initial connection attempt (RFC 8305 Section 3 / v3 draft -04 Section 5.3)",
         "rfc_recommended_range": "N/A",
         "observed_delay_ms": None,
         "observed_min_delay_ms": None,
@@ -1824,11 +1826,12 @@ def assess_rfc8305_conformance(
         "observable_behavior_summary": summary,
         "specification_context": (
             "RFC 8305 Section 3 specifies that implementations SHOULD prefer IPv6 for the first "
-            "connection attempt when both A and AAAA resource records are resolved."
+            "connection attempt when both A and AAAA resource records are resolved. "
+            "draft-ietf-happy-happyeyeballs-v3-04 Section 5.3 also prioritizes IPv6 destination endpoints."
         ),
     })
 
-    # Check 2: RFC 8305 §5 - Immediate Fallback on TCP Reset
+    # Check 2: RFC 8305 §5 / v3 draft -04 §6 - Active Failure Inter-Attempt Delay
     s2_trials = by_sc["S2"]
     cad_vals: List[float] = []
     med_cad: Optional[float] = None
@@ -1836,121 +1839,139 @@ def assess_rfc8305_conformance(
         cad_vals = [t.connection_attempt_delay_ms for t in s2_trials if t.connection_attempt_delay_ms is not None]
         med_cad = compute_percentile(sorted(cad_vals), 0.5) if cad_vals else None
 
+        # Verify whether compared attempts are demonstrably paired sequential attempts
+        # within the same logical setup. In the empirical campaign, CAD is derived from
+        # family-wide first-SYN timestamps without establishing logical attempt pairing
+        # or causal linkage to TCP RST.
+        all_paired = all(
+            bool(t.raw_dict.get("attempt_pairing_verified", False))
+            for t in s2_trials
+            if isinstance(getattr(t, "raw_dict", None), dict)
+        ) if s2_trials else False
+
         cad_sub10_count = sum(1 for c in cad_vals if round(c, 2) < RFC8305_MIN_ATTEMPT_INTERVAL_MS)
         cad_ge10_count = sum(1 for c in cad_vals if round(c, 2) >= RFC8305_MIN_ATTEMPT_INTERVAL_MS)
         browsers_in_s2 = sorted(set(t.browser_name for t in s2_trials))
 
         if not cad_vals:
-            status = "INDETERMINATE"
-            mandatory_status = "INDETERMINATE"
-            recommended_status = "INDETERMINATE"
-            mandatory_floor_status = "INDETERMINATE"
-            recommendation_alignment_status = "INDETERMINATE"
-            overall_observation_status = "INDETERMINATE"
-            summary = "Indeterminate: S2 trials missing connection attempt delay measurements."
-        elif cad_sub10_count > 0:
-            status = "OBSERVED_DEVIATION"
-            mandatory_status = "OBSERVED_DEVIATION"
-            recommended_status = "OBSERVED_DEVIATION"
-            mandatory_floor_status = "BELOW_MANDATORY_FLOOR"
-            recommendation_alignment_status = "OUTSIDE_RECOMMENDED_RANGE"
-            overall_observation_status = "OBSERVED_DEVIATION"
+            status = "NOT_ASSESSED"
+            mandatory_status = "NOT_ASSESSED"
+            recommended_status = "NOT_ASSESSED"
+            mandatory_floor_status = "NOT_ASSESSED"
+            recommendation_alignment_status = "NOT_ASSESSED"
+            overall_observation_status = "NOT_ASSESSED"
+            summary = "Not assessed: S2 trials missing connection attempt delay measurements."
+        elif not all_paired:
+            # Empirical campaign trials: attempt pairing is not established.
+            # A below-10ms observation cannot be called a criterion mismatch without adequate attempt pairing.
+            status = "NOT_ASSESSED"
+            mandatory_status = "NOT_ASSESSED"
+            recommended_status = "NOT_ASSESSED"
+            mandatory_floor_status = "NOT_ASSESSED"
+            recommendation_alignment_status = "NOT_ASSESSED"
+            overall_observation_status = "NOT_ASSESSED"
 
-            if len(browsers_in_s2) > 1 and cad_ge10_count > 0:
-                # Multi-browser cohort with sub-10ms and >=10ms attempts (live campaign)
-                b_descs = []
-                for b in browsers_in_s2:
-                    b_trials = [t for t in s2_trials if t.browser_name == b]
-                    b_cads = [t.connection_attempt_delay_ms for t in b_trials if t.connection_attempt_delay_ms is not None]
-                    b_label = "Google Chrome" if "chrome" in b.lower() else ("Mozilla Firefox" if "firefox" in b.lower() else _format_browser_label(b))
-                    if not b_cads:
-                        continue
-                    b_med = compute_percentile(sorted(b_cads), 0.5)
-                    b_min = min(b_cads)
-                    b_max = max(b_cads)
-                    b_sub10 = sum(1 for c in b_cads if round(c, 2) < RFC8305_MIN_ATTEMPT_INTERVAL_MS)
-                    if b_sub10 == len(b_cads):
-                        b_descs.append(
-                            f"{len(b_trials)}/{len(s2_trials)} trials ({b_label}, median CAD {b_med:.3f} ms [{b_min:.3f} - {b_max:.3f} ms]) "
-                            f"launched subsequent IPv4 connection attempt within < 10.000 ms of initial IPv6 attempt"
-                        )
-                    elif b_sub10 == 0:
-                        b_descs.append(
-                            f"{len(b_trials)}/{len(s2_trials)} trials ({b_label}, median CAD {b_med:.3f} ms [{b_min:.3f} - {b_max:.3f} ms]) "
-                            f"launched subsequent IPv4 attempt after >= 10.000 ms (falling within the 100.000–2000.000 ms CAD range)"
-                        )
-                    else:
-                        b_descs.append(
-                            f"{len(b_trials)}/{len(s2_trials)} trials ({b_label}, median CAD {b_med:.3f} ms [{b_min:.3f} - {b_max:.3f} ms]: "
-                            f"{b_sub10}/{len(b_cads)} < 10.000 ms)"
-                        )
-                summary = (
-                    f"Observed inter-attempt spacing on TCP RST active failure: {'; '.join(b_descs)}. "
-                    f"Pooled median delay across all {len(s2_trials)} trials is {med_cad:.3f} ms. "
-                    f"Scoped to recorded trials under lab conditions; does not claim browser non-conformance or infer unobserved browser internals."
-                )
-            else:
-                summary = (
-                    f"Observed deviation in tested trial(s): Subsequent attempt started in {med_cad:.2f}ms after initial attempt "
-                    f"(< 10ms minimum interval), deviating from RFC 8305 §5 mandatory floor ('a subsequent connection "
-                    f"MUST NOT be started within 10 milliseconds of the previous attempt'). Classified as a mandatory-floor deviation. "
-                    f"Scoped to recorded trial(s)."
-                )
-        elif any(round(c, 2) < RFC8305_MIN_CAD_MS for c in cad_vals):
-            # Meets mandatory floor (>= 10ms), but falls below recommended minimum CAD (100ms)
-            status = "OBSERVED_DEVIATION"
-            mandatory_status = "OBSERVED_CONFORMANCE"
-            recommended_status = "OBSERVED_DEVIATION"
-            mandatory_floor_status = "MEETS_MANDATORY_FLOOR"
-            recommendation_alignment_status = "OUTSIDE_RECOMMENDED_RANGE"
-            overall_observation_status = "OBSERVED_DEVIATION"
+            b_descs = []
+            for b in browsers_in_s2:
+                b_trials = [t for t in s2_trials if t.browser_name == b]
+                b_cads = [t.connection_attempt_delay_ms for t in b_trials if t.connection_attempt_delay_ms is not None]
+                b_label = "Google Chrome" if "chrome" in b.lower() else ("Mozilla Firefox" if "firefox" in b.lower() else _format_browser_label(b))
+                if not b_cads:
+                    continue
+                b_med = compute_percentile(sorted(b_cads), 0.5)
+                b_min = min(b_cads)
+                b_max = max(b_cads)
+                b_sub10 = sum(1 for c in b_cads if round(c, 2) < RFC8305_MIN_ATTEMPT_INTERVAL_MS)
+                if b_sub10 == len(b_cads):
+                    b_descs.append(
+                        f"{len(b_trials)}/{len(s2_trials)} trials ({b_label}, median CAD {b_med:.3f} ms [{b_min:.3f} - {b_max:.3f} ms]) "
+                        f"recorded first-IPv4-SYN within < 10.000 ms of first-IPv6-SYN"
+                    )
+                elif b_sub10 == 0:
+                    b_descs.append(
+                        f"{len(b_trials)}/{len(s2_trials)} trials ({b_label}, median CAD {b_med:.3f} ms [{b_min:.3f} - {b_max:.3f} ms]) "
+                        f"recorded first-IPv4-SYN after >= 10.000 ms (falling within the 100.000–2000.000 ms CAD range)"
+                    )
+                else:
+                    b_descs.append(
+                        f"{len(b_trials)}/{len(s2_trials)} trials ({b_label}, median CAD {b_med:.3f} ms [{b_min:.3f} - {b_max:.3f} ms]: "
+                        f"{b_sub10}/{len(b_cads)} < 10.000 ms)"
+                    )
             summary = (
-                f"Observed deviation in tested trial(s): Subsequent attempt started in {med_cad}ms. "
-                f"Result meets RFC 8305 §5 mandatory floor (>= 10ms, mandatory_status=OBSERVED_CONFORMANCE), but falls outside "
-                f"recommended parameters (< 100ms recommended minimum CAD, recommended_status=OBSERVED_DEVIATION). "
-                f"Classified as a recommended-range deviation, not a mandatory MUST violation. Scoped to recorded trial(s)."
-            )
-        elif any(round(c, 2) > RFC8305_MAX_CAD_MS for c in cad_vals):
-            # Meets mandatory floor (>= 10ms), but exceeds recommended 2-second upper bound
-            status = "OBSERVED_DEVIATION"
-            mandatory_status = "OBSERVED_CONFORMANCE"
-            recommended_status = "OBSERVED_DEVIATION"
-            mandatory_floor_status = "MEETS_MANDATORY_FLOOR"
-            recommendation_alignment_status = "OUTSIDE_RECOMMENDED_RANGE"
-            overall_observation_status = "OBSERVED_DEVIATION"
-            summary = (
-                f"Observed deviation in tested trial(s): Subsequent attempt was delayed by {med_cad}ms. "
-                f"Result meets RFC 8305 §5 mandatory floor (>= 10ms, mandatory_status=OBSERVED_CONFORMANCE), but falls outside "
-                f"recommended parameters (> {RFC8305_MAX_CAD_MS:.0f}ms recommended 2-second upper bound, recommended_status=OBSERVED_DEVIATION). "
-                f"Classified as a recommended-range deviation, not a mandatory MUST violation. Scoped to recorded trial(s)."
+                f"Observed inter-attempt spacing on TCP RST active failure: {'; '.join(b_descs)}. "
+                f"Pooled median delay across all {len(s2_trials)} trials is {med_cad:.3f} ms. "
+                f"However, because connection attempt delay measurements are derived from family-wide first-SYN timestamps "
+                f"without establishing verified attempt pairing, socket transaction causality, or chronological attempt correlation, "
+                f"these observed intervals cannot be validly assessed against the 10 ms mandatory floor criterion. "
+                f"Scoped to recorded trials under lab conditions; does not claim browser non-conformance."
             )
         else:
-            # Meets both mandatory floor (>= 10ms) and recommended CAD range [100ms, 2000ms]
-            status = "OBSERVED_CONFORMANCE"
-            mandatory_status = "OBSERVED_CONFORMANCE"
-            recommended_status = "OBSERVED_CONFORMANCE"
-            mandatory_floor_status = "MEETS_MANDATORY_FLOOR"
-            recommendation_alignment_status = "ALIGNED"
-            overall_observation_status = "OBSERVED_CONFORMANCE"
-            summary = (
-                f"Observed conformance in tested trial(s): Fallback observed with median CAD {med_cad}ms. "
-                f"Result meets both RFC 8305 §5 mandatory floor (>= 10ms, mandatory_status=OBSERVED_CONFORMANCE) and falls within "
-                f"recommended CAD range [{RFC8305_MIN_CAD_MS:.0f}ms, {RFC8305_MAX_CAD_MS:.0f}ms] (target: {RFC8305_RECOMMENDED_CAD_MS:.0f}ms, "
-                f"recommended_status=OBSERVED_CONFORMANCE). Scoped to recorded trial(s)."
-            )
+            # Verified paired attempts (e.g. synthetic test cases)
+            if cad_sub10_count > 0:
+                status = "POTENTIAL_CRITERION_MISMATCH"
+                mandatory_status = "POTENTIAL_CRITERION_MISMATCH"
+                recommended_status = "POTENTIAL_CRITERION_MISMATCH"
+                mandatory_floor_status = "BELOW_MANDATORY_FLOOR"
+                recommendation_alignment_status = "OUTSIDE_RECOMMENDED_RANGE"
+                overall_observation_status = "POTENTIAL_CRITERION_MISMATCH"
+                summary = (
+                    f"Observed potential criterion mismatch in tested paired trial(s): Subsequent attempt started in {med_cad:.2f}ms after initial attempt "
+                    f"(< 10ms minimum interval), differing from RFC 8305 §5 mandatory floor ('a subsequent connection "
+                    f"MUST NOT be started within 10 milliseconds of the previous attempt'). Classified as a mandatory-floor criterion mismatch. "
+                    f"Scoped to recorded paired trial(s)."
+                )
+            elif any(round(c, 2) < RFC8305_MIN_CAD_MS for c in cad_vals):
+                status = "POTENTIAL_CRITERION_MISMATCH"
+                mandatory_status = "OBSERVED_BEHAVIOR"
+                recommended_status = "POTENTIAL_CRITERION_MISMATCH"
+                mandatory_floor_status = "MEETS_MANDATORY_FLOOR"
+                recommendation_alignment_status = "OUTSIDE_RECOMMENDED_RANGE"
+                overall_observation_status = "POTENTIAL_CRITERION_MISMATCH"
+                summary = (
+                    f"Observed potential criterion mismatch in tested paired trial(s): Subsequent attempt started in {med_cad}ms. "
+                    f"Result meets RFC 8305 §5 mandatory floor (>= 10ms), but falls outside "
+                    f"recommended parameters (< 100ms recommended minimum CAD). "
+                    f"Classified as a recommended-range criterion mismatch, not a mandatory MUST violation. Scoped to recorded trial(s)."
+                )
+            elif any(round(c, 2) > RFC8305_MAX_CAD_MS for c in cad_vals):
+                status = "POTENTIAL_CRITERION_MISMATCH"
+                mandatory_status = "OBSERVED_BEHAVIOR"
+                recommended_status = "POTENTIAL_CRITERION_MISMATCH"
+                mandatory_floor_status = "MEETS_MANDATORY_FLOOR"
+                recommendation_alignment_status = "OUTSIDE_RECOMMENDED_RANGE"
+                overall_observation_status = "POTENTIAL_CRITERION_MISMATCH"
+                summary = (
+                    f"Observed potential criterion mismatch in tested paired trial(s): Subsequent attempt was delayed by {med_cad}ms. "
+                    f"Result meets RFC 8305 §5 mandatory floor (>= 10ms), but falls outside "
+                    f"recommended parameters (> {RFC8305_MAX_CAD_MS:.0f}ms recommended 2-second upper bound). "
+                    f"Classified as a recommended-range criterion mismatch, not a mandatory MUST violation. Scoped to recorded trial(s)."
+                )
+            else:
+                status = "OBSERVED_BEHAVIOR"
+                mandatory_status = "OBSERVED_BEHAVIOR"
+                recommended_status = "OBSERVED_BEHAVIOR"
+                mandatory_floor_status = "MEETS_MANDATORY_FLOOR"
+                recommendation_alignment_status = "ALIGNED"
+                overall_observation_status = "OBSERVED_BEHAVIOR"
+                summary = (
+                    f"Observed behavior in tested paired trial(s): Fallback observed with median CAD {med_cad}ms. "
+                    f"Result meets both RFC 8305 §5 mandatory floor (>= 10ms) and falls within "
+                    f"recommended CAD range [{RFC8305_MIN_CAD_MS:.0f}ms, {RFC8305_MAX_CAD_MS:.0f}ms] (target: {RFC8305_RECOMMENDED_CAD_MS:.0f}ms). "
+                    f"Scoped to recorded trial(s)."
+                )
     else:
-        status = "INDETERMINATE"
-        mandatory_status = "INDETERMINATE"
-        recommended_status = "INDETERMINATE"
-        mandatory_floor_status = "INDETERMINATE"
-        recommendation_alignment_status = "INDETERMINATE"
-        overall_observation_status = "INDETERMINATE"
-        summary = "Indeterminate: No valid S2 TCP RST trials available."
+        status = "NOT_ASSESSED"
+        mandatory_status = "NOT_ASSESSED"
+        recommended_status = "NOT_ASSESSED"
+        mandatory_floor_status = "NOT_ASSESSED"
+        recommendation_alignment_status = "NOT_ASSESSED"
+        overall_observation_status = "NOT_ASSESSED"
+        summary = "Not assessed: No valid S2 TCP RST trials available."
 
     assessments.append({
-        "check_id": "RFC8305-SEC5-IMMEDIATE-RST-FALLBACK",
+        "check_id": "RFC8305-SEC5-CAD-10MS-FLOOR",
         "rfc_section": "RFC 8305 Section 5",
-        "title": "Immediate Fallback on Active Connection Failure (TCP RST)",
+        "title": "Active Failure RST Inter-Attempt Delay",
         "scenario_id": "S2",
         "status": status,
         "mandatory_status": mandatory_status,
@@ -1958,18 +1979,19 @@ def assess_rfc8305_conformance(
         "sample_size": len(s2_trials),
         "evidence_summary": summary,
         "reasoning": (
-            "RFC 8305 Section 5 distinguishes mandatory requirements from recommended parameters: "
-            "subsequent connection attempts MUST NOT start within 10 milliseconds of the previous attempt "
-            "(mandatory floor to prevent congestion collapse), while Connection Attempt Delay has a recommended "
-            "minimum of 100 milliseconds and a recommended maximum of 2 seconds. When an attempt actively fails "
-            "(such as TCP RST), Section 5 recommends starting immediately without waiting for the CAD timer to expire, "
-            "provided the 10ms mandatory floor is respected. Results between 10ms and 100ms meet all mandatory MUST "
-            "requirements while falling outside the recommended minimum CAD timer; they are classified as recommended-range "
-            "deviations and are not labeled as MUST violations."
+            "RFC 8305 Section 5 and draft-ietf-happy-happyeyeballs-v3-04 Section 6 define attempt-spacing requirements: "
+            "subsequent connection attempts MUST NOT start within 10 milliseconds of the previous attempt (mandatory floor to "
+            "prevent congestion collapse), while Connection Attempt Delay has a recommended minimum of 100 milliseconds, a "
+            "recommended default of 250 milliseconds, and a recommended maximum of 2 seconds. Neither specification establishes "
+            "a rule that a subsequent connection attempt SHOULD start immediately after receiving a TCP RST. Evaluation of the 10 ms "
+            "criterion requires establishing that compared attempts represent sequential attempts within the same logical connection setup. "
+            "Because the campaign measurements are family-wide first-SYN timestamp deltas rather than verified paired attempts "
+            "within a single logical setup, and do not establish causal linkage between TCP RST arrival and subsequent SYN transmission, "
+            "normative evaluation against the 10 ms criterion is not supported by available evidence (NOT_ASSESSED)."
         ),
         "target_parameter": "Active Failure RST Inter-Attempt Delay",
-        "rfc_specification_requirement": "Subsequent attempt MUST NOT < 10 ms; SHOULD start immediately upon TCP RST",
-        "rfc_recommended_range": "[10.000, inf) ms",
+        "rfc_specification_requirement": "Subsequent connection MUST NOT be started within 10 milliseconds of the previous attempt (RFC 8305 Section 5 / v3 draft -04 Section 6)",
+        "rfc_recommended_range": "[100.000, 2000.000] ms",
         "observed_delay_ms": med_cad,
         "observed_min_delay_ms": min(cad_vals) if cad_vals else None,
         "observed_max_delay_ms": max(cad_vals) if cad_vals else None,
@@ -1978,15 +2000,15 @@ def assess_rfc8305_conformance(
         "overall_observation_status": overall_observation_status,
         "observable_behavior_summary": summary,
         "specification_context": (
-            "RFC 8305 Section 5 distinguishes mandatory requirements from recommended parameters: "
-            "subsequent connection attempts MUST NOT start within 10 milliseconds of the previous attempt "
-            "(mandatory floor to prevent congestion collapse). When an attempt actively fails (such as TCP RST), "
-            "Section 5 recommends starting immediately without waiting for the CAD timer to expire, provided "
-            "the 10 ms mandatory floor is respected."
+            "RFC 8305 Section 5 and draft-ietf-happy-happyeyeballs-v3-04 Section 6 distinguish mandatory inter-attempt spacing "
+            "(subsequent connection attempts MUST NOT start within 10 milliseconds of the previous attempt) from recommended CAD parameters "
+            "(100 ms to 2000 ms, default 250 ms). Neither specification contains an immediate-retry requirement upon TCP RST. "
+            "Evaluation of attempt spacing requires verified sequential pairing within the same logical setup; unestablished attempt "
+            "pairing cannot be evaluated as a criterion mismatch."
         ),
     })
 
-    # Check 3: RFC 8305 §5 - Connection Attempt Delay on SYN Timeout
+    # Check 3: RFC 8305 §5 / v3 draft -04 §6 - Connection Attempt Delay on SYN Timeout
     s1_trials = by_sc["S1"]
     cad_vals = []
     med_cad = None
@@ -1995,73 +2017,72 @@ def assess_rfc8305_conformance(
         med_cad = compute_percentile(sorted(cad_vals), 0.5) if cad_vals else None
 
         if not cad_vals:
-            status = "INDETERMINATE"
-            mandatory_status = "INDETERMINATE"
-            recommended_status = "INDETERMINATE"
-            mandatory_floor_status = "INDETERMINATE"
-            recommendation_alignment_status = "INDETERMINATE"
-            overall_observation_status = "INDETERMINATE"
-            summary = "Indeterminate: S1 trials missing connection attempt delay measurements."
+            status = "NOT_ASSESSED"
+            mandatory_status = "NOT_ASSESSED"
+            recommended_status = "NOT_ASSESSED"
+            mandatory_floor_status = "NOT_ASSESSED"
+            recommendation_alignment_status = "NOT_ASSESSED"
+            overall_observation_status = "NOT_ASSESSED"
+            summary = "Not assessed: S1 trials missing connection attempt delay measurements."
         elif any(round(c, 2) < RFC8305_MIN_ATTEMPT_INTERVAL_MS for c in cad_vals):
-            status = "OBSERVED_DEVIATION"
-            mandatory_status = "OBSERVED_DEVIATION"
-            recommended_status = "OBSERVED_DEVIATION"
+            status = "POTENTIAL_CRITERION_MISMATCH"
+            mandatory_status = "POTENTIAL_CRITERION_MISMATCH"
+            recommended_status = "POTENTIAL_CRITERION_MISMATCH"
             mandatory_floor_status = "BELOW_MANDATORY_FLOOR"
             recommendation_alignment_status = "OUTSIDE_RECOMMENDED_RANGE"
-            overall_observation_status = "OBSERVED_DEVIATION"
+            overall_observation_status = "POTENTIAL_CRITERION_MISMATCH"
             summary = (
-                f"Observed deviation in tested trial(s): Subsequent attempt started in {med_cad}ms (< 10ms minimum interval), "
-                f"deviating from RFC 8305 §5 mandatory floor. Classified as a mandatory-floor deviation. Scoped to recorded trial(s)."
+                f"Observed potential criterion mismatch in tested trial(s): Subsequent attempt started in {med_cad}ms (< 10ms minimum interval), "
+                f"differing from RFC 8305 §5 mandatory floor. Classified as a mandatory-floor criterion mismatch. Scoped to recorded trial(s)."
             )
         elif any(round(c, 2) < RFC8305_MIN_CAD_MS for c in cad_vals):
-            status = "OBSERVED_DEVIATION"
-            mandatory_status = "OBSERVED_CONFORMANCE"
-            recommended_status = "OBSERVED_DEVIATION"
+            status = "POTENTIAL_CRITERION_MISMATCH"
+            mandatory_status = "OBSERVED_BEHAVIOR"
+            recommended_status = "POTENTIAL_CRITERION_MISMATCH"
             mandatory_floor_status = "MEETS_MANDATORY_FLOOR"
             recommendation_alignment_status = "OUTSIDE_RECOMMENDED_RANGE"
-            overall_observation_status = "OBSERVED_DEVIATION"
+            overall_observation_status = "POTENTIAL_CRITERION_MISMATCH"
             summary = (
-                f"Observed deviation in tested trial(s): Subsequent attempt started in {med_cad}ms. "
-                f"Result meets RFC 8305 §5 mandatory floor (>= 10ms, mandatory_status=OBSERVED_CONFORMANCE), but falls outside "
-                f"recommended parameters (< 100ms recommended minimum CAD, recommended_status=OBSERVED_DEVIATION). "
-                f"Classified as a recommended-range deviation, not a mandatory MUST violation. Scoped to recorded trial(s)."
+                f"Observed potential criterion mismatch in tested trial(s): Subsequent attempt started in {med_cad}ms. "
+                f"Result meets RFC 8305 §5 mandatory floor (>= 10ms), but falls outside "
+                f"recommended parameters (< 100ms recommended minimum CAD). "
+                f"Classified as a recommended-range criterion mismatch, not a mandatory MUST violation. Scoped to recorded trial(s)."
             )
         elif any(round(c, 2) > RFC8305_MAX_CAD_MS for c in cad_vals):
-            status = "OBSERVED_DEVIATION"
-            mandatory_status = "OBSERVED_CONFORMANCE"
-            recommended_status = "OBSERVED_DEVIATION"
+            status = "POTENTIAL_CRITERION_MISMATCH"
+            mandatory_status = "OBSERVED_BEHAVIOR"
+            recommended_status = "POTENTIAL_CRITERION_MISMATCH"
             mandatory_floor_status = "MEETS_MANDATORY_FLOOR"
             recommendation_alignment_status = "OUTSIDE_RECOMMENDED_RANGE"
-            overall_observation_status = "OBSERVED_DEVIATION"
+            overall_observation_status = "POTENTIAL_CRITERION_MISMATCH"
             summary = (
-                f"Observed deviation in tested trial(s): CAD median {med_cad}ms exceeds RFC 8305 §5 recommended 2-second upper bound. "
-                f"Result meets mandatory floor (>= 10ms, mandatory_status=OBSERVED_CONFORMANCE), but deviates from recommended parameters "
-                f"(recommended_status=OBSERVED_DEVIATION). Scoped to recorded trial(s)."
+                f"Observed potential criterion mismatch in tested trial(s): CAD median {med_cad}ms exceeds RFC 8305 §5 recommended 2-second upper bound. "
+                f"Result meets mandatory floor (>= 10ms), but deviates from recommended parameters. Scoped to recorded trial(s)."
             )
         else:
-            status = "OBSERVED_CONFORMANCE"
-            mandatory_status = "OBSERVED_CONFORMANCE"
-            recommended_status = "OBSERVED_CONFORMANCE"
+            status = "OBSERVED_BEHAVIOR"
+            mandatory_status = "OBSERVED_BEHAVIOR"
+            recommended_status = "OBSERVED_BEHAVIOR"
             mandatory_floor_status = "MEETS_MANDATORY_FLOOR"
             recommendation_alignment_status = "ALIGNED"
-            overall_observation_status = "OBSERVED_CONFORMANCE"
+            overall_observation_status = "OBSERVED_BEHAVIOR"
             summary = (
                 f"Observed alignment with RFC 8305 Section 5 recommended parameters: 40/40 trials initiated IPv4 fallback attempt "
                 f"within the recommended [100.000, 2000.000] ms window (pooled median CAD 342.155 ms; Google Chrome median 301.190 ms, "
                 f"Mozilla Firefox median 396.960 ms), satisfying the 10.000 ms mandatory inter-attempt floor. Scoped to recorded trials under lab conditions."
                 if (len(s1_trials) == 40 and med_cad is not None and 340 <= med_cad <= 345) else
-                f"Observed conformance in tested trial(s): CAD median {med_cad}ms meets RFC 8305 §5 mandatory floor (>= 10ms) "
+                f"Observed behavior in tested trial(s): CAD median {med_cad}ms meets RFC 8305 §5 mandatory floor (>= 10ms) "
                 f"and falls within recommended range [{RFC8305_MIN_CAD_MS:.0f}ms, {RFC8305_MAX_CAD_MS:.0f}ms] (target: {RFC8305_RECOMMENDED_CAD_MS:.0f}ms). "
                 f"Scoped to recorded trial(s); does not infer general client compliance."
             )
     else:
-        status = "INDETERMINATE"
-        mandatory_status = "INDETERMINATE"
-        recommended_status = "INDETERMINATE"
-        mandatory_floor_status = "INDETERMINATE"
-        recommendation_alignment_status = "INDETERMINATE"
-        overall_observation_status = "INDETERMINATE"
-        summary = "Indeterminate: No valid S1 SYN blackhole trials available."
+        status = "NOT_ASSESSED"
+        mandatory_status = "NOT_ASSESSED"
+        recommended_status = "NOT_ASSESSED"
+        mandatory_floor_status = "NOT_ASSESSED"
+        recommendation_alignment_status = "NOT_ASSESSED"
+        overall_observation_status = "NOT_ASSESSED"
+        summary = "Not assessed: No valid S1 SYN blackhole trials available."
 
     assessments.append({
         "check_id": "RFC8305-SEC5-CAD-SYN-TIMEOUT",
@@ -2074,12 +2095,12 @@ def assess_rfc8305_conformance(
         "sample_size": len(s1_trials),
         "evidence_summary": summary,
         "reasoning": (
-            "RFC 8305 Section 5 distinguishes mandatory inter-attempt spacing (MUST NOT be smaller than 10ms) "
-            "from recommended CAD timer parameters (SHOULD NOT be smaller than 100ms, recommended default 250ms, "
-            "maximum 2000ms) on unresponsive paths."
+            "RFC 8305 Section 5 and draft-ietf-happy-happyeyeballs-v3-04 Section 6 distinguish mandatory inter-attempt spacing "
+            "(MUST NOT be smaller than 10ms) from recommended CAD timer parameters (SHOULD NOT be smaller than 100ms, recommended "
+            "default 250ms, maximum 2000ms) on unresponsive paths."
         ),
         "target_parameter": "Unresponsive Path CAD Timer",
-        "rfc_specification_requirement": "Subsequent attempt MUST NOT < 10 ms; CAD timer SHOULD NOT < 100 ms; RECOMMENDED default 250 ms; MAX 2000 ms",
+        "rfc_specification_requirement": "Subsequent connection MUST NOT be started within 10 milliseconds of previous attempt; CAD timer SHOULD NOT < 100 ms; RECOMMENDED default 250 ms; MAX 2000 ms (RFC 8305 Section 5 / v3 draft -04 Section 6)",
         "rfc_recommended_range": "[100.000, 2000.000] ms",
         "observed_delay_ms": med_cad,
         "observed_min_delay_ms": min(cad_vals) if cad_vals else None,
@@ -2089,13 +2110,13 @@ def assess_rfc8305_conformance(
         "overall_observation_status": overall_observation_status,
         "observable_behavior_summary": summary,
         "specification_context": (
-            "RFC 8305 Section 5 distinguishes mandatory inter-attempt spacing (MUST NOT be smaller than 10 ms) "
-            "from recommended CAD timer parameters (SHOULD NOT be smaller than 100 ms, recommended default 250 ms, "
-            "maximum 2000 ms) on unresponsive paths."
+            "RFC 8305 Section 5 and draft-ietf-happy-happyeyeballs-v3-04 Section 6 distinguish mandatory inter-attempt spacing "
+            "(MUST NOT be smaller than 10 ms) from recommended CAD timer parameters (SHOULD NOT be smaller than 100 ms, "
+            "recommended default 250 ms, maximum 2000 ms) on unresponsive paths."
         ),
     })
 
-    # Check 4: RFC 8305 §5 - Alternative Path Selection on Latency Imbalance
+    # Check 4: RFC 8305 §5 / v3 draft -04 §6 - Alternative Path Selection on Latency Imbalance
     s4_trials = by_sc["S4"]
     cad_vals = []
     med_cad = None
@@ -2131,23 +2152,23 @@ def assess_rfc8305_conformance(
             if is_valid_cad:
                 cad_vals.append(c_float)
                 if c_float < RFC8305_MIN_ATTEMPT_INTERVAL_MS:
-                    trial_mand_statuses.append("OBSERVED_DEVIATION")
+                    trial_mand_statuses.append("POTENTIAL_CRITERION_MISMATCH")
                 else:
-                    trial_mand_statuses.append("OBSERVED_CONFORMANCE")
+                    trial_mand_statuses.append("OBSERVED_BEHAVIOR")
             else:
                 # CAD is invalid or missing
                 if raw_c is not None:
                     invalid_cad_count += 1
-                    trial_mand_statuses.append("INDETERMINATE")
+                    trial_mand_statuses.append("NOT_ASSESSED")
                 else:
                     if v4_att is True or fallback_occ is True or t.winning_address_family == "IPv4":
                         missing_cad_count += 1
-                        trial_mand_statuses.append("INDETERMINATE")
+                        trial_mand_statuses.append("NOT_ASSESSED")
                     elif v4_att is False and (t.winning_address_family == "IPv6" or t.winning_address_family is None):
                         trial_mand_statuses.append("NOT_APPLICABLE")
                     else:
                         missing_cad_count += 1
-                        trial_mand_statuses.append("INDETERMINATE")
+                        trial_mand_statuses.append("NOT_ASSESSED")
 
         cad_count = len(cad_vals)
         cad_sub10_count = sum(1 for c in cad_vals if c < RFC8305_MIN_ATTEMPT_INTERVAL_MS)
@@ -2158,19 +2179,19 @@ def assess_rfc8305_conformance(
         med_cad = compute_percentile(sorted(cad_vals), 0.5) if cad_vals else None
         med_cad_str = f"{round(med_cad, 2):.2f}ms" if med_cad is not None else "N/A"
 
-        subsequent_attempts_indeterminate = sum(1 for s in trial_mand_statuses if s == "INDETERMINATE")
+        subsequent_attempts_indeterminate = sum(1 for s in trial_mand_statuses if s == "NOT_ASSESSED")
         not_applicable_mand_count = sum(1 for s in trial_mand_statuses if s == "NOT_APPLICABLE")
-        applicable_measured_count = sum(1 for s in trial_mand_statuses if s in ("OBSERVED_CONFORMANCE", "OBSERVED_DEVIATION"))
+        applicable_measured_count = sum(1 for s in trial_mand_statuses if s in ("OBSERVED_BEHAVIOR", "POTENTIAL_CRITERION_MISMATCH"))
 
         # Aggregate mandatory status
         if cad_sub10_count > 0:
-            mandatory_status = "OBSERVED_DEVIATION"
+            mandatory_status = "POTENTIAL_CRITERION_MISMATCH"
             mandatory_floor_status = "BELOW_MANDATORY_FLOOR"
         elif subsequent_attempts_indeterminate > 0:
-            mandatory_status = "INDETERMINATE"
-            mandatory_floor_status = "INDETERMINATE"
+            mandatory_status = "NOT_ASSESSED"
+            mandatory_floor_status = "NOT_ASSESSED"
         elif applicable_measured_count > 0:
-            mandatory_status = "OBSERVED_CONFORMANCE"
+            mandatory_status = "OBSERVED_BEHAVIOR"
             mandatory_floor_status = "MEETS_MANDATORY_FLOOR"
         else:
             mandatory_status = "NOT_APPLICABLE"
@@ -2240,30 +2261,30 @@ def assess_rfc8305_conformance(
 
         # Determine overall recommended_status and status
         if mandatory_violation or rec_deviations:
-            status = "OBSERVED_DEVIATION"
+            status = "POTENTIAL_CRITERION_MISMATCH"
             recommendation_alignment_status = "OUTSIDE_RECOMMENDED_RANGE"
-            overall_observation_status = "OBSERVED_DEVIATION"
+            overall_observation_status = "POTENTIAL_CRITERION_MISMATCH"
             if rec_deviations:
-                recommended_status = "OBSERVED_DEVIATION"
+                recommended_status = "POTENTIAL_CRITERION_MISMATCH"
             elif has_unknown_wins or subsequent_attempts_indeterminate > 0:
-                recommended_status = "INDETERMINATE"
-                recommendation_alignment_status = "INDETERMINATE"
+                recommended_status = "NOT_ASSESSED"
+                recommendation_alignment_status = "NOT_ASSESSED"
             elif len(v4_wins) == total_s4 and cad_count > 0:
-                recommended_status = "OBSERVED_CONFORMANCE"
+                recommended_status = "OBSERVED_BEHAVIOR"
                 recommendation_alignment_status = "ALIGNED"
             else:
-                recommended_status = "INDETERMINATE"
-                recommendation_alignment_status = "INDETERMINATE"
+                recommended_status = "NOT_ASSESSED"
+                recommendation_alignment_status = "NOT_ASSESSED"
         elif has_unknown_wins or subsequent_attempts_indeterminate > 0 or not cad_vals:
-            status = "INDETERMINATE"
-            recommended_status = "INDETERMINATE"
-            recommendation_alignment_status = "INDETERMINATE"
-            overall_observation_status = "INDETERMINATE"
+            status = "NOT_ASSESSED"
+            recommended_status = "NOT_ASSESSED"
+            recommendation_alignment_status = "NOT_ASSESSED"
+            overall_observation_status = "NOT_ASSESSED"
         else:
-            status = "OBSERVED_CONFORMANCE"
-            recommended_status = "OBSERVED_CONFORMANCE"
+            status = "OBSERVED_BEHAVIOR"
+            recommended_status = "OBSERVED_BEHAVIOR"
             recommendation_alignment_status = "ALIGNED"
-            overall_observation_status = "OBSERVED_CONFORMANCE"
+            overall_observation_status = "OBSERVED_BEHAVIOR"
 
         # Construct evidence_summary
         if len(s4_trials) == 40 and len(v4_wins) == 39 and len(v6_wins) == 1 and med_cad is not None:
@@ -2275,12 +2296,12 @@ def assess_rfc8305_conformance(
                 f"In 1/40 trials (Firefox trial trial-20261029222109-5c74c26a), IPv6 completed without an IPv4 attempt being initiated. "
                 f"Scoped to recorded trials under lab conditions; does not infer general client non-conformance."
             )
-        elif status == "OBSERVED_DEVIATION":
-            if mandatory_status == "OBSERVED_DEVIATION":
-                mand_part = f"Subsequent connection attempt started in < 10ms ({cad_sub10_count} trial(s)), violating RFC 8305 §5 mandatory floor (mandatory_status=OBSERVED_DEVIATION)."
-            elif mandatory_status == "OBSERVED_CONFORMANCE":
+        elif status == "POTENTIAL_CRITERION_MISMATCH":
+            if mandatory_status == "POTENTIAL_CRITERION_MISMATCH":
+                mand_part = f"Subsequent connection attempt started in < 10ms ({cad_sub10_count} trial(s)), differing from RFC 8305 §5 mandatory floor (mandatory_status=POTENTIAL_CRITERION_MISMATCH)."
+            elif mandatory_status == "OBSERVED_BEHAVIOR":
                 na_note = f"; {not_applicable_mand_count} trial(s) without subsequent attempt evaluated as NOT_APPLICABLE" if not_applicable_mand_count > 0 else ""
-                mand_part = f"All {cad_count} measured CAD values satisfy mandatory 10ms floor (mandatory_status=OBSERVED_CONFORMANCE{na_note})."
+                mand_part = f"All {cad_count} measured CAD values satisfy mandatory 10ms floor (mandatory_status=OBSERVED_BEHAVIOR{na_note})."
             else:
                 extra_notes = []
                 if invalid_cad_count > 0:
@@ -2292,15 +2313,15 @@ def assess_rfc8305_conformance(
 
             rec_part = f" {'; '.join(rec_deviations)}." if rec_deviations else ""
             inv_str = f" ({invalid_cad_count} trial(s) had invalid CAD measurements)" if invalid_cad_count > 0 else ""
-            indet_rec_note = f" (recommendation_status=INDETERMINATE due to {len(unknown_wins)} unknown outcome(s))" if (recommended_status == "INDETERMINATE" and not rec_deviations) else ""
-            prefix = "Observed recommendation-level deviation in tested trial(s):" if rec_deviations else "Observed mandatory timing deviation in tested trial(s):"
+            indet_rec_note = f" (recommendation_status=NOT_ASSESSED due to {len(unknown_wins)} unknown outcome(s))" if (recommended_status == "NOT_ASSESSED" and not rec_deviations) else ""
+            prefix = "Observed potential criterion mismatch in tested trial(s):" if rec_deviations else "Observed mandatory timing criterion mismatch in tested trial(s):"
             summary = (
                 f"{prefix} "
                 f"IPv4 won in {len(v4_wins)}/{total_s4} trials ({b_summary_str}){indet_rec_note}. "
                 f"{cad_dist_str}{inv_str} {mand_part}{rec_part} "
                 f"Scoped to recorded trial(s); does not infer general client non-conformance or a mandatory timing violation."
             )
-        elif status == "INDETERMINATE":
+        elif status == "NOT_ASSESSED":
             indet_reasons = []
             if invalid_cad_count > 0:
                 indet_reasons.append(f"{invalid_cad_count} trial(s) with invalid connection attempt delay measurements")
@@ -2311,23 +2332,23 @@ def assess_rfc8305_conformance(
                 indet_reasons.append(f"{len(unknown_wins)} trial(s) with unknown winning address family ({unk_ids})")
             if not cad_vals and applicable_measured_count == 0:
                 indet_reasons.append("no connection attempt delay measurements available")
-            summary = f"Indeterminate: {'; '.join(indet_reasons)}."
+            summary = f"Not assessed: {'; '.join(indet_reasons)}."
         else:
             summary = (
-                f"Observed conformance in tested trial(s): IPv4 won in {len(v4_wins)}/{total_s4} trials ({b_summary_str}) "
+                f"Observed behavior in tested trial(s): IPv4 won in {len(v4_wins)}/{total_s4} trials ({b_summary_str}) "
                 f"with median CAD {med_cad_str} when IPv6 RTT (600ms) exceeded CAD timer. "
                 f"{cad_dist_str} All measured CAD values meet RFC 8305 §5 mandatory floor (>= 10ms) "
                 f"and fall within recommended range [{RFC8305_MIN_CAD_MS:.0f}ms, {RFC8305_MAX_CAD_MS:.0f}ms]. "
                 f"Scoped to recorded trial(s); does not infer general client compliance."
             )
     else:
-        status = "INDETERMINATE"
-        mandatory_status = "INDETERMINATE"
-        recommended_status = "INDETERMINATE"
-        mandatory_floor_status = "INDETERMINATE"
-        recommendation_alignment_status = "INDETERMINATE"
-        overall_observation_status = "INDETERMINATE"
-        summary = "Indeterminate: No valid S4 high latency trials available."
+        status = "NOT_ASSESSED"
+        mandatory_status = "NOT_ASSESSED"
+        recommended_status = "NOT_ASSESSED"
+        mandatory_floor_status = "NOT_ASSESSED"
+        recommendation_alignment_status = "NOT_ASSESSED"
+        overall_observation_status = "NOT_ASSESSED"
+        summary = "Not assessed: No valid S4 high latency trials available."
 
     assessments.append({
         "check_id": "RFC8305-SEC5-CAD-HIGH-LATENCY",
@@ -2340,16 +2361,16 @@ def assess_rfc8305_conformance(
         "sample_size": len(s4_trials),
         "evidence_summary": summary,
         "reasoning": (
-            "RFC 8305 Section 5 distinguishes mandatory inter-attempt spacing (subsequent attempts MUST NOT start "
-            "within 10ms of the previous attempt) from recommended CAD parameters (recommended default 250ms, range "
-            "100ms to 2000ms). Under high primary-path latency (600ms IPv6 RTT), the client is expected to initiate "
-            "an IPv4 connection attempt after the CAD timer, which finishes setup first over the low-latency path. "
-            "Trials where IPv4 wins within timing bounds conform to this recommendation. When a trial completes over "
-            "IPv6 without an IPv4 attempt under 600ms RTT, an observed recommendation-level deviation is recorded without "
-            "imputing a mandatory timing violation."
+            "RFC 8305 Section 5 and draft-ietf-happy-happyeyeballs-v3-04 Section 6 distinguish mandatory inter-attempt spacing "
+            "(subsequent attempts MUST NOT start within 10ms of the previous attempt) from recommended CAD parameters (recommended "
+            "default 250ms, range 100ms to 2000ms). Under high primary-path latency (600ms IPv6 RTT), the client is expected to "
+            "initiate an IPv4 connection attempt after the CAD timer, which finishes setup first over the low-latency path. "
+            "Trials where IPv4 wins within timing bounds exhibit this expected behavior. When a trial completes over "
+            "IPv6 without an IPv4 attempt under 600ms RTT, an observed recommendation-level criterion mismatch is recorded without "
+            "imputing a mandatory timing violation or general browser non-conformance."
         ),
         "target_parameter": "High Latency Fallback Path Racing",
-        "rfc_specification_requirement": "CAD timer SHOULD NOT < 100 ms and MAX 2000 ms; IPv4 path expected to complete first",
+        "rfc_specification_requirement": "CAD timer SHOULD NOT < 100 ms and MAX 2000 ms; IPv4 path expected to complete first (RFC 8305 Section 5 / v3 draft -04 Section 6)",
         "rfc_recommended_range": "[100.000, 2000.000] ms",
         "observed_delay_ms": med_cad,
         "observed_min_delay_ms": min(cad_vals) if cad_vals else None,
@@ -2359,9 +2380,10 @@ def assess_rfc8305_conformance(
         "overall_observation_status": overall_observation_status,
         "observable_behavior_summary": summary,
         "specification_context": (
-            "RFC 8305 Section 5 distinguishes mandatory inter-attempt spacing (MUST NOT start within 10 ms) "
-            "from recommended CAD parameters (100 ms to 2000 ms). Under high primary-path latency (600 ms RTT), "
-            "the client is expected to initiate an IPv4 attempt after the CAD timer, which finishes setup first over the low-latency path."
+            "RFC 8305 Section 5 and draft-ietf-happy-happyeyeballs-v3-04 Section 6 distinguish mandatory inter-attempt spacing "
+            "(MUST NOT start within 10 ms) from recommended CAD parameters (100 ms to 2000 ms). Under high primary-path latency "
+            "(600 ms RTT), the client is expected to initiate an IPv4 attempt after the CAD timer, which finishes setup first "
+            "over the low-latency path."
         ),
     })
 
@@ -2402,12 +2424,12 @@ def assess_rfc8305_conformance(
 
         # Conservative aggregate status
         if dev_trials:
-            status = "OBSERVED_DEVIATION"
+            status = "POTENTIAL_CRITERION_MISMATCH"
             mandatory_status = "NOT_APPLICABLE"
-            recommended_status = "OBSERVED_DEVIATION"
+            recommended_status = "POTENTIAL_CRITERION_MISMATCH"
             mandatory_floor_status = "NOT_APPLICABLE"
             recommendation_alignment_status = "OUTSIDE_RECOMMENDED_RANGE"
-            overall_observation_status = "OBSERVED_DEVIATION"
+            overall_observation_status = "POTENTIAL_CRITERION_MISMATCH"
             if len(s6_trials) == 40 and len(dev_trials) == 40:
                 summary = (
                     f"Observed behavior when positive A response precedes positive AAAA response by ~500.000 ms: "
@@ -2419,50 +2441,50 @@ def assess_rfc8305_conformance(
                 )
             else:
                 summary = (
-                    f"Observed recommendation-level deviation in tested trial(s): "
-                    f"{len(dev_trials)}/{len(s6_trials)} trials with observed deviation, "
-                    f"{len(conf_trials)}/{len(s6_trials)} conforming, "
-                    f"{len(indet_trials)}/{len(s6_trials)} indeterminate. "
+                    f"Observed recommendation-level criterion mismatch in tested trial(s): "
+                    f"{len(dev_trials)}/{len(s6_trials)} trials with potential criterion mismatch, "
+                    f"{len(conf_trials)}/{len(s6_trials)} aligned, "
+                    f"{len(indet_trials)}/{len(s6_trials)} not assessed. "
                     f"Sample: {len(s6_trials)} trial(s) ({browser_str}). "
                     f"Scoped to recorded trial(s); does not infer a mandatory MUST violation or general browser non-conformance."
                 )
         elif indet_trials:
-            status = "INDETERMINATE"
+            status = "NOT_ASSESSED"
             mandatory_status = "NOT_APPLICABLE"
-            recommended_status = "INDETERMINATE"
+            recommended_status = "NOT_ASSESSED"
             mandatory_floor_status = "NOT_APPLICABLE"
-            recommendation_alignment_status = "INDETERMINATE"
-            overall_observation_status = "INDETERMINATE"
+            recommendation_alignment_status = "NOT_ASSESSED"
+            overall_observation_status = "NOT_ASSESSED"
             summary = (
-                f"Indeterminate: Insufficient or missing positive DNS response/attempt evidence to assess Resolution Delay "
-                f"({len(indet_trials)}/{len(s6_trials)} trials indeterminate, "
-                f"{len(conf_trials)}/{len(s6_trials)} conforming, "
+                f"Not assessed: Insufficient or missing positive DNS response/attempt evidence to assess Resolution Delay "
+                f"({len(indet_trials)}/{len(s6_trials)} trials not assessed, "
+                f"{len(conf_trials)}/{len(s6_trials)} aligned, "
                 f"{len(dev_trials)}/{len(s6_trials)} deviations). "
                 f"Sample: {len(s6_trials)} trial(s) ({browser_str})."
             )
         else:
-            status = "OBSERVED_CONFORMANCE"
+            status = "OBSERVED_BEHAVIOR"
             mandatory_status = "NOT_APPLICABLE"
-            recommended_status = "OBSERVED_CONFORMANCE"
+            recommended_status = "OBSERVED_BEHAVIOR"
             mandatory_floor_status = "NOT_APPLICABLE"
             recommendation_alignment_status = "ALIGNED"
-            overall_observation_status = "OBSERVED_CONFORMANCE"
+            overall_observation_status = "OBSERVED_BEHAVIOR"
             summary = (
-                f"Observed conformance in tested trial(s): Client adhered to Resolution Delay recommendation "
+                f"Observed behavior in tested trial(s): Client adhered to Resolution Delay recommendation "
                 f"({len(conf_trials)}/{len(s6_trials)} trials conforming, "
                 f"{len(dev_trials)}/{len(s6_trials)} deviations, "
-                f"{len(indet_trials)}/{len(s6_trials)} indeterminate). "
+                f"{len(indet_trials)}/{len(s6_trials)} not assessed). "
                 f"Sample: {len(s6_trials)} trial(s) ({browser_str}). "
                 f"Scoped to recorded trial(s); does not infer general client compliance."
             )
     else:
-        status = "INDETERMINATE"
-        mandatory_status = "INDETERMINATE"
-        recommended_status = "INDETERMINATE"
-        mandatory_floor_status = "INDETERMINATE"
-        recommendation_alignment_status = "INDETERMINATE"
-        overall_observation_status = "INDETERMINATE"
-        summary = "Indeterminate: No valid S6 delayed AAAA DNS trials available."
+        status = "NOT_ASSESSED"
+        mandatory_status = "NOT_ASSESSED"
+        recommended_status = "NOT_ASSESSED"
+        mandatory_floor_status = "NOT_ASSESSED"
+        recommendation_alignment_status = "NOT_ASSESSED"
+        overall_observation_status = "NOT_ASSESSED"
+        summary = "Not assessed: No valid S6 delayed AAAA DNS trials available."
 
     assessments.append({
         "check_id": "RFC8305-SEC3-RESOLUTION-DELAY",
@@ -2478,16 +2500,16 @@ def assess_rfc8305_conformance(
             "RFC 8305 Section 3 recommends a 50ms Resolution Delay when a positive A response arrives "
             "before a positive AAAA response. If positive AAAA arrives within or exactly at 50ms, an IPv4 "
             "connection attempt that starts before the positive AAAA response is an observed recommendation-level "
-            "deviation; if no IPv4 attempt starts before that positive AAAA response, the trial conforms to this "
+            "criterion mismatch; if no IPv4 attempt starts before that positive AAAA response, the trial aligns with this "
             "timing recommendation. If positive AAAA arrives more than 50ms after positive A, an IPv4 attempt "
             "should have started within the 50ms window; no attempt, or an attempt starting after that window, "
-            "is an observed deviation. If an attempt is recorded but its timing cannot establish the relevant "
-            "chronology, classify the trial as indeterminate. This recommendation-level assessment documents "
+            "is an observed potential criterion mismatch. If an attempt is recorded but its timing cannot establish the relevant "
+            "chronology, classify the trial as not assessed. This recommendation-level assessment documents "
             "specific trial behavior under lab conditions and does not infer a mandatory MUST violation or "
             "general browser non-conformance."
         ),
         "target_parameter": "DNS Resolution Delay Pacing",
-        "rfc_specification_requirement": "RECOMMENDED 50 ms Resolution Delay before initiating IPv4",
+        "rfc_specification_requirement": "RECOMMENDED 50 ms Resolution Delay before initiating IPv4 (RFC 8305 Section 3 / v3 draft -04 Section 7)",
         "rfc_recommended_range": "[0.000, 50.000] ms",
         "observed_delay_ms": pos_med_s6,
         "observed_min_delay_ms": min(pos_delays_s6) if pos_delays_s6 else None,
@@ -2499,84 +2521,94 @@ def assess_rfc8305_conformance(
         "specification_context": (
             "RFC 8305 Section 3 recommends a 50 ms Resolution Delay when a positive A response arrives before a positive "
             "AAAA response. If positive AAAA arrives within 50 ms, an IPv4 attempt starting before AAAA arrival is an "
-            "observed deviation. If positive AAAA arrives after 50 ms, an IPv4 attempt should be initiated within the 50 ms window."
+            "observed potential criterion mismatch. If positive AAAA arrives after 50 ms, an IPv4 attempt should be initiated "
+            "within the 50 ms window. draft-ietf-happy-happyeyeballs-v3-04 Section 7 discusses DNS answer changes during connection setup."
         ),
     })
 
-    # Check 6: RFC 8305 §7 - Historical Statefulness & Adaptive Timers
+    # Check 6: RFC 8305 §4 / v3 draft -04 §5.3 - Historical Statefulness & Adaptive Timers
     assessments.append({
-        "check_id": "RFC8305-SEC7-STATEFULNESS-CACHING",
-        "rfc_section": "RFC 8305 Section 7",
-        "title": "Statefulness and Adaptive Past-Failure Caching",
+        "check_id": "RFC8305-SEC4-HISTORICAL-STATE",
+        "rfc_section": "RFC 8305 Section 4",
+        "title": "Historical Address Selection and State Caching",
         "scenario_id": "ALL",
-        "status": "INDETERMINATE",
-        "mandatory_status": "INDETERMINATE",
-        "recommended_status": "INDETERMINATE",
+        "status": "NOT_ASSESSED",
+        "mandatory_status": "NOT_ASSESSED",
+        "recommended_status": "NOT_ASSESSED",
         "sample_size": len(trials),
         "evidence_summary": (
-            "Indeterminate: Unsupported check. PS-028 testbed protocol unconditionally wipes browser user data directories "
+            "Not assessed: Unsupported check. PS-028 testbed protocol unconditionally wipes browser user data directories "
             "(--user-data-dir) after each trial to guarantee cross-trial measurement independence. Cross-session persistence "
             "and adaptive failure caching cannot be evaluated."
         ),
         "reasoning": (
-            "RFC 8305 Section 7 permits implementations to remember past failure history. "
-            "Because trials are executed with clean profiles to guarantee measurement independence, "
-            "cross-trial statefulness cannot be evaluated."
+            "RFC 8305 Section 4 specifies sorting addresses, including the use of historical RTT and previously used addresses. "
+            "draft-ietf-happy-happyeyeballs-v3-04 Section 5.3 specifies sorting destination endpoints within groups using "
+            "historical RTT and endpoint-use data. RFC 8305 Section 7 is dedicated to NAT64 and DNS64 support on IPv6-only "
+            "networks, not statefulness or failure caching. Because trials are executed with clean profiles to guarantee "
+            "measurement independence, historical statefulness cannot be evaluated."
         ),
-        "target_parameter": "Statefulness and Adaptive Past-Failure Caching",
-        "rfc_specification_requirement": "MAY remember past failure history and dynamically adjust timers",
+        "target_parameter": "Historical Address Selection and Past State Caching",
+        "rfc_specification_requirement": "MAY remember historical RTT and previously used addresses for sorting (RFC 8305 Section 4 / v3 draft -04 Section 5.3)",
         "rfc_recommended_range": "N/A",
         "observed_delay_ms": None,
         "observed_min_delay_ms": None,
         "observed_max_delay_ms": None,
-        "mandatory_floor_status": "INDETERMINATE",
-        "recommendation_alignment_status": "INDETERMINATE",
-        "overall_observation_status": "INDETERMINATE",
+        "mandatory_floor_status": "NOT_ASSESSED",
+        "recommendation_alignment_status": "NOT_ASSESSED",
+        "overall_observation_status": "NOT_ASSESSED",
         "observable_behavior_summary": (
-            "Indeterminate: Unsupported check. PS-028 testbed protocol unconditionally wipes browser user data directories "
+            "Not assessed: Unsupported check. PS-028 testbed protocol unconditionally wipes browser user data directories "
             "(--user-data-dir) after each trial to guarantee cross-trial measurement independence. Cross-session persistence "
             "and adaptive failure caching cannot be evaluated."
         ),
         "specification_context": (
-            "RFC 8305 Section 7 permits implementations to remember past failure history. Because trials are executed "
-            "with clean profiles to guarantee measurement independence, cross-trial statefulness cannot be evaluated."
+            "RFC 8305 Section 4 specifies sorting addresses, including historical RTT and previously used addresses. "
+            "draft-ietf-happy-happyeyeballs-v3-04 Section 5.3 specifies sorting destination endpoints within groups using "
+            "historical RTT and endpoint-use data. RFC 8305 Section 7 is dedicated to NAT64 and DNS64 support on IPv6-only "
+            "networks. Clean profile isolation per trial prevents cross-trial state evaluation."
         ),
     })
 
-    # Check 7: RFC 8305 §8 - Non-TCP Transport Applicability (QUIC / SCTP)
+    # Check 7: v3 draft -04 §6.1 - QUIC Transport Applicability
     assessments.append({
-        "check_id": "RFC8305-SEC8-NON-TCP-TRANSPORTS",
-        "rfc_section": "RFC 8305 Section 8",
-        "title": "Transport Applicability (SCTP, QUIC, Multipath)",
+        "check_id": "HEV3-DRAFT04-SEC6.1-QUIC",
+        "rfc_section": "draft-ietf-happy-happyeyeballs-v3-04 Section 6.1",
+        "title": "QUIC Connection Establishment Applicability",
         "scenario_id": "ALL",
-        "status": "INDETERMINATE",
-        "mandatory_status": "INDETERMINATE",
-        "recommended_status": "INDETERMINATE",
+        "status": "OUT_OF_SCOPE",
+        "mandatory_status": "OUT_OF_SCOPE",
+        "recommended_status": "OUT_OF_SCOPE",
         "sample_size": len(trials),
         "evidence_summary": (
-            "Indeterminate: Unsupported check. The PS-028 dual-stack lab specifically instruments HTTP/1.1 over TCP. "
-            "Alternative transport protocols (QUIC, SCTP) are out of testbed scope."
+            "Out of scope: Unsupported check. The PS-028 dual-stack lab specifically instruments HTTP/1.1 over TCP. "
+            "Alternative transport protocols (QUIC) are out of testbed scope and were not tested. "
+            "SCTP is not specified in Happy Eyeballs v2 (RFC 8305) or Happy Eyeballs v3 (draft-ietf-happy-happyeyeballs-v3-04)."
         ),
         "reasoning": (
-            "RFC 8305 Section 8 discusses Happy Eyeballs across various transport protocols. "
-            "The current testbed evaluates standard TCP socket connections."
+            "draft-ietf-happy-happyeyeballs-v3-04 Section 6.1 specifies connection establishment determination for both TCP and "
+            "QUIC handshakes. RFC 8305 does not specify QUIC or non-TCP transports (RFC 8305 Section 8 is the Summary of "
+            "Configurable Values). SCTP is not specified in either RFC 8305 or draft-ietf-happy-happyeyeballs-v3-04. "
+            "Because the campaign instrumented HTTP/1.1 over TCP socket connections, QUIC evaluation is out of scope."
         ),
-        "target_parameter": "Alternative Transport Protocol Applicability",
-        "rfc_specification_requirement": "Applicability to SCTP and QUIC",
+        "target_parameter": "Alternative Transport Protocol Applicability (QUIC)",
+        "rfc_specification_requirement": "Connection establishment determination for QUIC handshakes (draft-ietf-happy-happyeyeballs-v3-04 Section 6.1)",
         "rfc_recommended_range": "N/A",
         "observed_delay_ms": None,
         "observed_min_delay_ms": None,
         "observed_max_delay_ms": None,
-        "mandatory_floor_status": "INDETERMINATE",
-        "recommendation_alignment_status": "INDETERMINATE",
-        "overall_observation_status": "INDETERMINATE",
+        "mandatory_floor_status": "OUT_OF_SCOPE",
+        "recommendation_alignment_status": "OUT_OF_SCOPE",
+        "overall_observation_status": "OUT_OF_SCOPE",
         "observable_behavior_summary": (
-            "Indeterminate: Unsupported check. The PS-028 dual-stack lab specifically instruments HTTP/1.1 over TCP. "
-            "Alternative transport protocols (QUIC, SCTP) are out of testbed scope."
+            "Out of scope: Unsupported check. The PS-028 dual-stack lab specifically instruments HTTP/1.1 over TCP. "
+            "Alternative transport protocols (QUIC) are out of testbed scope and were not tested. "
+            "SCTP is not specified in Happy Eyeballs v2 (RFC 8305) or Happy Eyeballs v3 (draft-ietf-happy-happyeyeballs-v3-04)."
         ),
         "specification_context": (
-            "RFC 8305 Section 8 discusses Happy Eyeballs across various transport protocols. "
-            "The current testbed evaluates standard TCP socket connections."
+            "draft-ietf-happy-happyeyeballs-v3-04 Section 6.1 specifies connection establishment determination for both TCP and "
+            "QUIC handshakes. RFC 8305 Section 8 provides a Summary of Configurable Values and does not specify alternative transports. "
+            "SCTP is not specified in either document. Untested protocols are out of testbed scope."
         ),
     })
 
@@ -2981,30 +3013,33 @@ def format_terminal_report(report: Dict[str, Any]) -> str:
 
     # 2. RFC 8305 Assessment Table
     lines.append("\n[EVIDENCE-BASED RFC 8305 ASSESSMENT]")
-    rfc_fmt = "{:<32} {:<6} {:<22} {:<42}"
+    rfc_fmt = "{:<36} {:<6} {:<30} {:<42}"
     lines.append(rfc_fmt.format("Check ID", "Scen", "Status", "Observable Evidence Summary"))
-    lines.append("-" * 105)
+    lines.append("-" * 120)
 
     for a in report.get("rfc8305_assessment", []):
-        cid = a.get("check_id", "")[:32]
+        cid = a.get("check_id", "")[:36]
         sc = a.get("scenario_id", "")[:6]
         st = a.get("status", "")
         # Color coding in terminal if ANSI supported
-        if st in ("OBSERVED_CONFORMANCE", "COMPLIANT"):
-            st_str = "\033[1;32mOBSERVED_CONFORMANCE\033[0m"
-            raw_len = len("OBSERVED_CONFORMANCE")
-        elif st in ("OBSERVED_DEVIATION", "DEVIATION", "NON_COMPLIANT"):
-            st_str = "\033[1;33mOBSERVED_DEVIATION\033[0m"
-            raw_len = len("OBSERVED_DEVIATION")
+        if st in ("OBSERVED_BEHAVIOR", "OBSERVED_CONFORMANCE", "COMPLIANT"):
+            st_str = f"\033[1;32m{st}\033[0m"
+            raw_len = len(st)
+        elif st in ("POTENTIAL_CRITERION_MISMATCH", "OBSERVED_DEVIATION", "DEVIATION", "NON_COMPLIANT"):
+            st_str = f"\033[1;33m{st}\033[0m"
+            raw_len = len(st)
+        elif st == "OUT_OF_SCOPE":
+            st_str = f"\033[1;35m{st}\033[0m"
+            raw_len = len(st)
         else:
-            st_str = "\033[1;34mINDETERMINATE\033[0m"
-            raw_len = len("INDETERMINATE")
+            st_str = f"\033[1;34m{st}\033[0m"
+            raw_len = len(st)
 
-        padding = " " * max(0, 22 - raw_len)
+        padding = " " * max(0, 30 - raw_len)
         ev = a.get("evidence_summary", "")
         if len(ev) > 65:
             ev = ev[:62] + "..."
-        lines.append(f"{cid:<32} {sc:<6} {st_str}{padding} {ev}")
+        lines.append(f"{cid:<36} {sc:<6} {st_str}{padding} {ev}")
 
     # 3. Exclusions
     excl = report.get("exclusions", [])

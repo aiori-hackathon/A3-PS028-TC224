@@ -391,26 +391,140 @@ class TestC2AdversarialTimelineChallenge(unittest.TestCase):
             self.assertEqual(types, ["TRIAL_START", "TRIAL_END"])
 
     def test_5_2_synthetic_missing_telemetry_and_corruptions(self):
-        """Adversarial stress harness: handle missing/corrupted files gracefully without crashing."""
+        """Adversarial stress harness: handle missing/corrupted telemetry files and empty trials fail-closed."""
+        sample_pcap = next((CAMPAIGN_DIR / "trials").glob("*/capture.pcap"))
+        trials_dir = self.temp_dir / "trials"
+        trials_dir.mkdir(parents=True, exist_ok=True)
+
+        # ---------------------------------------------------------------------
+        # Negative Case 1: Chrome VALID_LIVE trial with corrupted NetLog JSON
+        # Must fail-closed with ValueError indicating invalid JSON.
+        # ---------------------------------------------------------------------
+        m_chrome_corrupt = {
+            "schema_version": "1.1.0",
+            "matrix_slots": [{
+                "slot_id": "slot-synth-01",
+                "browser": "google-chrome",
+                "attempts": [
+                    {"trial_id": "trial-synth-chrome-corrupt", "status": "COMPLETED", "validity": "VALID_LIVE"}
+                ],
+            }],
+        }
+        m1_path = self.temp_dir / "manifest_chrome_corrupt.json"
+        m1_path.write_text(json.dumps(m_chrome_corrupt), encoding="utf-8")
+        c1_dir = trials_dir / "trial-synth-chrome-corrupt"
+        c1_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy(sample_pcap, c1_dir / "capture.pcap")
+        (c1_dir / "result.json").write_text(json.dumps({
+            "timestamps": {
+                "start_time": "2026-10-29T20:00:00+00:00",
+                "browser_start_time": "2026-10-29T20:00:01+00:00",
+                "browser_end_time": "2026-10-29T20:00:02+00:00",
+                "end_time": "2026-10-29T20:00:03+00:00",
+            }
+        }))
+        (c1_dir / "netlog.json").write_text("{CORRUPTED SYNTAX")
+
+        with self.assertRaises(ValueError) as ctx1:
+            export_trial_timeline(
+                campaign_dir=self.temp_dir,
+                output_dir=self.temp_dir / "out1",
+                manifest_path=m1_path,
+            )
+        self.assertIn("invalid JSON in Chrome NetLog", str(ctx1.exception))
+        self.assertIn("trial-synth-chrome-corrupt", str(ctx1.exception))
+
+        # ---------------------------------------------------------------------
+        # Negative Case 2: Chrome VALID_LIVE trial with missing NetLog file
+        # Must fail-closed with FileNotFoundError indicating missing NetLog.
+        # ---------------------------------------------------------------------
+        m_chrome_missing = {
+            "schema_version": "1.1.0",
+            "matrix_slots": [{
+                "slot_id": "slot-synth-02",
+                "browser": "google-chrome",
+                "attempts": [
+                    {"trial_id": "trial-synth-chrome-missing", "status": "COMPLETED", "validity": "VALID_LIVE"}
+                ],
+            }],
+        }
+        m2_path = self.temp_dir / "manifest_chrome_missing.json"
+        m2_path.write_text(json.dumps(m_chrome_missing), encoding="utf-8")
+        c2_dir = trials_dir / "trial-synth-chrome-missing"
+        c2_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy(sample_pcap, c2_dir / "capture.pcap")
+        (c2_dir / "result.json").write_text(json.dumps({
+            "timestamps": {
+                "start_time": "2026-10-29T20:00:00+00:00",
+                "browser_start_time": "2026-10-29T20:00:01+00:00",
+                "browser_end_time": "2026-10-29T20:00:02+00:00",
+                "end_time": "2026-10-29T20:00:03+00:00",
+            }
+        }))
+
+        with self.assertRaises(FileNotFoundError) as ctx2:
+            export_trial_timeline(
+                campaign_dir=self.temp_dir,
+                output_dir=self.temp_dir / "out2",
+                manifest_path=m2_path,
+            )
+        self.assertIn("mandatory Chrome NetLog file missing", str(ctx2.exception))
+        self.assertIn("trial-synth-chrome-missing", str(ctx2.exception))
+
+        # ---------------------------------------------------------------------
+        # Negative Case 3: Firefox VALID_LIVE trial with missing telemetry log
+        # Must fail-closed with FileNotFoundError indicating missing Firefox log.
+        # ---------------------------------------------------------------------
+        m_ff_missing = {
+            "schema_version": "1.1.0",
+            "matrix_slots": [{
+                "slot_id": "slot-synth-03",
+                "browser": "firefox",
+                "attempts": [
+                    {"trial_id": "trial-synth-ff-missing", "status": "COMPLETED", "validity": "VALID_LIVE"}
+                ],
+            }],
+        }
+        m3_path = self.temp_dir / "manifest_ff_missing.json"
+        m3_path.write_text(json.dumps(m_ff_missing), encoding="utf-8")
+        f3_dir = trials_dir / "trial-synth-ff-missing"
+        f3_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy(sample_pcap, f3_dir / "capture.pcap")
+        (f3_dir / "result.json").write_text(json.dumps({
+            "timestamps": {
+                "start_time": "2026-10-29T20:00:00+00:00",
+                "browser_start_time": "2026-10-29T20:00:01+00:00",
+                "browser_end_time": "2026-10-29T20:00:02+00:00",
+                "end_time": "2026-10-29T20:00:03+00:00",
+            }
+        }))
+
+        with self.assertRaises(FileNotFoundError) as ctx3:
+            export_trial_timeline(
+                campaign_dir=self.temp_dir,
+                output_dir=self.temp_dir / "out3",
+                manifest_path=m3_path,
+            )
+        self.assertIn("mandatory Firefox telemetry log missing", str(ctx3.exception))
+        self.assertIn("trial-synth-ff-missing", str(ctx3.exception))
+
+        # ---------------------------------------------------------------------
+        # Positive / Graceful Degradation Case:
+        # - Firefox trial with mixed valid/invalid log lines (should parse valid lines)
+        # - Empty failed trial (should emit 0 events without error)
+        # ---------------------------------------------------------------------
         synth_manifest = {
             "schema_version": "1.1.0",
             "matrix_slots": [
                 {
-                    "slot_id": "slot-synth-01",
-                    "browser": "google-chrome",
-                    "attempts": [
-                        {"trial_id": "trial-synth-chrome-corrupt", "status": "COMPLETED", "validity": "VALID_LIVE"},
-                    ],
-                },
-                {
-                    "slot_id": "slot-synth-02",
+                    "slot_id": "slot-synth-04",
                     "browser": "firefox",
                     "attempts": [
                         {"trial_id": "trial-synth-ff-corrupt", "status": "COMPLETED", "validity": "VALID_LIVE"},
                     ],
                 },
                 {
-                    "slot_id": "slot-synth-03",
+                    "slot_id": "slot-synth-05",
                     "browser": "firefox",
                     "attempts": [
                         {"trial_id": "trial-synth-empty", "status": "FAILED", "validity": "MEASUREMENT_FAILURE"},
@@ -421,25 +535,9 @@ class TestC2AdversarialTimelineChallenge(unittest.TestCase):
         mpath = self.temp_dir / "campaign_manifest.json"
         mpath.write_text(json.dumps(synth_manifest), encoding="utf-8")
 
-        trials_dir = self.temp_dir / "trials"
-        trials_dir.mkdir()
-
-        # 1. Chrome trial with corrupted NetLog JSON
-        c_dir = trials_dir / "trial-synth-chrome-corrupt"
-        c_dir.mkdir()
-        (c_dir / "result.json").write_text(json.dumps({
-            "timestamps": {
-                "start_time": "2026-10-29T20:00:00+00:00",
-                "browser_start_time": "2026-10-29T20:00:01+00:00",
-                "browser_end_time": "2026-10-29T20:00:02+00:00",
-                "end_time": "2026-10-29T20:00:03+00:00",
-            }
-        }))
-        (c_dir / "netlog.json").write_text("{CORRUPTED SYNTAX")
-
-        # 2. Firefox trial with mixed valid/invalid log lines
         f_dir = trials_dir / "trial-synth-ff-corrupt"
-        f_dir.mkdir()
+        f_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy(sample_pcap, f_dir / "capture.pcap")
         (f_dir / "result.json").write_text(json.dumps({
             "timestamps": {
                 "start_time": "2026-10-29T20:00:00+00:00",
@@ -454,9 +552,8 @@ class TestC2AdversarialTimelineChallenge(unittest.TestCase):
             "ANOTHER UNTIMESTAMPED LINE\n"
         )
 
-        # 3. Completely empty failed trial directory
         e_dir = trials_dir / "trial-synth-empty"
-        e_dir.mkdir()
+        e_dir.mkdir(parents=True, exist_ok=True)
 
         out_dir = self.temp_dir / "derived"
         csv_path, prov_path = export_trial_timeline(
@@ -471,15 +568,13 @@ class TestC2AdversarialTimelineChallenge(unittest.TestCase):
         with open(csv_path, "r", encoding="utf-8") as f:
             rows = list(csv.DictReader(f))
 
-        # Chrome trial should still output harness events
-        c_events = [r for r in rows if r["trial_id"] == "trial-synth-chrome-corrupt"]
-        self.assertEqual(len(c_events), 4)
-        self.assertEqual([r["event_index"] for r in c_events], ["1", "2", "3", "4"])
-
-        # Firefox trial should output harness events + the 1 valid telemetry event
+        # Firefox trial should output harness events + PCAP events + the 1 valid telemetry event
         f_events = [r for r in rows if r["trial_id"] == "trial-synth-ff-corrupt"]
-        self.assertEqual(len(f_events), 5)
-        self.assertEqual([r["event_index"] for r in f_events], ["1", "2", "3", "4", "5"])
+        sources = {r["event_source"] for r in f_events}
+        self.assertIn("HARNESS", sources)
+        self.assertIn("PCAP", sources)
+        self.assertIn("BROWSER_TELEMETRY", sources)
+        self.assertEqual([r["event_index"] for r in f_events], [str(i) for i in range(1, len(f_events) + 1)])
         ff_tel = [r for r in f_events if r["event_source"] == "BROWSER_TELEMETRY"]
         self.assertEqual(len(ff_tel), 1)
         self.assertEqual(ff_tel[0]["event_type"], "nsHttpHandler::Init")

@@ -65,9 +65,15 @@ def load_derived_metrics() -> Dict[str, Any]:
         metrics["s5_ipv4_wins"] = 7
         metrics["s5_total_flows"] = 95
 
-    metrics["unit_tests"] = 725
+    metrics["unit_tests"] = 788
     metrics["synthetic_tests"] = 93
-    metrics["total_tests"] = 818
+    metrics["total_tests"] = 881
+    metrics["unique_tests"] = 881
+    metrics["duplicate_executions"] = 0
+    metrics["tests_passed"] = 866
+    metrics["tests_failed"] = 4
+    metrics["tests_errors"] = 11
+    metrics["focused_tests"] = 199
     metrics["historical_files_verified"] = 705
 
     return metrics
@@ -302,11 +308,11 @@ def generate_presentation_html(m: Dict[str, Any]) -> str:
       <div class="stat-card"><div class="stat-val">{m['valid_live']}</div><div class="stat-lbl">Valid Live Trials (0 Drops)</div></div>
       <div class="stat-card"><div class="stat-val">{m['direct_ipv6']} (55.0%)</div><div class="stat-lbl">Direct IPv6 Wins</div></div>
       <div class="stat-card"><div class="stat-val">{m['fallback_ipv4']} (45.0%)</div><div class="stat-lbl">IPv4 Fallback Wins</div></div>
-      <div class="stat-card"><div class="stat-val">{m['total_tests']} / 100%</div><div class="stat-lbl">Automated Tests Passing</div></div>
+      <div class="stat-card"><div class="stat-val">{m['tests_passed']}/{m['total_tests']}</div><div class="stat-lbl">Passing ({m['unique_tests']} Unique, {m['focused_tests']} 100%)</div></div>
     </div>
   </div>
   <div class="content-text" style="margin-top: 1.5mm;">
-    <strong>Core Findings:</strong> Both Google Chrome 156 and Mozilla Firefox 159 demonstrate robust dual-stack fallback under SYN blackholing (S1) and TCP RST (S2). However, under delayed AAAA DNS resolution (S6, 500 ms delay), both browsers wait for late AAAA responses rather than triggering the RFC 8305 §3 recommended 50 ms Resolution Delay fallback.
+    <strong>Core Findings:</strong> Both Google Chrome 156 and Mozilla Firefox 159 demonstrate robust dual-stack fallback under SYN blackholing (S1) and TCP RST (S2). Under delayed AAAA DNS (S6, 500 ms), both wait for late AAAA responses rather than triggering 50 ms Resolution Delay fallback. <em>Test Inventory Audit:</em> 881 unique tests discovered across repository (788 in <code>lab/</code>, 93 in <code>tests/</code>; 0 duplicate executions): 866 passed, 4 failed, 11 errors in unprivileged environment; 199 focused regression tests pass 100%.
   </div>
   <div class="slide-footer">
     <span>AIORI-3 PS-028: Happy Eyeballs Fallback Measurement</span>
@@ -378,7 +384,7 @@ def generate_presentation_html(m: Dict[str, Any]) -> str:
         <td>Defines strict 3-way handshake completion: initial SYN to primary stream client final ACK (<code>t_connect_ms</code>), superseding legacy SYN-to-SYN/ACK proxies.</td>
       </tr>
       <tr>
-        <td><strong>draft-ietf-v6ops-happy-eyeballs-v3-04</strong><br>(Pinned July 2026)</td>
+        <td><strong>draft-ietf-happy-happyeyeballs-v3-04</strong><br>(Pinned July 2026)</td>
         <td>HEv3 Evolution</td>
         <td>Pinned specification of record (Amendment A10). Extends HEv2 with SVCB/HTTPS (Type 65) record processing, QUIC racing, and multi-prefix handling.</td>
       </tr>
@@ -467,7 +473,7 @@ def generate_presentation_html(m: Dict[str, Any]) -> str:
       <tr>
         <td><strong>Connection Timing Metric</strong></td>
         <td>SYN-to-SYN/ACK interval (<code>connection_setup_time_ms</code>); deviated >1ms in 144/280 trials.</td>
-        <td>Strict RFC 9293 <code>t_connect_ms</code> (initial SYN to primary final ACK) and <code>t_setup_total_ms</code> (DNS query start to final ACK); locks initial SYN.</td>
+        <td>Strict RFC 9293 <code>t_connect_ms</code> (initial SYN to primary final ACK) and <code>t_setup_total_ms</code> (first target-host SYN across IPv4/IPv6 to primary final ACK); locks initial SYN.</td>
       </tr>
       <tr>
         <td><strong>DNS Query Correlation</strong></td>
@@ -667,7 +673,7 @@ def generate_presentation_html(m: Dict[str, Any]) -> str:
       <tr>
         <td><strong>M7 (Phase E)</strong></td>
         <td>Final Handover</td>
-        <td>PS-028 compliance matrix, offline PCAP replay demonstration tool (<code>lab/demo_replay.py</code>), pseudocode kit, 824 tests passing (100% PASS).</td>
+        <td>PS-028 compliance matrix, offline PCAP replay demonstration tool (<code>lab/demo_replay.py</code>), pseudocode kit, 881 unique tests discovered across repository (788 in lab/, 93 in tests/; 0 duplicate executions; 866 passed, 4 failed, 11 errors in unprivileged sandbox; 199 focused regression tests 100% PASS).</td>
         <td><strong style="color: #2e7d32;">READY (Owner Handover Pending)</strong></td>
       </tr>
     </tbody>
@@ -690,7 +696,7 @@ def generate_presentation_html(m: Dict[str, Any]) -> str:
     <li><strong>[RFC 9293]</strong> W. Eddy, Ed., "Transmission Control Protocol (TCP) Specification," STD 7, RFC 9293, DOI 10.17487/RFC9293, August 2022.</li>
     <li><strong>[RFC 6555]</strong> D. Wing and A. Yourtchenko, "Happy Eyeballs: Success with Dual-Stack Hosts," RFC 6555, DOI 10.17487/RFC6555, April 2012.</li>
     <li><strong>[RFC 6724]</strong> D. Thaler, Ed., R. Draves, A. Matsumoto, and T. Chown, "Default Address Selection for Internet Protocol Version 6 (IPv6)," RFC 6724, September 2012.</li>
-    <li><strong>[HEv3-Draft]</strong> T. Pauly and D. Schinazi, "Happy Eyeballs Version 3," draft-ietf-v6ops-happy-eyeballs-v3-04 (Internet-Draft of Record), July 2, 2026.</li>
+    <li><strong>[HEv3-Draft]</strong> T. Pauly and D. Schinazi, "Happy Eyeballs Version 3," draft-ietf-happy-happyeyeballs-v3-04 (Internet-Draft of Record), July 1, 2026.</li>
     <li><strong>[Sattler2025]</strong> P. Sattler, J. Zirngibl, and G. Carle, "Lazy Eye Inspection: Capturing the State of Happy Eyeballs Implementations," in <em>Proceedings of the ACM Internet Measurement Conference (IMC '25)</em>, 2025.</li>
     <li><strong>[APNIC2025]</strong> G. Huston, "Analysing the state of Happy Eyeballs implementations," APNIC Research, October 2025.</li>
   </ul>
@@ -712,7 +718,7 @@ def generate_presentation_html(m: Dict[str, Any]) -> str:
     <strong>Deliverable Status & Evidence Integrity:</strong><br>
     ✓ Phase C: 280 Valid Live Trials Reconciled & Dissected from Authentic PCAPs (0 Indeterminate Flows)<br>
     ✓ Historical Integrity: 705 Campaign Files Sealed with 100% Cryptographic SHA-256 Proof (Rule R2)<br>
-    ✓ Automated Test Suite: 824 Offline Unit & Synthetic Tier Tests Passing (100% PASS)<br>
+    ✓ Automated Test Suite: 881 Unique Tests Discovered Across lab/ and tests/ (0 Duplicate Executions; 866 Passed, 4 Failed, 11 Errors in unprivileged sandbox; 199 Focused Regression Tests 100% PASS)<br>
     ✓ Phase D Sweeps: Pre-Registered Simulation Mode (Zero Live Network/Sudo Operations Executed; Rule R1 Disclosed)
   </div>
 </div>
@@ -737,8 +743,21 @@ def build_presentation_pdf() -> int:
         f.write(html_content)
     print(f"[OK] Generated temporary presentation HTML at {HTML_TEMP}")
 
+    chrome_bin = None
+    for cand in ["/usr/bin/google-chrome", "/usr/bin/chromium", "/usr/bin/chromium-browser"]:
+        if Path(cand).is_file():
+            chrome_bin = cand
+            break
+    if not chrome_bin:
+        import shutil
+        chrome_bin = shutil.which("google-chrome") or shutil.which("chromium")
+
+    if not chrome_bin:
+        print(f"[INFO] Headless Chrome/Chromium binary not available in environment; presentation deck HTML generated and saved to {HTML_TEMP}. Preserving verified historical PDF.")
+        return 0
+
     chrome_cmd = [
-        "/usr/bin/google-chrome",
+        chrome_bin,
         "--headless=new",
         "--no-sandbox",
         "--disable-gpu",

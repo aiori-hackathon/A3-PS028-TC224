@@ -14,7 +14,14 @@
 2. **Rule R4 (Unavailable $\ne$ Zero)**: Missing, unpairable, or incomplete values MUST be represented as `null` with an explicit null reason code (e.g., `INDETERMINATE_NO_FINAL_ACK`). Null values MUST NEVER be coerced to `0.0`.
 3. **Rule R5 (Fail Closed)**: Incomplete classifications, unknown schemas, unverified process reloads, or missing evidence reject the trial fail-closed.
 4. **Amendment A4 (Capture Vantage Point)**: All packet-derived metrics are defined strictly at the **client-side capture vantage point** (`ps028-cl` namespace, interface `ps028-cl-rt`, kernel monotonic/epoch timestamping). TShark version (`4.2.2`), parser version (`1.1.0`), and dissector flags (`-o tcp.relative_sequence_numbers:FALSE`) must be recorded in evidence provenance.
-5. **Amendment A10 (Specification Pin Integrity & Status Tracking)**: The campaign's pinned specification revision of record is `draft-ietf-v6ops-happy-eyeballs-v3-04`. It remains the immutable baseline of record. A dated status check box (`Draft status check: 2026-11-11`) tracks Datatracker status without silently altering the pin. No draft is ever described as an RFC or settled standard (Rule R7).
+5. **Amendment A10 (Specification Pin Integrity & Status Tracking)**: The campaign's pinned specification revision of record is [`draft-ietf-happy-happyeyeballs-v3-04`](https://datatracker.ietf.org/doc/html/draft-ietf-happy-happyeyeballs-v3-04) (published 1 July 2026). It remains the immutable baseline of record. A dated status check tracks Datatracker status without silently altering the pin. No draft is ever described as an RFC or settled standard (Rule R7).
+
+   > [!NOTE]
+   > **Happy Eyeballs v3 Draft Status and Historical Baseline Notice (as of 13 November 2026)**
+   >
+   > - **Historical Experimental Baseline**: The October 2026 PS-028 campaign used [`draft-ietf-happy-happyeyeballs-v3-04`](https://datatracker.ietf.org/doc/html/draft-ietf-happy-happyeyeballs-v3-04), published on 1 July 2026. The campaign's methodology and historical RFC/draft assessments retain that revision as their immutable experimental reference.
+   > - **Subsequent Revision**: On 2 November 2026, the IETF published [`draft-ietf-happy-happyeyeballs-v3-05`](https://datatracker.ietf.org/doc/html/draft-ietf-happy-happyeyeballs-v3-05). As of 13 November 2026, this revision is an active Internet-Draft in the HAPPY Working Group, with intended status Standards Track (IESG state: I-D Exists, expiring on 6 May 2027). It is not a published RFC or finalized standard.
+   > - **Scope Limitation**: The October 2026 campaign predates publication of revision -05. Its historical observations and assessment results have not been evaluated or reclassified against revision -05. Revision -05 does not retroactively alter or invalidate the empirical findings obtained under revision -04.
 6. **Amendment A13 (Determinism & Sibling Provenance Files)**: All derived data files (`attempts.csv`, `connection_attempts.csv`, `trial_timeline.csv`) must be deterministic and idempotent (stable sort, fixed float formatting, `\n` line endings, and **no generation timestamps inside data files**). All execution provenance (timestamps, git commit, host OS, tool versions) must be stored in sibling files named `<filename>.provenance.json`.
 
 ---
@@ -47,7 +54,7 @@ Client (ps028-cl)                                Server (ps028-sv)
   $$t_{\text{setup\_total}} = \left( t_{\text{final\_ack, primary}} - \min_{f \in \{\text{IPv4}, \text{IPv6}\}} \left( t_{\text{first\_syn, } f} \right) \right) \times 1000$$
 - **Significance**:
   - In direct IPv6 connections (S0, S3), $t_{\text{setup\_total\_ms}} \approx t_{\text{connect\_ms}}$.
-  - In fallback scenarios (S1, S2, S4, S5), $t_{\text{connect\_ms}}$ of the winning IPv4 stream captures only the IPv4 handshake ($\sim 20\text{ ms}$), hiding the user-visible stall caused by Connection Attempt Delay (CAD). $t_{\text{setup\_total\_ms}}$ includes the entire fallback delay and serves as the headline connection setup metric for fallback cost evaluations.
+  - In fallback scenarios (S1, S2, S4, S5), $t_{\text{connect\_ms}}$ of the winning IPv4 stream captures only the IPv4 handshake ($\sim 20\text{ ms}$), omitting the initial failed/delayed IPv6 attempt and Connection Attempt Delay (CAD). $t_{\text{setup\_total\_ms}}$ includes the entire transport fallback setup interval before the primary stream completes and serves as the headline connection setup metric for fallback cost evaluations (without measuring application response time or page rendering).
 - **Invariants**:
   - If no primary stream establishes, $t_{\text{setup\_total\_ms}} = \text{null}$.
 

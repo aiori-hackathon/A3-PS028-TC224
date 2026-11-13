@@ -18,10 +18,19 @@ T10: Fail-Closed on Corrupt Manifest or Schema (Rule R5)
 import csv
 import hashlib
 import json
+import math
 from pathlib import Path
+import re
 import subprocess
 import tempfile
+from typing import Optional
 import unittest
+
+from lab.export_campaign_evidence import (
+    EventSource,
+    export_trial_timeline,
+    validate_campaign_timeline,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CAMPAIGN_ROOT = REPO_ROOT / "lab" / "campaigns" / "ps028-a10-live-20261030-01"
@@ -196,7 +205,18 @@ class TestExportCampaignEvidence(unittest.TestCase):
     # T07: Trial Timeline Event Provenance
     # --------------------------------------------------------------------------
     def test_export_trial_timeline_event_provenance(self):
-        """Amendment A9: trial_timeline.csv events must have explicit event_source enum."""
+        """
+        Amendment A9 & Rule R5: trial_timeline.csv full campaign validation across all rows.
+        Replaces 500-row spot check with complete campaign validation:
+        1. All 280 authoritative valid trial IDs represented.
+        2. No valid trial is missing from the timeline.
+        3. Every valid trial has HARNESS, PCAP and BROWSER_TELEMETRY events.
+        4. Every timeline row has a valid event source enum.
+        5. Every timeline row has a valid numeric timestamp.
+        6. No event has an invalid or unknown trial ID.
+        7. Event indexes are deterministic and chronological within each trial.
+        8. The valid-trial and exclusion event counts reconcile with the total.
+        """
         timeline_csv = DERIVED_DIR / "trial_timeline.csv"
         self.assertTrue(timeline_csv.is_file(), f"Missing export: {timeline_csv}")
 
@@ -211,9 +231,264 @@ class TestExportCampaignEvidence(unittest.TestCase):
             self.assertEqual(reader.fieldnames, expected_header)
             rows = list(reader)
 
-        self.assertGreater(len(rows), 20000, f"Expected >20000 timeline events, got {len(rows)}")
-        for i, row in enumerate(rows[:500]):  # Spot check first 500
-            self.assertIn(row["event_source"], allowed_sources, f"Invalid event_source at row {i}: {row['event_source']}")
+        manifest_file = CAMPAIGN_ROOT / "campaign_manifest.json"
+        with open(manifest_file, "r", encoding="utf-8") as f:
+            manifest = json.load(f)
+
+        # 1 & 2. Authoritative valid live trials from manifest
+        valid_trial_ids = set()
+        exclusion_trial_ids = set()
+        all_manifest_trial_ids = set()
+
+        for slot in manifest.get("matrix_slots", []):
+            for att in slot.get("attempts", []):
+                tid = att["trial_id"]
+                all_manifest_trial_ids.add(tid)
+                st = att.get("status")
+                val = att.get("validity")
+                if st == "COMPLETED" and val == "VALID_LIVE":
+                    valid_trial_ids.add(tid)
+                elif val == "CLEANUP_FAILURE":
+                    exclusion_trial_ids.add(tid)
+
+        self.assertEqual(len(valid_trial_ids), 280, f"Expected 280 valid trial IDs, got {len(valid_trial_ids)}")
+        self.assertEqual(len(exclusion_trial_ids), 2, f"Expected 2 exclusion trial IDs, got {len(exclusion_trial_ids)}")
+
+        # Group timeline rows by trial
+        rows_by_trial: dict = {}
+        for idx, row in enumerate(rows):
+            tid = row["trial_id"]
+            # 6. No event has an invalid or unknown trial ID
+            self.assertIn(tid, all_manifest_trial_ids, f"Row {idx} has unknown trial_id {tid}")
+            rows_by_trial.setdefault(tid, []).append(row)
+
+            # 4. Valid event source
+            self.assertIn(row["event_source"], allowed_sources, f"Invalid event_source at row {idx}: {row['event_source']}")
+
+            # 5. Valid numeric timestamp
+            try:
+                ts = float(row["event_timestamp_epoch"])
+                self.assertTrue(math.isfinite(ts), f"Non-finite timestamp at row {idx}")
+            except (ValueError, TypeError):
+                self.fail(f"Invalid timestamp at row {idx}: {row['event_timestamp_epoch']}")
+
+            # Event type must be non-empty
+            self.assertTrue(bool(row["event_type"].strip()), f"Empty event_type at row {idx}")
+
+            # PCAP events must have valid sha256
+            if row["event_source"] == "PCAP":
+                self.assertTrue(bool(re.fullmatch(r"[0-9a-fA-F]{64}", row["pcap_sha256"])), f"Invalid pcap_sha256 at row {idx}")
+
+        # 1. All 280 authoritative valid trial IDs are represented
+        # 2. No valid trial is missing from the timeline
+        self.assertEqual(set(rows_by_trial.keys()) & valid_trial_ids, valid_trial_ids)
+        self.assertEqual(len(rows_by_trial), 282)
+
+        # 3. Every valid trial has HARNESS, PCAP, and BROWSER_TELEMETRY events
+        for tid in valid_trial_ids:
+            trial_sources = {r["event_source"] for r in rows_by_trial[tid]}
+            self.assertEqual(
+                trial_sources,
+                allowed_sources,
+                f"Valid trial {tid} missing mandatory event sources: {allowed_sources - trial_sources}",
+            )
+
+        # 7. Event indexes are deterministic and chronological within each trial
+        for tid, t_rows in rows_by_trial.items():
+            prev_ts = -1.0
+            for seq, r in enumerate(t_rows, start=1):
+                self.assertEqual(int(r["event_index"]), seq, f"Trial {tid} non-consecutive event_index at {seq}")
+                cur_ts = float(r["event_timestamp_epoch"])
+                self.assertGreaterEqual(cur_ts, prev_ts, f"Trial {tid} chronology inversion at index {seq}")
+                prev_ts = cur_ts
+
+        # 8. Valid-trial and exclusion event counts reconcile with total
+        valid_trial_events = sum(len(rows_by_trial[tid]) for tid in valid_trial_ids)
+        exclusion_events = sum(len(rows_by_trial[tid]) for tid in exclusion_trial_ids)
+        self.assertEqual(valid_trial_events, 28326, f"Valid trial events {valid_trial_events} != 28326")
+        self.assertEqual(exclusion_events, 4, f"Exclusion events {exclusion_events} != 4")
+        self.assertEqual(len(rows), 28330, f"Total timeline rows {len(rows)} != 28330")
+        self.assertEqual(valid_trial_events + exclusion_events, len(rows))
+
+    def _create_synthetic_trial(
+        self,
+        tmp_path: Path,
+        browser: str = "google-chrome",
+        status: str = "COMPLETED",
+        validity: str = "VALID_LIVE",
+        include_result: bool = True,
+        result_content: Optional[str] = None,
+        include_pcap: bool = True,
+        include_telemetry: bool = True,
+        include_failed_record: bool = True,
+    ):
+        """Helper to create minimal synthetic trial fixture without mutating historical data."""
+        campaign_dir = tmp_path / "campaign"
+        trials_dir = campaign_dir / "trials"
+        trial_id = "trial-synth-001"
+        tdir = trials_dir / trial_id
+        tdir.mkdir(parents=True, exist_ok=True)
+
+        manifest = {
+            "schema_version": "1.0.0",
+            "campaign_id": "ps028-synth-test",
+            "matrix_slots": [
+                {
+                    "slot_id": "slot-001",
+                    "slot_index": 1,
+                    "scenario_id": "S0",
+                    "browser": browser,
+                    "repetition": 1,
+                    "status": status,
+                    "attempts": [
+                        {
+                            "attempt_number": 1,
+                            "trial_id": trial_id,
+                            "status": status,
+                            "validity": validity,
+                        }
+                    ],
+                }
+            ],
+        }
+        manifest_file = campaign_dir / "campaign_manifest.json"
+        manifest_file.write_text(json.dumps(manifest), encoding="utf-8")
+
+        if validity == "VALID_LIVE":
+            if include_result:
+                rfile = tdir / "result.json"
+                if result_content is not None:
+                    rfile.write_text(result_content, encoding="utf-8")
+                else:
+                    rdata = {
+                        "schema_version": "1.0.0",
+                        "trial_id": trial_id,
+                        "browser": {"name": browser},
+                        "timestamps": {
+                            "start_time": "2026-10-29T20:54:25.657889+00:00",
+                            "scenario_applied_time": "2026-10-29T20:54:30.654577+00:00",
+                            "capture_start_time": "2026-10-29T20:54:30.654591+00:00",
+                            "browser_start_time": "2026-10-29T20:54:30.915968+00:00",
+                            "browser_end_time": "2026-10-29T20:54:32.346343+00:00",
+                            "capture_stop_time": "2026-10-29T20:54:33.222140+00:00",
+                            "baseline_restored_time": "2026-10-29T20:54:33.398354+00:00",
+                            "end_time": "2026-10-29T20:54:37.871666+00:00",
+                        },
+                    }
+                    rfile.write_text(json.dumps(rdata), encoding="utf-8")
+
+            if include_pcap:
+                (tdir / "capture.pcap").write_bytes(b"\xd4\xc3\xb2\xa1\x02\x00\x04\x00" + b"\x00" * 16)
+
+            if include_telemetry:
+                if browser == "google-chrome":
+                    netlog = {
+                        "constants": {"timeTickOffset": 1793307270000, "logEventTypes": {"URL_REQUEST_START_JOB": 1}},
+                        "events": [{"type": 1, "time": 100, "phase": 1}],
+                    }
+                    (tdir / "netlog.json").write_text(json.dumps(netlog), encoding="utf-8")
+                elif browser == "firefox":
+                    log_text = "2026-10-29 20:59:30.209532 UTC - nsHttpHandler::Init\n"
+                    (tdir / "browser_telemetry.log").write_text(log_text, encoding="utf-8")
+        elif validity == "CLEANUP_FAILURE":
+            if include_failed_record:
+                failed_data = {
+                    "attempt_number": 1,
+                    "trial_id": trial_id,
+                    "status": "FAILED",
+                    "validity": "CLEANUP_FAILURE",
+                    "timestamps": {
+                        "start_time": "2026-10-29T20:54:42.092344+00:00",
+                        "end_time": "2026-10-29T20:54:46.246842+00:00",
+                    },
+                }
+                (tdir / "failed_attempt_record.json").write_text(json.dumps(failed_data), encoding="utf-8")
+
+        return campaign_dir, trial_id, tdir, manifest_file
+
+    def test_timeline_fail_closed_missing_result_json(self):
+        """Requirement 9: Missing valid trial result.json causes explicit failure."""
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            cdir, tid, tdir, _ = self._create_synthetic_trial(tmp, include_result=False)
+            dissections_cache = {tid: {"dns_transactions": [{"query_time": 1793307271.0, "query_frame": 1, "qname": "test.he.test", "qtype": "A", "transport": "UDP"}], "tcp_streams": {}}}
+            with self.assertRaises(FileNotFoundError) as ctx:
+                export_trial_timeline(campaign_dir=cdir, output_dir=tmp / "out", dissections_cache=dissections_cache)
+            self.assertIn(tid, str(ctx.exception))
+            self.assertIn("result.json", str(ctx.exception))
+
+    def test_timeline_fail_closed_missing_capture_pcap(self):
+        """Requirement 10: Missing valid trial capture.pcap causes explicit failure."""
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            cdir, tid, tdir, _ = self._create_synthetic_trial(tmp, include_pcap=False)
+            with self.assertRaises(FileNotFoundError) as ctx:
+                export_trial_timeline(campaign_dir=cdir, output_dir=tmp / "out")
+            self.assertIn(tid, str(ctx.exception))
+            self.assertIn("capture.pcap", str(ctx.exception))
+
+    def test_timeline_fail_closed_missing_cleanup_failure_record(self):
+        """Requirement 11: Missing required cleanup-failure record causes explicit failure."""
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            cdir, tid, tdir, _ = self._create_synthetic_trial(
+                tmp, status="FAILED", validity="CLEANUP_FAILURE", include_failed_record=False
+            )
+            with self.assertRaises(FileNotFoundError) as ctx:
+                export_trial_timeline(campaign_dir=cdir, output_dir=tmp / "out")
+            self.assertIn(tid, str(ctx.exception))
+            self.assertIn("failed_attempt_record.json", str(ctx.exception))
+
+    def test_timeline_fail_closed_invalid_result_json(self):
+        """Requirement 12: Invalid JSON in a mandatory result file causes explicit failure."""
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            cdir, tid, tdir, _ = self._create_synthetic_trial(
+                tmp, include_result=True, result_content="{bad_json_not_closed"
+            )
+            with self.assertRaises(ValueError) as ctx:
+                export_trial_timeline(campaign_dir=cdir, output_dir=tmp / "out")
+            self.assertIn(tid, str(ctx.exception))
+            self.assertIn("result.json", str(ctx.exception))
+
+    def test_timeline_fail_closed_missing_browser_telemetry(self):
+        """Requirement 13: Missing browser telemetry input causes explicit failure rather than silent omission."""
+        # Case A: Chrome missing netlog.json
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            cdir, tid, tdir, _ = self._create_synthetic_trial(
+                tmp, browser="google-chrome", include_telemetry=False
+            )
+            dissections_cache = {tid: {"dns_transactions": [{"query_time": 1793307271.0, "query_frame": 1, "qname": "test.he.test", "qtype": "A", "transport": "UDP"}], "tcp_streams": {}}}
+            with self.assertRaises(FileNotFoundError) as ctx:
+                export_trial_timeline(campaign_dir=cdir, output_dir=tmp / "out", dissections_cache=dissections_cache)
+            self.assertIn(tid, str(ctx.exception))
+            self.assertIn("netlog.json", str(ctx.exception))
+
+        # Case B: Firefox missing browser_telemetry.log
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            cdir, tid, tdir, _ = self._create_synthetic_trial(
+                tmp, browser="firefox", include_telemetry=False
+            )
+            dissections_cache = {tid: {"dns_transactions": [{"query_time": 1793307271.0, "query_frame": 1, "qname": "test.he.test", "qtype": "A", "transport": "UDP"}], "tcp_streams": {}}}
+            with self.assertRaises(FileNotFoundError) as ctx:
+                export_trial_timeline(campaign_dir=cdir, output_dir=tmp / "out", dissections_cache=dissections_cache)
+            self.assertIn(tid, str(ctx.exception))
+            self.assertIn("browser_telemetry.log", str(ctx.exception))
+
+    def test_timeline_fail_closed_missing_event_source_coverage(self):
+        """Requirement 3 & fail-closed: Missing any required source raises explicit error."""
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            cdir, tid, tdir, _ = self._create_synthetic_trial(tmp, browser="google-chrome", include_telemetry=True)
+            # Make netlog.json valid JSON but empty events list -> no BROWSER_TELEMETRY events generated
+            (tdir / "netlog.json").write_text('{"constants": {}, "events": []}', encoding="utf-8")
+            dissections_cache = {tid: {"dns_transactions": [{"query_time": 1793307271.0, "query_frame": 1, "qname": "test.he.test", "qtype": "A", "transport": "UDP"}], "tcp_streams": {}}}
+            with self.assertRaises(ValueError) as ctx:
+                export_trial_timeline(campaign_dir=cdir, output_dir=tmp / "out", dissections_cache=dissections_cache)
+            self.assertIn(tid, str(ctx.exception))
+            self.assertIn("BROWSER_TELEMETRY", str(ctx.exception))
 
     # --------------------------------------------------------------------------
     # T08: Determinism & Byte Reproducibility

@@ -693,12 +693,12 @@ def build_demonstration_bundle(
             total_events += 1
             tid = r["trial_id"]
             timeline_by_trial.setdefault(tid, []).append({
-                "timestamp": parse_float_or_none(r.get("timestamp")),
-                "relative_ms": parse_float_or_none(r.get("relative_ms")),
-                "source": r.get("source"),
+                "timestamp": parse_float_or_none(r.get("event_timestamp_epoch")),
+                "relative_ms": parse_float_or_none(r.get("relative_ms")),  # Retain as null; Phase C CSV provides absolute epoch timestamps
+                "source": r.get("event_source") or None,
                 "event_type": r.get("event_type"),
-                "family": r.get("family") or None,
-                "stream_id": r.get("stream_id") or None,
+                "family": r.get("address_family") or None,
+                "stream_id": r.get("tcp_stream") or None,
                 "details": r.get("details"),
             })
 

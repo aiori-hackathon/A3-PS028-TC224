@@ -1,10 +1,10 @@
 {
   "target_file": "rfc8305_assessment.csv",
-  "sha256": "f1f639aa6d0c96928be7f4cc49d45db44eb63b6af70b1945cdd1febca255d9e7",
+  "sha256": "c6216eccb1c563eec48d020119e08ccf17f0cae971cac6e7b8fa70c7f389e39f",
   "row_count": 7,
   "generated_by_command": "python3 lab/export_campaign_evidence.py",
-  "git_commit": "7c6ab23c2a378bbc8556fcc15f5911f626502576",
-  "git_branch": "regional/ps028-phase-cd",
+  "git_commit": "bba2655f7996557df24f4f38a78b2a7e17915cfc",
+  "git_branch": "fix/phase-e-bundle-timeline-mapping",
   "python_version": "3.12.3",
   "tshark_version": "4.2.2",
   "tcpdump_version": "4.99.4",

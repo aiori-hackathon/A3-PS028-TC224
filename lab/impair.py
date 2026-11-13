@@ -1010,12 +1010,17 @@ def save_state(scenario_id: str, metadata: Dict[str, Any], dry_run: bool = False
         log_info(f"[DRY-RUN] Would record active scenario '{scenario_id}' in {STATE_FILE.name}")
         return
 
-    tmp_file = SCRIPT_DIR / f".impair_state.json.tmp.{os.getpid()}"
-    with open(tmp_file, "w", encoding="utf-8") as f:
-        json.dump(state, f, indent=2)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp_file, STATE_FILE)
+    target_dir = STATE_FILE.parent
+    tmp_file = target_dir / f".impair_state.json.tmp.{os.getpid()}"
+    try:
+        with open(tmp_file, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_file, STATE_FILE)
+    finally:
+        if tmp_file.is_file():
+            tmp_file.unlink(missing_ok=True)
 
 
 def get_current_state() -> Optional[Dict[str, Any]]:

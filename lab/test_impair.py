@@ -599,6 +599,22 @@ class TestControllerLifecycle(unittest.TestCase):
             self.assertIn("--a-delay", kwargs["extra_args"])
             self.assertIn("--aaaa-delay", kwargs["extra_args"])
 
+    def test_save_state_cross_device_atomic_portability(self):
+        """save_state creates temp file in STATE_FILE.parent and replaces atomically across distinct paths."""
+        from pathlib import Path
+        isolated_dir = Path(self.temp_dir) / "isolated_cross_device"
+        isolated_dir.mkdir()
+        isolated_state = isolated_dir / ".impair_state.json"
+        with patch.object(impair, "STATE_FILE", isolated_state):
+            impair.save_state("S1", {"name": "test_s1", "type": "blackhole"}, dry_run=False)
+            self.assertTrue(isolated_state.is_file())
+            leftover_temp = list(isolated_dir.glob(".impair_state.json.tmp.*"))
+            self.assertEqual(len(leftover_temp), 0)
+            with open(isolated_state, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            self.assertEqual(data["active_scenario"], "S1")
+            self.assertEqual(data["metadata"]["name"], "test_s1")
+
 
 class TestSelfTestBaseline(unittest.TestCase):
     """Test self-test-baseline validation logic."""

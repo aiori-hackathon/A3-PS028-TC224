@@ -1,0 +1,20 @@
+---
+import PageLayout from "@/layouts/main.astro";
+import Header from "@/components/header.astro";
+import { EvidenceExplorer } from "@/components/evidence/evidence-explorer.tsx";
+---
+
+<PageLayout title="Historical Evidence Explorer - Happy Eyeballs Webtester">
+  <Header titleLine1="Historical Evidence" titleLine2="Campaign Explorer">
+    <p>
+      Offline replay and empirical evidence verification for the October 2026 PS-028 Happy Eyeballs experimental campaign (<code>ps028-a10-live-20261030-01</code>).
+    </p>
+    <p>
+      Inspects 280 valid live trials across scenarios S0–S6, 765 connection attempts, and 28,330 synchronized timeline events with bit-for-bit SHA-256 cryptographic provenance.
+    </p>
+  </Header>
+
+  <div class="mt-8">
+    <EvidenceExplorer client:load />
+  </div>
+</PageLayout>
