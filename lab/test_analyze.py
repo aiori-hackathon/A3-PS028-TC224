@@ -798,12 +798,12 @@ class TestRFC8305Assessment(unittest.TestCase):
         self.assertEqual(check["mandatory_status"], "POTENTIAL_CRITERION_MISMATCH")
         self.assertEqual(check["recommended_status"], "OBSERVED_BEHAVIOR")
 
-        # IPv6 won (didn't switch to IPv4 despite 600ms RTT, no subsequent attempt) -> POTENTIAL_CRITERION_MISMATCH at recommendation level, NOT_APPLICABLE for mandatory floor
-        t_s4_nowin = _dict_to_evidence(_create_synthetic_trial(scenario_id="S4", winning_family="IPv6", cad_ms=None))
+        # IPv6 won (no subsequent IPv4 attempt observed) -> NOT_ASSESSED for timing, NOT_APPLICABLE for mandatory floor
+        t_s4_nowin = _dict_to_evidence(_create_synthetic_trial(scenario_id="S4", winning_family="IPv6", cad_ms=None, ipv4_attempt=False))
         check = [c for c in analyze.assess_rfc8305_conformance([t_s4_nowin]) if c["scenario_id"] == "S4"][0]
-        self.assertEqual(check["status"], "POTENTIAL_CRITERION_MISMATCH")
+        self.assertEqual(check["status"], "NOT_ASSESSED")
         self.assertEqual(check["mandatory_status"], "NOT_APPLICABLE")
-        self.assertEqual(check["recommended_status"], "POTENTIAL_CRITERION_MISMATCH")
+        self.assertEqual(check["recommended_status"], "NOT_ASSESSED")
 
     def test_s6_a_preceding_aaaa_sub_50ms(self):
         """1. S6 A response preceding AAAA by less than 50 ms -> OBSERVED_BEHAVIOR."""
@@ -915,14 +915,16 @@ class TestRFC8305Assessment(unittest.TestCase):
         # 1 Firefox IPv6 win
         trials.append(_dict_to_evidence(_create_synthetic_trial(
             trial_id="trial-20261029222109-5c74c26a", browser_name="firefox", scenario_id="S4",
-            winning_family="IPv6", cad_ms=None
+            winning_family="IPv6", cad_ms=None, ipv4_attempt=False
         )))
         assessment = analyze.assess_rfc8305_conformance(trials)
         check = [c for c in assessment if c["scenario_id"] == "S4"][0]
         self.assertEqual(check["sample_size"], 40)
-        self.assertEqual(check["status"], "POTENTIAL_CRITERION_MISMATCH")
+        self.assertEqual(check["status"], "OBSERVED_BEHAVIOR")
         self.assertEqual(check["mandatory_status"], "OBSERVED_BEHAVIOR")
-        self.assertEqual(check["recommended_status"], "POTENTIAL_CRITERION_MISMATCH")
+        self.assertEqual(check["recommended_status"], "OBSERVED_BEHAVIOR")
+        self.assertEqual(check["recommendation_alignment_status"], "ALIGNED")
+        self.assertEqual(check["mandatory_floor_status"], "MEETS_MANDATORY_FLOOR")
         self.assertIn("39/40", check["evidence_summary"])
         self.assertIn("Google Chrome: 20/20", check["evidence_summary"])
         self.assertIn("Firefox: 19/20", check["evidence_summary"])
@@ -943,7 +945,7 @@ class TestRFC8305Assessment(unittest.TestCase):
             )))
         trials.append(_dict_to_evidence(_create_synthetic_trial(
             trial_id="t-s4-f-v6", browser_name="firefox", scenario_id="S4",
-            winning_family="IPv6", cad_ms=None
+            winning_family="IPv6", cad_ms=None, ipv4_attempt=False
         )))
 
         # Chrome alone: 5/5 IPv4 wins -> OBSERVED_BEHAVIOR
@@ -952,13 +954,15 @@ class TestRFC8305Assessment(unittest.TestCase):
         self.assertEqual(c_check["status"], "OBSERVED_BEHAVIOR")
         self.assertEqual(c_check["mandatory_status"], "OBSERVED_BEHAVIOR")
         self.assertEqual(c_check["recommended_status"], "OBSERVED_BEHAVIOR")
+        self.assertEqual(c_check["recommendation_alignment_status"], "ALIGNED")
 
-        # Firefox alone: 4/5 IPv4 wins + 1 IPv6 win -> POTENTIAL_CRITERION_MISMATCH
+        # Firefox alone: 4/5 IPv4 wins + 1 IPv6 win -> OBSERVED_BEHAVIOR (timing aligned)
         firefox_assessment = analyze.assess_rfc8305_conformance(trials, browser="firefox")
         f_check = [c for c in firefox_assessment if c["scenario_id"] == "S4"][0]
-        self.assertEqual(f_check["status"], "POTENTIAL_CRITERION_MISMATCH")
+        self.assertEqual(f_check["status"], "OBSERVED_BEHAVIOR")
         self.assertEqual(f_check["mandatory_status"], "OBSERVED_BEHAVIOR")
-        self.assertEqual(f_check["recommended_status"], "POTENTIAL_CRITERION_MISMATCH")
+        self.assertEqual(f_check["recommended_status"], "OBSERVED_BEHAVIOR")
+        self.assertEqual(f_check["recommendation_alignment_status"], "ALIGNED")
 
     def test_s4_mandatory_10ms_vs_recommended_100ms_boundary(self):
         """9. S4 mandatory 10 ms boundary versus recommended 100 ms boundary."""
@@ -1271,15 +1275,16 @@ class TestRFC8305Assessment(unittest.TestCase):
     # --------------------------------------------------------------------------
 
     def test_s4_direct_ipv6_without_subsequent_attempt_mandatory_not_applicable(self):
-        """S4 1: One direct IPv6 trial without a subsequent attempt -> mandatory NOT_APPLICABLE."""
+        """S4 1: One direct IPv6 trial without a subsequent attempt -> mandatory NOT_APPLICABLE, recommended NOT_ASSESSED."""
         t = _dict_to_evidence(_create_synthetic_trial(
             scenario_id="S4", winning_family="IPv6", cad_ms=None, ipv4_attempt=False
         ))
         check = [c for c in analyze.assess_rfc8305_conformance([t]) if c["scenario_id"] == "S4"][0]
-        self.assertEqual(check["status"], "POTENTIAL_CRITERION_MISMATCH")
+        self.assertEqual(check["status"], "NOT_ASSESSED")
         self.assertEqual(check["mandatory_status"], "NOT_APPLICABLE")
-        self.assertEqual(check["recommended_status"], "POTENTIAL_CRITERION_MISMATCH")
-        self.assertIn("NOT_APPLICABLE", check["evidence_summary"])
+        self.assertEqual(check["recommended_status"], "NOT_ASSESSED")
+        self.assertEqual(check["recommendation_alignment_status"], "NOT_ASSESSED")
+        self.assertIn("no connection attempt delay measurements available", check["evidence_summary"])
 
     def test_s4_ipv4_attempt_with_missing_cad(self):
         """S4 2: An IPv4 attempt with missing CAD is indeterminate unless confirmed deviation exists."""
@@ -1292,11 +1297,11 @@ class TestRFC8305Assessment(unittest.TestCase):
         self.assertEqual(check1["mandatory_status"], "NOT_ASSESSED")
         self.assertEqual(check1["recommended_status"], "NOT_ASSESSED")
 
-        # Missing CAD combined with an independently confirmed deviation (IPv6 win)
-        t_v6_dev = _dict_to_evidence(_create_synthetic_trial(
-            trial_id="t-s4-v6", scenario_id="S4", winning_family="IPv6", cad_ms=None, ipv4_attempt=False
+        # Missing CAD combined with an independently confirmed timing deviation (CAD = 50ms)
+        t_dev = _dict_to_evidence(_create_synthetic_trial(
+            trial_id="t-s4-dev", scenario_id="S4", winning_family="IPv4", cad_ms=50.0, ipv4_attempt=True
         ))
-        check2 = [c for c in analyze.assess_rfc8305_conformance([t_missing_cad, t_v6_dev]) if c["scenario_id"] == "S4"][0]
+        check2 = [c for c in analyze.assess_rfc8305_conformance([t_missing_cad, t_dev]) if c["scenario_id"] == "S4"][0]
         self.assertEqual(check2["status"], "POTENTIAL_CRITERION_MISMATCH")
         self.assertEqual(check2["mandatory_status"], "NOT_ASSESSED")
         self.assertEqual(check2["recommended_status"], "POTENTIAL_CRITERION_MISMATCH")
@@ -1415,13 +1420,14 @@ class TestRFC8305Assessment(unittest.TestCase):
             self.assertEqual(c_inv["recommended_status"], "NOT_ASSESSED")
             self.assertIn("invalid connection attempt delay measurements", c_inv["evidence_summary"])
 
-        # Invalid CAD combined with an independently confirmed deviation (IPv6 win)
+        # Invalid CAD combined with an independently confirmed timing deviation (CAD = 50ms)
         t_nan = _dict_to_evidence(_create_synthetic_trial(trial_id="t-nan", scenario_id="S4", winning_family="IPv4", cad_ms=float("nan"), ipv4_attempt=True))
-        t_v6 = _dict_to_evidence(_create_synthetic_trial(trial_id="t-v6", scenario_id="S4", winning_family="IPv6", cad_ms=None, ipv4_attempt=False))
-        c_combo = [c for c in analyze.assess_rfc8305_conformance([t_nan, t_v6]) if c["scenario_id"] == "S4"][0]
+        t_dev = _dict_to_evidence(_create_synthetic_trial(trial_id="t-dev", scenario_id="S4", winning_family="IPv4", cad_ms=50.0, ipv4_attempt=True))
+        c_combo = [c for c in analyze.assess_rfc8305_conformance([t_nan, t_dev]) if c["scenario_id"] == "S4"][0]
         # Aggregate deviation preserved
         self.assertEqual(c_combo["status"], "POTENTIAL_CRITERION_MISMATCH")
         self.assertEqual(c_combo["mandatory_status"], "NOT_ASSESSED")
+        self.assertEqual(c_combo["recommended_status"], "POTENTIAL_CRITERION_MISMATCH")
         self.assertIn("invalid CAD measurement(s)", c_combo["evidence_summary"])
 
     def test_s6_response_omitting_qname_is_indeterminate(self):
@@ -2005,11 +2011,11 @@ class TestLiveEvidenceIntegration(unittest.TestCase):
         self.assertNotIn("RFC8305-SEC4-RESOLUTION-DELAY", rfc_map)
 
         # RFC check statuses
-        self.assertEqual(rfc_map["RFC8305-SEC3-IPV6-PREFERENCE"]["status"], "OBSERVED_BEHAVIOR")
+        self.assertEqual(rfc_map["RFC8305-SEC2-IPV6-PREFERENCE"]["status"], "OBSERVED_BEHAVIOR")
         self.assertEqual(rfc_map["RFC8305-SEC5-CAD-10MS-FLOOR"]["status"], "NOT_ASSESSED")
         self.assertNotIn("RFC8305-SEC5-IMMEDIATE-RST-FALLBACK", rfc_map)
         self.assertEqual(rfc_map["RFC8305-SEC5-CAD-SYN-TIMEOUT"]["status"], "OBSERVED_BEHAVIOR")
-        self.assertEqual(rfc_map["RFC8305-SEC5-CAD-HIGH-LATENCY"]["status"], "POTENTIAL_CRITERION_MISMATCH")
+        self.assertEqual(rfc_map["RFC8305-SEC5-CAD-HIGH-LATENCY"]["status"], "OBSERVED_BEHAVIOR")
         self.assertEqual(rfc_map["RFC8305-SEC3-RESOLUTION-DELAY"]["status"], "POTENTIAL_CRITERION_MISMATCH")
         self.assertEqual(rfc_map["RFC8305-SEC4-HISTORICAL-STATE"]["status"], "NOT_ASSESSED")
         self.assertEqual(rfc_map["HEV3-DRAFT04-SEC6.1-QUIC"]["status"], "OUT_OF_SCOPE")
@@ -2019,8 +2025,11 @@ class TestLiveEvidenceIntegration(unittest.TestCase):
         # S4 assessment details:
         s4_check = rfc_map["RFC8305-SEC5-CAD-HIGH-LATENCY"]
         self.assertEqual(s4_check["sample_size"], 40)
+        self.assertEqual(s4_check["status"], "OBSERVED_BEHAVIOR")
         self.assertEqual(s4_check["mandatory_status"], "OBSERVED_BEHAVIOR")
-        self.assertEqual(s4_check["recommended_status"], "POTENTIAL_CRITERION_MISMATCH")
+        self.assertEqual(s4_check["recommended_status"], "OBSERVED_BEHAVIOR")
+        self.assertEqual(s4_check["recommendation_alignment_status"], "ALIGNED")
+        self.assertEqual(s4_check["mandatory_floor_status"], "MEETS_MANDATORY_FLOOR")
         self.assertIn("39/40", s4_check["evidence_summary"])
         self.assertIn("trial-20261029222109-5c74c26a", s4_check["evidence_summary"])
         self.assertIn("Google Chrome: 20/20", s4_check["evidence_summary"])
@@ -2576,6 +2585,100 @@ class TestResearchCohortKeysAndUnifiedEnums(unittest.TestCase):
         self.assertEqual(cohort_key.os_kernel, "Linux-6.8.0")
         self.assertEqual(cohort_key.host_class, "baremetal_linux_x86_64")
         self.assertEqual(cohort_key.to_short_slug(), "firefox-159-baremetal_linux_x86_64-s5")
+
+
+class TestP0WorkstreamBCADSeparation(unittest.TestCase):
+    """
+    Dedicated tests for P0 Workstream B (Audit Findings #3 and #10):
+    Separation of CAD timing measurements from path-selection outcomes.
+    Directly covers the 6 required cases from Section 4.3.
+    """
+
+    def test_case_1_timing_values_inside_range_with_ipv6_win(self):
+        """Case 1: Timing values all inside [100, 2000]ms range alongside an IPv6 win trial."""
+        t1 = _dict_to_evidence(_create_synthetic_trial(
+            trial_id="t1-v4", scenario_id="S4", winning_family="IPv4", cad_ms=250.0, ipv4_attempt=True
+        ))
+        t2 = _dict_to_evidence(_create_synthetic_trial(
+            trial_id="t2-v4", scenario_id="S4", winning_family="IPv4", cad_ms=350.0, ipv4_attempt=True
+        ))
+        t3_v6 = _dict_to_evidence(_create_synthetic_trial(
+            trial_id="t3-v6", scenario_id="S4", winning_family="IPv6", cad_ms=None, ipv4_attempt=False
+        ))
+        checks = analyze.assess_rfc8305_conformance([t1, t2, t3_v6])
+        s4 = [c for c in checks if c["scenario_id"] == "S4"][0]
+        self.assertEqual(s4["status"], "OBSERVED_BEHAVIOR")
+        self.assertEqual(s4["mandatory_status"], "OBSERVED_BEHAVIOR")
+        self.assertEqual(s4["recommended_status"], "OBSERVED_BEHAVIOR")
+        self.assertEqual(s4["recommendation_alignment_status"], "ALIGNED")
+        self.assertEqual(s4["mandatory_floor_status"], "MEETS_MANDATORY_FLOOR")
+
+    def test_case_2_genuine_measured_timing_deviation_low_and_high(self):
+        """Case 2: Genuine measured timing deviation (<100ms or >2000ms)."""
+        # Low timing deviation (< 100ms, e.g. 50ms)
+        t_low = _dict_to_evidence(_create_synthetic_trial(
+            scenario_id="S4", winning_family="IPv4", cad_ms=50.0, ipv4_attempt=True
+        ))
+        s4_low = [c for c in analyze.assess_rfc8305_conformance([t_low]) if c["scenario_id"] == "S4"][0]
+        self.assertEqual(s4_low["status"], "POTENTIAL_CRITERION_MISMATCH")
+        self.assertEqual(s4_low["mandatory_status"], "OBSERVED_BEHAVIOR")
+        self.assertEqual(s4_low["recommended_status"], "POTENTIAL_CRITERION_MISMATCH")
+        self.assertEqual(s4_low["recommendation_alignment_status"], "OUTSIDE_RECOMMENDED_RANGE")
+
+        # High timing deviation (> 2000ms, e.g. 2500ms)
+        t_high = _dict_to_evidence(_create_synthetic_trial(
+            scenario_id="S4", winning_family="IPv4", cad_ms=2500.0, ipv4_attempt=True
+        ))
+        s4_high = [c for c in analyze.assess_rfc8305_conformance([t_high]) if c["scenario_id"] == "S4"][0]
+        self.assertEqual(s4_high["status"], "POTENTIAL_CRITERION_MISMATCH")
+        self.assertEqual(s4_high["mandatory_status"], "OBSERVED_BEHAVIOR")
+        self.assertEqual(s4_high["recommended_status"], "POTENTIAL_CRITERION_MISMATCH")
+        self.assertEqual(s4_high["recommendation_alignment_status"], "OUTSIDE_RECOMMENDED_RANGE")
+
+    def test_case_3_trial_where_cad_is_unavailable(self):
+        """Case 3: Trial where CAD is unavailable / missing."""
+        t_missing = _dict_to_evidence(_create_synthetic_trial(
+            scenario_id="S4", winning_family="IPv4", cad_ms=None, ipv4_attempt=True
+        ))
+        s4 = [c for c in analyze.assess_rfc8305_conformance([t_missing]) if c["scenario_id"] == "S4"][0]
+        self.assertEqual(s4["status"], "NOT_ASSESSED")
+        self.assertEqual(s4["mandatory_status"], "NOT_ASSESSED")
+        self.assertEqual(s4["recommended_status"], "NOT_ASSESSED")
+        self.assertEqual(s4["recommendation_alignment_status"], "NOT_ASSESSED")
+
+    def test_case_4_trial_with_no_observed_alternative_family_attempt(self):
+        """Case 4: Trial with no observed alternative-family attempt (direct single-family completion)."""
+        t_no_alt = _dict_to_evidence(_create_synthetic_trial(
+            scenario_id="S4", winning_family="IPv6", cad_ms=None, ipv4_attempt=False
+        ))
+        s4 = [c for c in analyze.assess_rfc8305_conformance([t_no_alt]) if c["scenario_id"] == "S4"][0]
+        self.assertEqual(s4["status"], "NOT_ASSESSED")
+        self.assertEqual(s4["mandatory_status"], "NOT_APPLICABLE")
+        self.assertEqual(s4["recommended_status"], "NOT_ASSESSED")
+
+    def test_case_5_valid_attempt_interval_below_10ms_mandatory_floor(self):
+        """Case 5: Valid attempt interval strictly below the 10ms mandatory floor."""
+        t_sub10 = _dict_to_evidence(_create_synthetic_trial(
+            scenario_id="S4", winning_family="IPv4", cad_ms=6.5, ipv4_attempt=True
+        ))
+        s4 = [c for c in analyze.assess_rfc8305_conformance([t_sub10]) if c["scenario_id"] == "S4"][0]
+        self.assertEqual(s4["status"], "POTENTIAL_CRITERION_MISMATCH")
+        self.assertEqual(s4["mandatory_status"], "POTENTIAL_CRITERION_MISMATCH")
+        self.assertEqual(s4["mandatory_floor_status"], "BELOW_MANDATORY_FLOOR")
+        self.assertEqual(s4["recommended_status"], "OBSERVED_BEHAVIOR")
+
+    def test_case_6_family_wide_first_syn_offset_without_logical_attempt_pairing(self):
+        """Case 6: Family-wide first-SYN offset without logical attempt pairing (S2)."""
+        t_s2_unpaired = _dict_to_evidence(_create_synthetic_trial(
+            scenario_id="S2", winning_family="IPv4", cad_ms=2.65, attempt_pairing_verified=False
+        ))
+        checks = analyze.assess_rfc8305_conformance([t_s2_unpaired])
+        s2 = [c for c in checks if c["scenario_id"] == "S2"][0]
+        self.assertEqual(s2["status"], "NOT_ASSESSED")
+        self.assertEqual(s2["mandatory_status"], "NOT_ASSESSED")
+        self.assertEqual(s2["recommended_status"], "NOT_ASSESSED")
+        self.assertEqual(s2["mandatory_floor_status"], "NOT_ASSESSED")
+        self.assertEqual(s2["recommendation_alignment_status"], "NOT_ASSESSED")
 
 
 if __name__ == "__main__":

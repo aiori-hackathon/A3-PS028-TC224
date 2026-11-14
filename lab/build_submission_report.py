@@ -15,7 +15,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -24,57 +24,104 @@ OUTPUT_PDF = REPO_ROOT / "PS028_Hackathon_Submission_Presentation.pdf"
 HTML_TEMP = REPO_ROOT / "lab" / "derived" / "phase-c" / "presentation_deck.html"
 
 
-def load_derived_metrics() -> Dict[str, Any]:
+def load_derived_metrics(
+    derived_dir: Optional[Path] = None,
+    campaign_dir: Optional[Path] = None,
+    test_run_record_path: Optional[Path] = None,
+) -> Dict[str, Any]:
     """Loads authoritative numbers from derived CSVs to enforce the Data Tracing Contract."""
+    base_derived = derived_dir or DERIVED_DIR
     metrics: Dict[str, Any] = {}
 
-    attempts_csv = DERIVED_DIR / "attempts.csv"
-    if attempts_csv.is_file():
-        with open(attempts_csv, "r", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            rows = list(reader)
-            metrics["total_attempts"] = len(rows)
-            metrics["valid_live"] = sum(1 for r in rows if r["validity_category"] == "VALID_LIVE")
-            metrics["cleanup_failures"] = sum(1 for r in rows if r["validity_category"] == "CLEANUP_FAILURE")
-            metrics["direct_ipv6"] = sum(1 for r in rows if r["classification"] == "DIRECT_IPV6")
-            metrics["fallback_ipv4"] = sum(1 for r in rows if r["classification"] == "IPV6_TO_IPV4_FALLBACK")
-    else:
-        metrics.update({
-            "total_attempts": 282,
-            "valid_live": 280,
-            "cleanup_failures": 2,
-            "direct_ipv6": 154,
-            "fallback_ipv4": 126,
-        })
+    attempts_csv = base_derived / "attempts.csv"
+    if not attempts_csv.is_file():
+        raise FileNotFoundError(f"Required scientific evidence missing: {attempts_csv}")
 
-    s5_csv = DERIVED_DIR / "s5_flow_dissection.csv"
-    if s5_csv.is_file():
-        with open(s5_csv, "r", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            s5_rows = list(reader)
-            # Group by trial_id to find primary flow family
-            trial_primaries = {}
-            for r in s5_rows:
-                if r.get("is_primary") == "True" or r.get("flow_role") == "PRIMARY_GET":
-                    trial_primaries[r["trial_id"]] = r["family"]
-            metrics["s5_ipv6_wins"] = sum(1 for fam in trial_primaries.values() if fam == "IPv6")
-            metrics["s5_ipv4_wins"] = sum(1 for fam in trial_primaries.values() if fam == "IPv4")
-            metrics["s5_total_flows"] = len(s5_rows)
-    else:
-        metrics["s5_ipv6_wins"] = 33
-        metrics["s5_ipv4_wins"] = 7
-        metrics["s5_total_flows"] = 95
+    with open(attempts_csv, "r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        if not reader.fieldnames:
+            raise ValueError(f"Required scientific evidence {attempts_csv} is empty or has no header")
+        required_cols = {"validity_category", "classification"}
+        missing_cols = required_cols - set(reader.fieldnames)
+        if missing_cols:
+            raise ValueError(f"Required scientific evidence {attempts_csv} missing columns: {sorted(missing_cols)}")
+        rows = list(reader)
+        if not rows:
+            raise ValueError(f"Required scientific evidence {attempts_csv} contains 0 rows")
 
-    metrics["unit_tests"] = 788
-    metrics["synthetic_tests"] = 93
-    metrics["total_tests"] = 881
-    metrics["unique_tests"] = 881
-    metrics["duplicate_executions"] = 0
-    metrics["tests_passed"] = 866
-    metrics["tests_failed"] = 4
-    metrics["tests_errors"] = 11
-    metrics["focused_tests"] = 199
-    metrics["historical_files_verified"] = 705
+        metrics["total_attempts"] = len(rows)
+        metrics["valid_live"] = sum(1 for r in rows if r["validity_category"] == "VALID_LIVE")
+        metrics["cleanup_failures"] = sum(1 for r in rows if r["validity_category"] == "CLEANUP_FAILURE")
+        metrics["direct_ipv6"] = sum(1 for r in rows if r["classification"] == "DIRECT_IPV6")
+        metrics["fallback_ipv4"] = sum(1 for r in rows if r["classification"] == "IPV6_TO_IPV4_FALLBACK")
+
+    s5_csv = base_derived / "s5_flow_dissection.csv"
+    if not s5_csv.is_file():
+        raise FileNotFoundError(f"Required scientific evidence missing: {s5_csv}")
+
+    with open(s5_csv, "r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        if not reader.fieldnames:
+            raise ValueError(f"Required scientific evidence {s5_csv} is empty or has no header")
+        required_s5_cols = {"trial_id", "family"}
+        missing_s5 = required_s5_cols - set(reader.fieldnames)
+        if missing_s5:
+            raise ValueError(f"Required scientific evidence {s5_csv} missing columns: {sorted(missing_s5)}")
+        s5_rows = list(reader)
+        if not s5_rows:
+            raise ValueError(f"Required scientific evidence {s5_csv} contains 0 rows")
+
+        # Group by trial_id to find primary flow family
+        trial_primaries = {}
+        for r in s5_rows:
+            if r.get("is_primary") == "True" or r.get("flow_role") == "PRIMARY_GET":
+                trial_primaries[r["trial_id"]] = r["family"]
+        metrics["s5_ipv6_wins"] = sum(1 for fam in trial_primaries.values() if fam == "IPv6")
+        metrics["s5_ipv4_wins"] = sum(1 for fam in trial_primaries.values() if fam == "IPv4")
+        metrics["s5_total_flows"] = len(s5_rows)
+
+    # Historical test run record: load from dated and recorded test-run artifact
+    test_record_file = test_run_record_path or (base_derived / "test_run_record.json")
+    if test_record_file.is_file():
+        with open(test_record_file, "r", encoding="utf-8") as f:
+            test_data = json.load(f)
+        metrics["unit_tests"] = test_data.get("unit_tests", "UNAVAILABLE")
+        metrics["synthetic_tests"] = test_data.get("synthetic_tests", "UNAVAILABLE")
+        metrics["total_tests"] = test_data.get("total_tests", "UNAVAILABLE")
+        metrics["unique_tests"] = test_data.get("unique_tests", "UNAVAILABLE")
+        metrics["duplicate_executions"] = test_data.get("duplicate_executions", 0)
+        metrics["tests_passed"] = test_data.get("tests_passed", "UNAVAILABLE")
+        metrics["tests_failed"] = test_data.get("tests_failed", 0)
+        metrics["tests_errors"] = test_data.get("tests_errors", 0)
+        metrics["focused_tests"] = test_data.get("focused_tests", "UNAVAILABLE")
+        metrics["test_run_metadata"] = {
+            "test_command": test_data.get("test_command"),
+            "timestamp": test_data.get("timestamp"),
+            "commit_sha": test_data.get("commit_sha"),
+            "environment": test_data.get("environment"),
+        }
+    else:
+        # Explicitly label historical test metrics as historical snapshot metadata
+        metrics["unit_tests"] = "NOT_RECORDED"
+        metrics["synthetic_tests"] = "NOT_RECORDED"
+        metrics["total_tests"] = "NOT_RECORDED"
+        metrics["unique_tests"] = "NOT_RECORDED"
+        metrics["duplicate_executions"] = 0
+        metrics["tests_passed"] = "NOT_RECORDED"
+        metrics["tests_failed"] = 0
+        metrics["tests_errors"] = 0
+        metrics["focused_tests"] = "NOT_RECORDED"
+        metrics["test_run_metadata"] = None
+
+    # Historical files verified: count directly from authoritative campaign checksums manifest
+    base_campaign = campaign_dir or (REPO_ROOT / "lab" / "campaigns" / "ps028-a10-live-20261030-01")
+    checksums_file = base_campaign / "pcap_sha256_checksums.txt"
+    if checksums_file.is_file():
+        with open(checksums_file, "r", encoding="utf-8") as f:
+            lines = [line.strip() for line in f if line.strip() and not line.startswith("#")]
+        metrics["historical_files_verified"] = len(lines)
+    else:
+        metrics["historical_files_verified"] = "UNAVAILABLE"
 
     return metrics
 

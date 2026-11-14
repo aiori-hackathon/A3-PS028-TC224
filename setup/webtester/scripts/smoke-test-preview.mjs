@@ -1,8 +1,12 @@
 /**
- * Production Preview Integration Smoke Test for PS-028 Historical Evidence Explorer
+ * Static Production Artifact and Distribution Smoke Test for PS-028 Historical Evidence Explorer
  *
- * Exercises the production build artifact (`dist/`) over HTTP and verifies the complete
- * client-side evidence explorer workflow per TASK 6A Section 8.
+ * Exercises the production build artifact (`dist/`) over HTTP and validates static asset availability,
+ * MIME types, bundle JSON structure, and cryptographic hash consistency.
+ *
+ * Scope: This is a static asset and distribution integrity verification test.
+ * Genuine browser execution, UI interaction, React rendering, and console-error capture
+ * are handled by the Playwright browser acceptance test suite (test/browser-acceptance.test.mjs).
  */
 
 import http from 'node:http';
@@ -26,7 +30,7 @@ const MIME_TYPES = {
 
 async function main() {
   console.log('================================================================================');
-  console.log('PS-028 Phase F Production Preview Interaction Smoke Test');
+  console.log('PS-028 Static Production Artifact and Distribution Smoke Test');
   console.log(`Serving from: ${distDir}`);
   console.log('================================================================================');
 
@@ -195,11 +199,12 @@ async function main() {
     }
     record(9, 'Excluded attempts stay in isolated view with zero empirical leakage', !leakage && bundle.exclusions.length === 2);
 
-    // 10. No uncaught browser exceptions or console errors
-    record(10, 'Full preview workflow completed with 0 errors or exceptions', true, 'All 10 stages passed');
+    // 10. Verification of executed test stages
+    const allPriorPassed = results.length >= 10 && results.every((r) => r.passed);
+    record(10, 'Static distribution verification completed with all stages verified', allPriorPassed, `${results.length} checks executed`);
 
     console.log('\n================================================================================');
-    console.log('✓ ALL 10 PRODUCTION PREVIEW SMOKE TEST STAGES PASSED SUCCESSFULLY');
+    console.log('✓ ALL STATIC PRODUCTION ARTIFACT SMOKE TEST CHECKS PASSED');
     console.log('================================================================================\n');
   } finally {
     server.close();

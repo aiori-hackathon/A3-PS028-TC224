@@ -31,7 +31,7 @@ To address this challenge, the IETF standardized the Happy Eyeballs algorithm (o
 
 The research objectives of the PS-028 campaign are:
 1. **Empirical Verification:** Quantitatively observe and measure Happy Eyeballs connection attempt scheduling, connection attempt delay (CAD) timers, and address family selection in modern production browsers (Google Chrome and Mozilla Firefox) under rigorously controlled network conditions.
-2. **Standard Conformance Assessment:** Assess empirical browser behavior against normative and informative requirements of RFC 8305, including IPv6 preference, CAD floor and default recommendations, immediate fallback upon TCP RST, and Resolution Delay when AAAA records are delayed relative to A records.
+2. **Standard Conformance Assessment:** Assess empirical browser behavior against normative and informative requirements of RFC 8305, including IPv6 preference, CAD floor and default recommendations, empirical response to TCP RST, and Resolution Delay when AAAA records are delayed relative to A records.
 3. **Reproducible Experimental Architecture:** Construct a fully automated, reproducible, unprivileged-safe testbed that enforces strictly sequential trial execution, isolated browser profiles, comprehensive traffic capture, and automated post-trial baseline cleanup.
 
 ---
@@ -74,7 +74,7 @@ RFC 8305 defines the operational state machine for initiating dual-stack transpo
 
 Key timing parameters specified in RFC 8305 include:
 - **Connection Attempt Delay (CAD) Timer (Section 5):** The delay between initiating a connection attempt to the preferred address family (IPv6) and initiating a fallback attempt to the secondary family (IPv4). RFC 8305 mandates that CAD **MUST NOT** be smaller than 10ms, **SHOULD NOT** be smaller than 100ms, defines a recommended default of **250ms**, and specifies a maximum of **2000ms**.
-- **Immediate Fallback on Connection Failure (Section 5):** If the primary connection attempt fails immediately due to an active network rejection (such as an ICMP Port Unreachable or TCP RST), the client **SHOULD** immediately initiate a connection attempt to the next address family without awaiting the CAD timer expiration.
+- **Connection Reset Behavior:** When a TCP RST or ICMP error is received on the primary attempt, clients often accelerate initiating fallback attempts. Note that neither RFC 8305 nor draft HEv3 contains language requiring immediate fallback upon receiving a TCP RST; RFC 8305 Section 5 specifies connection attempt delay and pacing rather than mandating immediate RST retry.
 - **Resolution Delay (Section 3):** When asynchronous DNS responses arrive with the IPv4 (A) response arriving before the IPv6 (AAAA) response, the client **SHOULD** wait for a recommended delay of **50ms** before initiating an IPv4 connection, giving the preferred AAAA response an opportunity to arrive.
 
 ### 3.1 Standards References & Specification Baseline
@@ -563,13 +563,13 @@ The campaign manifest permanently records two documented mismatches between earl
 
 ### Limitations and Threats to Validity
 1. **Single-Site Topology:** Experiments were conducted within a local synthetic network namespace testbed. While tc netem and nftables reproduce packet-level delays and loss with fidelity, real-world WAN phenomena (BGP route flapping, Path MTU Discovery issues, intermediate middleboxes) were not evaluated.
-2. **Profile Isolation vs. Caching:** To guarantee measurement independence, ephemeral browser profiles were used for every trial. This intentionally precluded evaluating RFC 8305 Section 7 ("Statefulness"), which permits clients to cache historical connection failures across sessions.
+2. **Profile Isolation vs. Caching:** To guarantee measurement independence, ephemeral browser profiles were used for every trial. This intentionally precluded evaluating RFC 8305 Section 4 ("Historical Information"), which permits clients to cache historical connection failures across sessions.
 3. **Transport Scope:** In accordance with PS-028 specifications, measurements evaluated HTTP/1.1 over TCP. Alternate transport protocols such as HTTP/3 over QUIC were out of scope.
 
 ### Future Improvements
 1. Extend telemetry collection to extract raw HTTP payload byte counters directly from socket buffers rather than process stdout.
 2. Incorporate Multi-Prefix IPv6 environments and NAT64/DNS64 synthesis topologies.
-3. Develop stateful multi-trial sequences to explicitly evaluate RFC 8305 Section 7 adaptive past-failure caching.
+3. Develop stateful multi-trial sequences to explicitly evaluate RFC 8305 Section 4 adaptive past-failure caching.
 
 ---
 
@@ -648,6 +648,6 @@ The PS-028 live measurement campaign (`ps028-a10-live-20261030-01`) successfully
 
 1. **IPv6 Preference:** Both browsers exhibit 100% IPv6 preference under normal dual-stack conditions, incurring zero dual-stack connection penalty when IPv6 paths are healthy.
 2. **CAD Timer Implementation:** Google Chrome implements an exceptionally consistent CAD timer centered at **~300ms**, whereas Mozilla Firefox implements a slightly more relaxed CAD timer averaging **~408–441ms**.
-3. **Active Rejection (TCP RST):** Chrome demonstrates immediate fallback (< 1ms CAD) upon receiving a TCP RST, fully satisfying RFC 8305 recommendations. Firefox introduces an observable delay (~160ms) before initiating fallback.
+3. **Active Rejection (TCP RST):** Under TCP RST, Chrome initiated an IPv4 attempt rapidly (< 1ms family-first-SYN offset), while Firefox introduced an observable delay (~160ms). Neither RFC 8305 nor HEv3 mandates immediate retry upon TCP RST; because wire packets capture family-first-SYN offsets without verified logical attempt pairing, S2 cannot be evaluated for the 10 ms floor and remains NOT_ASSESSED.
 4. **Delayed DNS Resolution:** Neither browser initiated an IPv4 fallback after the RFC 8305 Section 3 recommended 50ms Resolution Delay when AAAA records were delayed by 500ms; both waited for the late AAAA response and connected directly over IPv6.
 5. **Measurement Integrity:** The testbed architecture demonstrated robust isolation, zero packet capture loss, atomic manifest tracking, and complete preservation of historical evidence.

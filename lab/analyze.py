@@ -1761,7 +1761,7 @@ def assess_rfc8305_conformance(
     for sc in DEFAULT_SCENARIOS:
         by_sc[sc] = [t for t in trials if t.scenario_id == sc]
 
-    # Check 1: RFC 8305 §3 - IPv6 Preference
+    # Check 1: RFC 8305 §2 / RFC 6724 §6 - IPv6 Preference
     s0_trials = by_sc["S0"]
     if s0_trials:
         v6_first_count = sum(1 for t in s0_trials if t.winning_address_family == "IPv6")
@@ -1771,8 +1771,9 @@ def assess_rfc8305_conformance(
             recommendation_alignment_status = "ALIGNED"
             overall_observation_status = "OBSERVED_BEHAVIOR"
             summary = (
-                f"Observed alignment with RFC 8305 Section 3 recommendation: 40/40 (100.0%) valid live trials "
-                f"established primary connection over IPv6 on dual-stack baseline without fallback. "
+                f"Observed alignment with RFC 8305 Section 2 overview assumption and RFC 6724 Section 6 "
+                f"destination address selection: 40/40 (100.0%) valid live trials established primary connection "
+                f"over IPv6 on dual-stack baseline without fallback. "
                 f"Scoped to recorded trials under lab conditions; does not infer general client behavior."
                 if (len(s0_trials) == 40 and v6_first_count == 40) else
                 f"Observed behavior in tested trial(s): {v6_first_count}/{len(s0_trials)} ({round(v6_first_count/len(s0_trials)*100, 1)}%) "
@@ -1800,8 +1801,8 @@ def assess_rfc8305_conformance(
         summary = "Not assessed: No valid S0 baseline trials available to evaluate IPv6 preference."
 
     assessments.append({
-        "check_id": "RFC8305-SEC3-IPV6-PREFERENCE",
-        "rfc_section": "RFC 8305 Section 3",
+        "check_id": "RFC8305-SEC2-IPV6-PREFERENCE",
+        "rfc_section": "RFC 8305 Section 2",
         "title": "IPv6 Preference on Dual-Stack Baseline",
         "scenario_id": "S0",
         "status": status,
@@ -1810,12 +1811,13 @@ def assess_rfc8305_conformance(
         "sample_size": len(s0_trials),
         "evidence_summary": summary,
         "reasoning": (
-            "RFC 8305 Section 3 specifies that implementations SHOULD prefer IPv6 for the first "
-            "connection attempt when both A and AAAA resource records are resolved. "
-            "draft-ietf-happy-happyeyeballs-v3-04 Section 5.3 also prioritizes IPv6 destination endpoints."
+            "RFC 8305 Section 2 states the overview assumption that host preference policy favors IPv6 over IPv4, "
+            "as defined in RFC 6724 Section 6 destination address selection. RFC 8305 Section 3 governs DNS query "
+            "handling and does not define address preference. draft-ietf-happy-happyeyeballs-v3-04 Section 5.3 also "
+            "prioritizes IPv6 destination endpoints within groups."
         ),
         "target_parameter": "Dual-Stack IPv6 Preference",
-        "rfc_specification_requirement": "SHOULD prefer IPv6 for initial connection attempt (RFC 8305 Section 3 / v3 draft -04 Section 5.3)",
+        "rfc_specification_requirement": "Host policy assumes IPv6 preferred for initial attempt (RFC 8305 Section 2 / RFC 6724 Section 6 / v3 draft -04 Section 5.3)",
         "rfc_recommended_range": "N/A",
         "observed_delay_ms": None,
         "observed_min_delay_ms": None,
@@ -1825,9 +1827,10 @@ def assess_rfc8305_conformance(
         "overall_observation_status": overall_observation_status,
         "observable_behavior_summary": summary,
         "specification_context": (
-            "RFC 8305 Section 3 specifies that implementations SHOULD prefer IPv6 for the first "
-            "connection attempt when both A and AAAA resource records are resolved. "
-            "draft-ietf-happy-happyeyeballs-v3-04 Section 5.3 also prioritizes IPv6 destination endpoints."
+            "RFC 8305 Section 2 states the overview assumption that host preference policy favors IPv6 over IPv4, "
+            "as defined in RFC 6724 Section 6 destination address selection. RFC 8305 Section 3 governs DNS query "
+            "handling and does not define address preference. draft-ietf-happy-happyeyeballs-v3-04 Section 5.3 also "
+            "prioritizes IPv6 destination endpoints within groups."
         ),
     })
 
@@ -2247,7 +2250,7 @@ def assess_rfc8305_conformance(
         else:
             cad_dist_str = "No fallback CAD measured."
 
-        # Compile deviations
+        # Compile deviations: strictly CAD timing violations
         rec_deviations = []
         if recommended_cad_low:
             med_note = f" (median {med_cad_str} < 100ms)" if (med_cad is not None and med_cad < RFC8305_MIN_CAD_MS) else ""
@@ -2255,36 +2258,50 @@ def assess_rfc8305_conformance(
         if recommended_cad_high:
             med_note = f" (median {med_cad_str} > 2000ms)" if (med_cad is not None and med_cad > RFC8305_MAX_CAD_MS) else ""
             rec_deviations.append(f"{cad_over2000_count} trial(s) measured CAD > 2000ms recommended upper bound{med_note}")
-        if has_v6_wins:
-            v6_ids_str = ", ".join(t.trial_id for t in v6_wins)
-            rec_deviations.append(f"{len(v6_wins)} trial(s) ({v6_ids_str}) completed over IPv6 without IPv4 fallback")
 
-        # Determine overall recommended_status and status
-        if mandatory_violation or rec_deviations:
-            status = "POTENTIAL_CRITERION_MISMATCH"
+        # Determine overall recommended_status, recommendation_alignment_status, mandatory_status, and overall status
+        if mandatory_violation:
+            mandatory_status = "POTENTIAL_CRITERION_MISMATCH"
+            mandatory_floor_status = "BELOW_MANDATORY_FLOOR"
+        elif subsequent_attempts_indeterminate > 0:
+            mandatory_status = "NOT_ASSESSED"
+            mandatory_floor_status = "NOT_ASSESSED"
+        elif cad_count > 0:
+            mandatory_status = "OBSERVED_BEHAVIOR"
+            mandatory_floor_status = "MEETS_MANDATORY_FLOOR"
+        else:
+            mandatory_status = "NOT_APPLICABLE"
+            mandatory_floor_status = "NOT_APPLICABLE"
+
+        if rec_deviations:
+            recommended_status = "POTENTIAL_CRITERION_MISMATCH"
             recommendation_alignment_status = "OUTSIDE_RECOMMENDED_RANGE"
-            overall_observation_status = "POTENTIAL_CRITERION_MISMATCH"
-            if rec_deviations:
-                recommended_status = "POTENTIAL_CRITERION_MISMATCH"
-            elif has_unknown_wins or subsequent_attempts_indeterminate > 0:
-                recommended_status = "NOT_ASSESSED"
-                recommendation_alignment_status = "NOT_ASSESSED"
-            elif len(v4_wins) == total_s4 and cad_count > 0:
-                recommended_status = "OBSERVED_BEHAVIOR"
-                recommendation_alignment_status = "ALIGNED"
-            else:
-                recommended_status = "NOT_ASSESSED"
-                recommendation_alignment_status = "NOT_ASSESSED"
-        elif has_unknown_wins or subsequent_attempts_indeterminate > 0 or not cad_vals:
-            status = "NOT_ASSESSED"
+        elif has_unknown_wins:
             recommended_status = "NOT_ASSESSED"
             recommendation_alignment_status = "NOT_ASSESSED"
-            overall_observation_status = "NOT_ASSESSED"
-        else:
-            status = "OBSERVED_BEHAVIOR"
+        elif cad_count > 0:
             recommended_status = "OBSERVED_BEHAVIOR"
             recommendation_alignment_status = "ALIGNED"
+        else:
+            recommended_status = "NOT_ASSESSED"
+            recommendation_alignment_status = "NOT_ASSESSED"
+
+        if mandatory_status == "POTENTIAL_CRITERION_MISMATCH" or recommended_status == "POTENTIAL_CRITERION_MISMATCH":
+            status = "POTENTIAL_CRITERION_MISMATCH"
+            overall_observation_status = "POTENTIAL_CRITERION_MISMATCH"
+        elif has_unknown_wins or mandatory_status == "NOT_ASSESSED" or recommended_status == "NOT_ASSESSED":
+            if cad_count > 0 and mandatory_status == "OBSERVED_BEHAVIOR" and not has_unknown_wins:
+                status = "OBSERVED_BEHAVIOR"
+                overall_observation_status = "OBSERVED_BEHAVIOR"
+            else:
+                status = "NOT_ASSESSED"
+                overall_observation_status = "NOT_ASSESSED"
+        elif cad_count > 0:
+            status = "OBSERVED_BEHAVIOR"
             overall_observation_status = "OBSERVED_BEHAVIOR"
+        else:
+            status = "NOT_ASSESSED"
+            overall_observation_status = "NOT_ASSESSED"
 
         # Construct evidence_summary
         if len(s4_trials) == 40 and len(v4_wins) == 39 and len(v6_wins) == 1 and med_cad is not None:
@@ -2365,9 +2382,10 @@ def assess_rfc8305_conformance(
             "(subsequent attempts MUST NOT start within 10ms of the previous attempt) from recommended CAD parameters (recommended "
             "default 250ms, range 100ms to 2000ms). Under high primary-path latency (600ms IPv6 RTT), the client is expected to "
             "initiate an IPv4 connection attempt after the CAD timer, which finishes setup first over the low-latency path. "
-            "Trials where IPv4 wins within timing bounds exhibit this expected behavior. When a trial completes over "
-            "IPv6 without an IPv4 attempt under 600ms RTT, an observed recommendation-level criterion mismatch is recorded without "
-            "imputing a mandatory timing violation or general browser non-conformance."
+            "CAD timing is assessed independently from path selection: trials with measured CAD intervals are evaluated against "
+            "the 10ms floor and [100ms, 2000ms] recommended range. When a trial completes directly over IPv6 without an IPv4 "
+            "connection attempt, no CAD interval occurs; such path-selection outcomes are documented separately and do not "
+            "contaminate the CAD timing range evaluation."
         ),
         "target_parameter": "High Latency Fallback Path Racing",
         "rfc_specification_requirement": "CAD timer SHOULD NOT < 100 ms and MAX 2000 ms; IPv4 path expected to complete first (RFC 8305 Section 5 / v3 draft -04 Section 6)",
