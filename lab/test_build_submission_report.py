@@ -164,6 +164,46 @@ class TestBuildSubmissionReport(unittest.TestCase):
         self.assertIsNotNone(metrics["test_run_metadata"])
         self.assertEqual(metrics["test_run_metadata"]["commit_sha"], "a2b2c501386276b4f43837beb1d00270e4dc44a5")
 
+    def test_scientific_presentation_claims_accuracy(self):
+        """P1.8: Presentation deck and generator must avoid unsupported microsecond claims."""
+        repo_root = Path(__file__).resolve().parent.parent
+        generator_file = repo_root / "lab" / "build_submission_report.py"
+        deck_file = repo_root / "lab" / "derived" / "phase-c" / "presentation_deck.html"
+
+        for file_path in (generator_file, deck_file):
+            content = file_path.read_text(encoding="utf-8")
+            self.assertNotIn(
+                "microsecond delay injection",
+                content,
+                f"{file_path} must not claim unsupported microsecond delay injection",
+            )
+            self.assertNotIn(
+                "Microsecond-Scale Dual-Stack Transport Racing",
+                content,
+                f"{file_path} must not claim unsupported microsecond transport racing",
+            )
+            self.assertNotIn(
+                "IPv6 Preference (§3):",
+                content,
+                f"{file_path} must not cite RFC 8305 §3 for IPv6 address preference",
+            )
+            self.assertIn(
+                "Selected RFC 8305 Requirements Assessment",
+                content,
+                f"{file_path} must accurately describe work as selected requirements assessment",
+            )
+            self.assertIn(
+                "IPv6 Preference (§2 / RFC 6724):",
+                content,
+                f"{file_path} must cite §2 and RFC 6724 for IPv6 preference",
+            )
+            self.assertIn(
+                "millisecond-scale delay injection",
+                content,
+                f"{file_path} must accurately describe delay injection as millisecond-scale",
+            )
+
+
 
 if __name__ == "__main__":
     unittest.main()

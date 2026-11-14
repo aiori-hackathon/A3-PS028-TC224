@@ -329,7 +329,7 @@ def generate_presentation_html(m: Dict[str, Any]) -> str:
 <div class="slide title-slide">
   <div class="title-badge">AIORI HACKATHON 3 · PROBLEM STATEMENT PS-028</div>
   <div class="main-title">Happy Eyeballs IPv4/IPv6 Fallback Measurement</div>
-  <div class="sub-title">Controlled Empirical Evaluation, RFC 8305 Standards Conformance, and Microsecond-Scale Dual-Stack Transport Racing</div>
+  <div class="sub-title">Controlled Empirical Evaluation, Selected RFC 8305 Requirements Assessment, and Dual-Stack Transport Racing</div>
   <div class="team-info">
     <strong>Team AlgoRhythm (TC224)</strong><br>
     Repository: <code>aiori-hackathon/A3-PS028-TC224</code> · Branch: <code>regional/ps028-phase-cd</code><br>
@@ -379,7 +379,7 @@ def generate_presentation_html(m: Dict[str, Any]) -> str:
       <div class="block">
         <div class="block-title">Happy Eyeballs v2 (RFC 8305) Principles</div>
         <ul class="content-list">
-          <li><strong>IPv6 Preference (§3):</strong> Resolvers return both A and AAAA; clients prefer IPv6 for the initial attempt.</li>
+          <li><strong>IPv6 Preference (§2 / RFC 6724):</strong> Resolvers return both A and AAAA; host destination policy favors IPv6 for initial attempt.</li>
           <li><strong>Resolution Delay (§3):</strong> If A arrives before AAAA, client RECOMMENDED to wait 50 ms before launching IPv4.</li>
           <li><strong>Connection Attempt Delay (CAD, §5):</strong> If IPv6 attempt does not complete, subsequent IPv4 attempt starts after CAD timer (recommended default 250 ms, bounds 100–2000 ms).</li>
           <li><strong>Mandatory Floor (§5):</strong> Subsequent attempts MUST NOT start within 10 ms of previous attempt.</li>
@@ -393,7 +393,7 @@ def generate_presentation_html(m: Dict[str, Any]) -> str:
           <li><strong>Client NS (<code>ps028-cl</code>):</strong> Clean profile execution, unprivileged browser runners, isolated resolver.</li>
           <li><strong>Router NS (<code>ps028-rt</code>):</strong> Dedicated veth routing with Linux <code>tc-netem</code> shaping and <code>nftables</code> stateful dropping.</li>
           <li><strong>Server NS (<code>ps028-sv</code>):</strong> Independent IPv4/IPv6 dual-stack legs (<code>ps028-rt-sv4</code> / <code>ps028-rt-sv6</code>) preventing cross-family impairment coupling.</li>
-          <li><strong>Controlled DNS:</strong> Custom Python UDP DNS server supporting microsecond delay injection per family.</li>
+          <li><strong>Controlled DNS:</strong> Custom Python UDP DNS server supporting millisecond-scale delay injection per family.</li>
         </ul>
       </div>
     </div>
