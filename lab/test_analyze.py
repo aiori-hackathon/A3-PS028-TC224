@@ -1830,10 +1830,11 @@ class TestRFC8305Assessment(unittest.TestCase):
         self.assertIn("Rule 2 is Prefer matching scope", sec2_check["specification_context"])
         self.assertNotIn("Rule 2 destination address selection", sec2_check["specification_context"])
 
-        # 15. S4 anomalous trial precision: 600.949 ms SYN-ACK vs 1,298.191 ms HTTP 200, causality unverified
+        # 15. S4 anomalous trial precision: 600.949 ms SYN-to-SYN/ACK vs 601.045 ms handshake vs 1,298.191 ms HTTP 200, causality unverified
         self.assertIn("600.949 ms", s4_check["evidence_summary"])
+        self.assertIn("601.045 ms", s4_check["evidence_summary"])
         self.assertIn("1,298.191 ms", s4_check["evidence_summary"])
-        self.assertIn("physical absence of an IPv4 SYN", s4_check["evidence_summary"])
+        self.assertIn("no IPv4 TCP SYN packet was observed in the monitored PCAP", s4_check["evidence_summary"])
         self.assertIn("browser-internal scheduling causality remains insufficient evidence", s4_check["evidence_summary"])
 
         # 13. S2 does not attribute immediate retry after RST to an RFC requirement and uses RFC8305-SEC5-CAD-10MS-FLOOR

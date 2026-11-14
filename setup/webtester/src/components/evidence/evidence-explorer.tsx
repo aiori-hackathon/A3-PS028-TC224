@@ -1432,14 +1432,15 @@ export const EvidenceExplorer: React.FC = () => {
                   <table className="w-full text-xs">
                     <thead className="sticky top-0 bg-card border-b z-10">
                       <tr className="text-left font-medium text-muted-foreground">
+                        <th className="p-2 w-12">#</th>
                         <th className="p-2 w-28">Δt (ms)</th>
                         <th className="p-2 w-44">Absolute Timestamp</th>
-                        <th className="p-2 w-32">Source</th>
-                        <th className="p-2 w-44">Event Type</th>
+                        <th className="p-2 w-28">Source</th>
+                        <th className="p-2 w-40">Event Type</th>
                         <th className="p-2 w-16">Family</th>
                         <th className="p-2 w-16">Stream</th>
                         <th className="p-2 w-16">Frame</th>
-                        <th className="p-2">Details</th>
+                        <th className="p-2">Details & Provenance</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y font-mono">
@@ -1449,6 +1450,9 @@ export const EvidenceExplorer: React.FC = () => {
                         const provTitle = `${ev.details}${ev.frame_number ? ` (Frame #${ev.frame_number})` : ''}${ev.pcap_sha256 ? ` | PCAP: ${ev.pcap_sha256.slice(0, 16)}...` : ''}${ev.source_path ? ` | Source: ${ev.source_path}` : ''}`;
                         return (
                           <tr key={idx} className="hover:bg-muted/20">
+                            <td className="p-2 font-mono text-[11px] text-muted-foreground">
+                              {ev.event_index !== null && ev.event_index !== undefined ? ev.event_index : idx + 1}
+                            </td>
                             <td className="p-2 font-semibold text-primary">
                               {relMs !== null ? `+${relMs.toFixed(2)} ms` : '—'}
                             </td>
@@ -1473,9 +1477,15 @@ export const EvidenceExplorer: React.FC = () => {
                             <td className="p-2 font-semibold text-foreground">{ev.event_type}</td>
                             <td className="p-2">{ev.family || '—'}</td>
                             <td className="p-2">{ev.stream_id || '—'}</td>
-                            <td className="p-2 text-muted-foreground">{frameLabel}</td>
-                            <td className="p-2 text-muted-foreground font-sans truncate max-w-md" title={provTitle}>
-                              {ev.details}
+                            <td className="p-2 text-muted-foreground font-mono">{frameLabel}</td>
+                            <td className="p-2 text-muted-foreground font-sans max-w-md" title={provTitle}>
+                              <div className="text-foreground truncate">{ev.details}</div>
+                              {ev.source_path && (
+                                <div className="text-[10px] text-muted-foreground/80 font-mono truncate">
+                                  <span>source: {ev.source_path}</span>
+                                  {ev.pcap_sha256 ? <span> | sha256: {ev.pcap_sha256.slice(0, 16)}...</span> : null}
+                                </div>
+                              )}
                             </td>
                           </tr>
                         );

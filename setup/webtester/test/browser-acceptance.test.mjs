@@ -192,8 +192,10 @@ async function runBrowserAcceptanceTests() {
     assert(detailContent.includes('Recorded TCP Connection Attempts'), 'Trial detail connection attempts must render');
     assert(detailContent.includes('Chronological Multi-Source Event Timeline'), 'Timeline section must render');
 
-    // Verify timeline Frame column header exists
+    // Verify timeline Frame and Details & Provenance headers exist
     assert(detailContent.includes('Frame'), 'Timeline table must contain Frame provenance column');
+    assert(detailContent.includes('Details & Provenance'), 'Timeline table must contain Details & Provenance header');
+    assert(detailContent.includes('source:'), 'Timeline table must display packet provenance source paths');
     console.log('  [PASS] Trial detail and event timeline packet provenance verified');
 
     // -------------------------------------------------------------------------

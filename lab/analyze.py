@@ -2317,9 +2317,9 @@ def assess_rfc8305_conformance(
                 f"(pooled median CAD {med_cad:.3f} ms; Google Chrome: 20/20 IPv4 wins [median 300.810 ms]; "
                 f"Firefox: 19/20 IPv4 wins [median 397.940 ms]). All 39 measured CAD values satisfy "
                 f"the 10.000 ms mandatory floor and fall within the recommended [100.000, 2000.000] ms range. "
-                f"In 1/40 trials (Firefox trial trial-20261029222109-5c74c26a), direct IPv6 TCP connection setup completed "
-                f"in 600.949 ms (SYN-to-SYN/ACK) and wire HTTP 200 at 1,298.191 ms with physical absence of an IPv4 SYN on the wire; "
-                f"browser-internal scheduling causality remains insufficient evidence. "
+                f"In 1/40 trials (Firefox trial trial-20261029222109-5c74c26a), IPv6 recorded a 600.949 ms SYN-to-SYN/ACK interval "
+                f"(handshake completion at 601.045 ms; wire HTTP 200 at 1,298.191 ms); no IPv4 TCP SYN packet was observed in the monitored PCAP "
+                f"(bounded by capture interface and observation window); browser-internal scheduling causality remains insufficient evidence. "
                 f"Scoped to recorded trials under lab conditions; does not infer general client non-conformance."
             )
         elif status == "POTENTIAL_CRITERION_MISMATCH":

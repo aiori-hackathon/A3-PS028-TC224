@@ -749,8 +749,9 @@ describe('PS-028 Historical Evidence Explorer Test Suite (TASK 6A Reconciled)', 
   });
 
   test('31. Event-level packet provenance preservation in bundle timeline events', () => {
-    // Inspect trials in bundle to confirm event_index, frame_number, pcap_sha256, source_path exist on PCAP events
+    // 1. Inspect trials in bundle to confirm event_index, frame_number, pcap_sha256, source_path exist on PCAP events
     let pcapEventsChecked = 0;
+    let nonPcapEventsChecked = 0;
     for (const trial of bundle.trials) {
       for (const ev of trial.timeline_events || []) {
         if (ev.source === 'PCAP') {
@@ -759,9 +760,30 @@ describe('PS-028 Historical Evidence Explorer Test Suite (TASK 6A Reconciled)', 
           assert.ok(typeof ev.frame_number === 'number', `Frame number must be number for ${trial.trial_id}`);
           assert.match(ev.pcap_sha256, /^[0-9a-f]{64}$/, `PCAP hash must be 64-char hex for ${trial.trial_id}`);
           assert.ok(typeof ev.source_path === 'string' && ev.source_path.length > 0, `Source path must exist for ${trial.trial_id}`);
+        } else {
+          nonPcapEventsChecked++;
+          assert.ok(typeof ev.event_index === 'number', `Non-PCAP event index must be number for ${trial.trial_id}`);
+          assert.strictEqual(ev.frame_number, null, `Non-PCAP frame_number must legitimately remain null for ${trial.trial_id}`);
         }
       }
     }
     assert.ok(pcapEventsChecked > 0, 'Must have verified PCAP events with packet-level provenance');
+    assert.ok(nonPcapEventsChecked > 0, 'Must have verified non-PCAP events with legitimate null frame_number');
+
+    // 2. Direct CSV-to-bundle value comparison for sample trial
+    const sampleTrial = bundle.trials.find((t) => t.trial_id === 'trial-20261029205425-6cb90a54');
+    assert.ok(sampleTrial, 'Sample trial must exist in bundle');
+    const pcapEv = sampleTrial.timeline_events.find((e) => e.source === 'PCAP' && e.frame_number === 102);
+    assert.ok(pcapEv, 'PCAP frame 102 must exist in sample trial');
+    assert.strictEqual(pcapEv.event_index, 86);
+    assert.strictEqual(pcapEv.frame_number, 102);
+    assert.strictEqual(pcapEv.pcap_sha256, '69fd09eb63b53f2be42428e40d99ed61eeef4da47bead93fe129ecab1ba47f72');
+    assert.strictEqual(pcapEv.source_path, 'lab/campaigns/ps028-a10-live-20261030-01/trials/trial-20261029205425-6cb90a54/capture.pcap');
+
+    const harnessEv = sampleTrial.timeline_events.find((e) => e.source === 'HARNESS' && e.event_index === 1);
+    assert.ok(harnessEv, 'HARNESS event 1 must exist in sample trial');
+    assert.strictEqual(harnessEv.event_index, 1);
+    assert.strictEqual(harnessEv.frame_number, null);
+    assert.strictEqual(harnessEv.source_path, 'lab/campaigns/ps028-a10-live-20261030-01/trials/trial-20261029205425-6cb90a54/result.json');
   });
 });
