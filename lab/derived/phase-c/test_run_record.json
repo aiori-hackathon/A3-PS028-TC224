@@ -4,7 +4,8 @@
   "frontend_tests": 31,
   "browser_acceptance_stages": 8,
   "static_distribution_checks": 16,
-  "browser_acceptance_assertions": 51,
+  "browser_acceptance_assertions": 53,
+  "dedicated_preservation_checks": 4,
   "total_automated_unit_tests": 928,
   "total_tests": 928,
   "unique_tests": 928,
@@ -13,9 +14,9 @@
   "tests_failed": 0,
   "tests_errors": 0,
   "focused_tests": 12,
-  "test_command": "python3 -m unittest discover -s lab -p 'test_*.py' && python3 -m unittest discover -s tests -p 'test_*.py' && npm test && npm run test:smoke && npm run test:browser",
-  "timestamp": "2026-11-14T14:52:30Z",
-  "commit_sha": "36eb271a543996a1d5d5c40c0c6902cb9c7f4ab0",
+  "test_command": "python3 -m unittest discover -s lab -p 'test_*.py' && python3 -m unittest discover -s tests -p 'test_*.py' && npm test && npm run test:smoke && npm run test:browser && python3 -m unittest lab/test_campaign_pcap_regression.py",
+  "timestamp": "2026-11-14T15:08:45Z",
+  "commit_sha": "5c84c93eff12903a1288770029a903aec48ac1a4",
   "environment": "Linux 6.18.58.1-microsoft-standard-WSL2 x86_64, Python 3.12.3, Node.js v22.14.0, Google Chrome 157.0.8103.50",
   "disaggregated_taxonomy": {
     "automated_unit_and_regression_tests": {
@@ -25,7 +26,8 @@
         "runner": "python3 -m unittest discover -s lab -p 'test_*.py'",
         "status": "PASSED",
         "failures": 0,
-        "errors": 0
+        "errors": 0,
+        "note": "Includes 4 PCAP regression preservation tests in lab/test_campaign_pcap_regression.py"
       },
       "python_integration_tier_tests": {
         "test_count": 93,
@@ -59,7 +61,7 @@
       "playwright_browser_suite": {
         "suite_count": 1,
         "stages_count": 8,
-        "assertions_verified": 51,
+        "assertions_verified": 53,
         "engine": "Playwright / Chromium (Google Chrome 157.0.8103.50)",
         "script": "setup/webtester/test/browser-acceptance.test.mjs",
         "runner": "npm run test:browser",
@@ -69,7 +71,18 @@
         "failed_requests": 0
       },
       "subtotal_stages": 8,
-      "subtotal_assertions": 51
+      "subtotal_assertions": 53
+    },
+    "dedicated_preservation_checks": {
+      "pcap_regression_preservation": {
+        "check_count": 4,
+        "runner": "python3 -m unittest lab/test_campaign_pcap_regression.py",
+        "status": "PASSED",
+        "failures": 0,
+        "errors": 0,
+        "note": "Repeated post-validation preservation check of tests included in the 804 lab tests"
+      },
+      "subtotal": 4
     }
   }
 }
