@@ -165,7 +165,7 @@ class TestBuildSubmissionReport(unittest.TestCase):
         self.assertEqual(metrics["test_run_metadata"]["commit_sha"], "a2b2c501386276b4f43837beb1d00270e4dc44a5")
 
     def test_scientific_presentation_claims_accuracy(self):
-        """P1.8: Presentation deck and generator must avoid unsupported microsecond claims."""
+        """P1.8 & P1.6: Presentation deck and generator must avoid unsupported claims and qualify measurements."""
         repo_root = Path(__file__).resolve().parent.parent
         generator_file = repo_root / "lab" / "build_submission_report.py"
         deck_file = repo_root / "lab" / "derived" / "phase-c" / "presentation_deck.html"
@@ -183,6 +183,11 @@ class TestBuildSubmissionReport(unittest.TestCase):
                 f"{file_path} must not claim unsupported microsecond transport racing",
             )
             self.assertNotIn(
+                "aggressive sub-10ms fallback",
+                content,
+                f"{file_path} must not claim aggressive sub-10ms fallback as a standard deviation",
+            )
+            self.assertNotIn(
                 "IPv6 Preference (§3):",
                 content,
                 f"{file_path} must not cite RFC 8305 §3 for IPv6 address preference",
@@ -198,10 +203,38 @@ class TestBuildSubmissionReport(unittest.TestCase):
                 f"{file_path} must cite §2 and RFC 6724 for IPv6 preference",
             )
             self.assertIn(
-                "millisecond-scale delay injection",
+                "nominal millisecond-valued per-family delay configuration",
                 content,
-                f"{file_path} must accurately describe delay injection as millisecond-scale",
+                f"{file_path} must accurately qualify delay configuration",
             )
+            self.assertIn(
+                "Effective delay accuracy and scheduling jitter were not independently calibrated",
+                content,
+                f"{file_path} must note absence of independent microsecond calibration",
+            )
+            self.assertIn(
+                "Packet observations included sub-10ms raw family-first-SYN offsets",
+                content,
+                f"{file_path} must preserve raw S2 observation context",
+            )
+            self.assertIn(
+                "S2 remains NOT_ASSESSED against the 10ms mandatory floor",
+                content,
+                f"{file_path} must state S2 NOT_ASSESSED status",
+            )
+
+        report_file = repo_root / "docs" / "PS028_FINAL_EXPERIMENTAL_REPORT.md"
+        report_content = report_file.read_text(encoding="utf-8")
+        self.assertIn(
+            "601.045 ms — initial SYN to observed client final ACK transmission",
+            report_content,
+            "Final experimental report must use precise S4 final-ACK measurement terminology",
+        )
+        self.assertNotIn(
+            "601.04 ms (handshake completion)",
+            report_content,
+            "Final experimental report must not equate wire timestamps with remote handshake completion",
+        )
 
 
 

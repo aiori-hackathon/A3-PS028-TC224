@@ -393,7 +393,7 @@ def generate_presentation_html(m: Dict[str, Any]) -> str:
           <li><strong>Client NS (<code>ps028-cl</code>):</strong> Clean profile execution, unprivileged browser runners, isolated resolver.</li>
           <li><strong>Router NS (<code>ps028-rt</code>):</strong> Dedicated veth routing with Linux <code>tc-netem</code> shaping and <code>nftables</code> stateful dropping.</li>
           <li><strong>Server NS (<code>ps028-sv</code>):</strong> Independent IPv4/IPv6 dual-stack legs (<code>ps028-rt-sv4</code> / <code>ps028-rt-sv6</code>) preventing cross-family impairment coupling.</li>
-          <li><strong>Controlled DNS:</strong> Custom Python UDP DNS server supporting millisecond-scale delay injection per family.</li>
+          <li><strong>Controlled DNS:</strong> Custom Python UDP DNS responder supporting nominal millisecond-valued per-family delay configuration. Effective delay accuracy and scheduling jitter were not independently calibrated to establish microsecond-level precision.</li>
         </ul>
       </div>
     </div>
@@ -438,7 +438,7 @@ def generate_presentation_html(m: Dict[str, Any]) -> str:
       <tr>
         <td><strong>Sattler et al. (ACM IMC 2025)</strong><br>"Lazy Eye Inspection"</td>
         <td>Empirical Browser Study</td>
-        <td>Investigated desktop and mobile browsers; observed significant deviations from RFC 8305 default timers, including aggressive sub-10ms fallback in Chromium on RST.</td>
+        <td>Investigated desktop and mobile browsers. Packet observations included sub-10ms raw family-first-SYN offsets in some Chromium S2 trials following IPv6 TCP RST events. Because logical sequential connection-attempt pairing and socket-level causality were not established, these observations are not treated as measured CAD values or evidence of RFC 8305 §5 non-conformance. S2 remains NOT_ASSESSED against the 10ms mandatory floor.</td>
       </tr>
     </tbody>
   </table>
