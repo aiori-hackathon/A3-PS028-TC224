@@ -17,6 +17,7 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 
@@ -150,16 +151,16 @@ async function runBrowserAcceptanceTests() {
     // TEST STAGE 3: Tab Navigation
     // -------------------------------------------------------------------------
     console.log('\n[STAGE 3] Exercising tab switching...');
-    // Click "Controlled Scenario Matrix" tab
-    await page.click('button:has-text("Controlled Scenario Matrix")');
+    // Click "Scenario & Cohort Comparison" tab
+    await page.click('button:has-text("Scenario & Cohort Comparison")');
     await page.waitForTimeout(300);
     const comparisonText = await page.textContent('body');
-    assert(comparisonText.includes('Scenario Matrix Comparison') || comparisonText.includes('S0'), 'Matrix comparison tab must render');
+    assert(comparisonText.includes('Historical Campaign Cohort Matrix') || comparisonText.includes('S0'), 'Matrix comparison tab must render');
 
-    // Click "Trials & Multi-Source Timeline" tab
-    await page.click('button:has-text("Trials & Multi-Source Timeline")');
+    // Click "Trial Explorer" tab
+    await page.click('button:has-text("Trial Explorer")');
     await page.waitForTimeout(300);
-    assert(await page.isVisible('input[placeholder*="Search trials"]'), 'Search input must be visible on Trials tab');
+    assert(await page.isVisible('input[placeholder*="Search by trial ID"]'), 'Search input must be visible on Trials tab');
     console.log('  [PASS] Tab switching verified');
 
     // -------------------------------------------------------------------------
@@ -167,12 +168,12 @@ async function runBrowserAcceptanceTests() {
     // -------------------------------------------------------------------------
     console.log('\n[STAGE 4] Exercising filter interactions (Scenario S2 + Google Chrome)...');
     // Select S2 scenario filter
-    await page.selectOption('select[aria-label="Filter by scenario"]', 'S2');
+    await page.selectOption('select[aria-label="Filter trials by scenario"]', 'S2');
     // Select google-chrome browser filter
-    await page.selectOption('select[aria-label="Filter by browser"]', 'google-chrome');
+    await page.selectOption('select[aria-label="Filter trials by browser"]', 'google-chrome');
     await page.waitForTimeout(300);
 
-    // Verify exactly 20 trials listed for S2 Chrome cohort
+    // Verify trials listed for S2 Chrome cohort
     const s2Rows = await page.$$('tbody tr');
     assert(s2Rows.length >= 15, 'S2 Chrome filtered view must populate table rows');
     const tableContent = await page.textContent('table');
@@ -183,16 +184,12 @@ async function runBrowserAcceptanceTests() {
     // TEST STAGE 5: Trial Selection, Detail View, and Event Timeline Provenance
     // -------------------------------------------------------------------------
     console.log('\n[STAGE 5] Selecting a trial and verifying timeline event provenance...');
-    // Click the first trial in the filtered list
-    await s2Rows[0].click();
-    await page.waitForTimeout(300);
-
-    // Click "Selected Trial Detail" tab
-    await page.click('button:has-text("Selected Trial Detail")');
-    await page.waitForTimeout(300);
+    // Click the "Inspect" button in the first trial of the filtered list
+    await page.click('tbody tr:first-child button:has-text("Inspect")');
+    await page.waitForTimeout(400);
 
     const detailContent = await page.textContent('body');
-    assert(detailContent.includes('Primary Flow Telemetry'), 'Trial detail primary flow telemetry must render');
+    assert(detailContent.includes('Recorded TCP Connection Attempts'), 'Trial detail connection attempts must render');
     assert(detailContent.includes('Chronological Multi-Source Event Timeline'), 'Timeline section must render');
 
     // Verify timeline Frame column header exists
@@ -240,6 +237,7 @@ async function runBrowserAcceptanceTests() {
     const s5Page = await s5Context.newPage();
 
     // Deterministically intercept bundle to simulate empty S5 flow records
+    let modifiedHash = '';
     await s5Page.route('**/demo_bundle.json', async (route) => {
       const response = await route.fetch();
       const bundleJson = await response.json();
@@ -250,9 +248,23 @@ async function runBrowserAcceptanceTests() {
         }
       }
       // Note: reconciliation_summary.s5_flows_count is intentionally left as 95 to verify summary fallback cannot save it
+      const bodyStr = JSON.stringify(bundleJson);
+      modifiedHash = crypto.createHash('sha256').update(bodyStr).digest('hex');
       await route.fulfill({
         response,
-        body: JSON.stringify(bundleJson),
+        body: bodyStr,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+
+    // Also update provenance sidecar with the matching hash so integrity is satisfied and invariant failure is isolated
+    await s5Page.route('**/demo_bundle.json.provenance.json', async (route) => {
+      const response = await route.fetch();
+      const provJson = await response.json();
+      provJson.output_bundle_sha256 = modifiedHash;
+      await route.fulfill({
+        response,
+        body: JSON.stringify(provJson),
         headers: { 'Content-Type': 'application/json' },
       });
     });

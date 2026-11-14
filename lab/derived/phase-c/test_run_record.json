@@ -1,0 +1,17 @@
+{
+  "unit_tests": 804,
+  "synthetic_tests": 93,
+  "frontend_tests": 31,
+  "browser_acceptance_stages": 8,
+  "total_tests": 928,
+  "unique_tests": 928,
+  "duplicate_executions": 0,
+  "tests_passed": 928,
+  "tests_failed": 0,
+  "tests_errors": 0,
+  "focused_tests": 12,
+  "test_command": "python3 -m unittest discover -s lab -p 'test_*.py' && python3 -m unittest discover -s tests -p 'test_*.py' && npm test && npm run test:browser",
+  "timestamp": "2026-11-14T14:24:20Z",
+  "commit_sha": "f58028752b65a2ad37fa78c82cf7a9e683b41ed1",
+  "environment": "Linux 6.18.58.1-microsoft-standard-WSL2 x86_64, Python 3.12.3, Node.js v22.14.0, Google Chrome 157.0.8103.50"
+}
