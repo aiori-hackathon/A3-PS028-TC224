@@ -8,13 +8,17 @@
  */
 
 export interface TimelineEvent {
+  event_index?: number | null;
   timestamp: number;
   source: 'HARNESS' | 'PCAP' | 'BROWSER_TELEMETRY' | string;
   event_type: string;
   family: 'IPv4' | 'IPv6' | null;
   stream_id: string | null;
+  frame_number?: number | null;
   details: string;
   relative_ms: number | null;
+  pcap_sha256?: string | null;
+  source_path?: string | null;
 }
 
 export interface ConnectionAttempt {
@@ -646,9 +650,9 @@ export function validateCampaignInvariants(bundle: HistoricalDemoBundle): Invari
     {
       name: 'S5 HTTP/1.1 Subflows',
       expected: 95,
-      actual: s5FlowsCount || (bundle.reconciliation_summary?.s5_flows_count ?? 95),
-      passed: (s5FlowsCount || (bundle.reconciliation_summary?.s5_flows_count ?? 95)) === 95,
-      description: 'Observed HTTP/1.1 subflows in Scenario S5 (separate campaign measurement)',
+      actual: s5FlowsCount,
+      passed: s5FlowsCount === 95,
+      description: 'Observed HTTP/1.1 subflows in Scenario S5 (calculated strictly from underlying trial records)',
     },
     {
       name: 'Chronological Timeline Integrity',
@@ -665,4 +669,67 @@ export function validateCampaignInvariants(bundle: HistoricalDemoBundle): Invari
       description: 'All 28,330 event timestamps fall within the verified historical campaign execution window',
     },
   ];
+}
+
+export type IntegrityStatus =
+  | 'HASH_MATCHED'
+  | 'HASH_MISMATCHED'
+  | 'HASH_UNAVAILABLE'
+  | 'AUTHENTICITY_NOT_ESTABLISHED';
+
+export interface IntegrityEvaluation {
+  status: IntegrityStatus;
+  computedHash: string | null;
+  expectedHash: string | null;
+  isHashMatched: boolean;
+  isAuthenticityEstablished: boolean;
+  statusLabel: string;
+  description: string;
+}
+
+/**
+ * Evaluates bundle cryptographic digest against provenance sidecar.
+ * Enforces explicit separation between digest consistency and authenticity.
+ */
+export function evaluateEvidenceIntegrity(
+  computedSha256: string | null,
+  sidecar: BundleProvenance | null
+): IntegrityEvaluation {
+  if (!computedSha256 || !sidecar?.output_bundle_sha256) {
+    return {
+      status: 'HASH_UNAVAILABLE',
+      computedHash: computedSha256 || null,
+      expectedHash: sidecar?.output_bundle_sha256 || null,
+      isHashMatched: false,
+      isAuthenticityEstablished: false,
+      statusLabel: 'Hash Unavailable',
+      description: 'Calculated digest or sidecar reference hash is unavailable.',
+    };
+  }
+
+  const expected = sidecar.output_bundle_sha256.toLowerCase().trim();
+  const actual = computedSha256.toLowerCase().trim();
+  const matched = actual === expected;
+
+  if (!matched) {
+    return {
+      status: 'HASH_MISMATCHED',
+      computedHash: actual,
+      expectedHash: expected,
+      isHashMatched: false,
+      isAuthenticityEstablished: false,
+      statusLabel: 'Hash Mismatch (Unverified)',
+      description: 'Bundle SHA-256 digest does not match sidecar reference. Analytical conclusions are unverified.',
+    };
+  }
+
+  return {
+    status: 'HASH_MATCHED',
+    computedHash: actual,
+    expectedHash: expected,
+    isHashMatched: true,
+    isAuthenticityEstablished: false,
+    statusLabel: 'Digest Consistent (Same-Origin)',
+    description: 'Bundle digest matches same-origin sidecar. Independent authenticity is not established.',
+  };
 }

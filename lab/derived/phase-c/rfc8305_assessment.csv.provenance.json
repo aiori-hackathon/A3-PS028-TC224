@@ -1,9 +1,9 @@
 {
   "target_file": "rfc8305_assessment.csv",
-  "sha256": "c6216eccb1c563eec48d020119e08ccf17f0cae971cac6e7b8fa70c7f389e39f",
+  "sha256": "ba469f59ad432628382e25a4259938f77e609e5e70e452fbd6ba295d8630c7ab",
   "row_count": 7,
   "generated_by_command": "python3 lab/export_campaign_evidence.py",
-  "git_commit": "bba2655f7996557df24f4f38a78b2a7e17915cfc",
+  "git_commit": "5c84c93eff12903a1288770029a903aec48ac1a4",
   "git_branch": "fix/phase-e-bundle-timeline-mapping",
   "python_version": "3.12.3",
   "tshark_version": "4.2.2",

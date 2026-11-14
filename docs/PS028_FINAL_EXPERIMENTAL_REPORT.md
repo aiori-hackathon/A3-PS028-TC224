@@ -31,7 +31,7 @@ To address this challenge, the IETF standardized the Happy Eyeballs algorithm (o
 
 The research objectives of the PS-028 campaign are:
 1. **Empirical Verification:** Quantitatively observe and measure Happy Eyeballs connection attempt scheduling, connection attempt delay (CAD) timers, and address family selection in modern production browsers (Google Chrome and Mozilla Firefox) under rigorously controlled network conditions.
-2. **Standard Conformance Assessment:** Assess empirical browser behavior against normative and informative requirements of RFC 8305, including IPv6 preference, CAD floor and default recommendations, immediate fallback upon TCP RST, and Resolution Delay when AAAA records are delayed relative to A records.
+2. **Standard Conformance Assessment:** Assess empirical browser behavior against normative and informative requirements of RFC 8305, including IPv6 preference, CAD floor and default recommendations, empirical response to TCP RST, and Resolution Delay when AAAA records are delayed relative to A records.
 3. **Reproducible Experimental Architecture:** Construct a fully automated, reproducible, unprivileged-safe testbed that enforces strictly sequential trial execution, isolated browser profiles, comprehensive traffic capture, and automated post-trial baseline cleanup.
 
 ---
@@ -74,7 +74,7 @@ RFC 8305 defines the operational state machine for initiating dual-stack transpo
 
 Key timing parameters specified in RFC 8305 include:
 - **Connection Attempt Delay (CAD) Timer (Section 5):** The delay between initiating a connection attempt to the preferred address family (IPv6) and initiating a fallback attempt to the secondary family (IPv4). RFC 8305 mandates that CAD **MUST NOT** be smaller than 10ms, **SHOULD NOT** be smaller than 100ms, defines a recommended default of **250ms**, and specifies a maximum of **2000ms**.
-- **Immediate Fallback on Connection Failure (Section 5):** If the primary connection attempt fails immediately due to an active network rejection (such as an ICMP Port Unreachable or TCP RST), the client **SHOULD** immediately initiate a connection attempt to the next address family without awaiting the CAD timer expiration.
+- **Connection Reset Behavior:** When a TCP RST or ICMP error is received on the primary attempt, clients often accelerate initiating fallback attempts. Note that neither RFC 8305 nor draft HEv3 contains language requiring immediate fallback upon receiving a TCP RST; RFC 8305 Section 5 specifies connection attempt delay and pacing rather than mandating immediate RST retry.
 - **Resolution Delay (Section 3):** When asynchronous DNS responses arrive with the IPv4 (A) response arriving before the IPv6 (AAAA) response, the client **SHOULD** wait for a recommended delay of **50ms** before initiating an IPv4 connection, giving the preferred AAAA response an opportunity to arrive.
 
 ### 3.1 Standards References & Specification Baseline
@@ -368,12 +368,12 @@ S6 (Delayed AAAA 500ms):      [==================== 40 DIRECT_IPV6 ] (0 Fallback
    - Chrome exhibited an exceptionally tight CAD timer distribution: median **300.83ms** (IQR: 0.73ms, mean: 300.95ms, std: 0.63ms).
    - Firefox exhibited a longer, more variable CAD timer: median **408.45ms** (IQR: 149.33ms, mean: 441.60ms, std: 88.09ms).
 3. **S2 (IPv6 TCP RST):** 40/40 trials (100.0%) fell back to IPv4 upon receiving a TCP RST on the IPv6 path.
-   - Chrome exhibited **immediate fallback**: median CAD was **0.71ms** (mean: 1.11ms, std: 1.39ms), conforming to the RFC 8305 recommendation to initiate fallback immediately upon hard connection rejection.
+   - Chrome exhibited **accelerated fallback**: median CAD was **0.71ms** (mean: 1.11ms, std: 1.39ms). Note that neither RFC 8305 nor draft HEv3 contains language requiring immediate fallback upon receiving a TCP RST; RFC 8305 Section 5 specifies connection attempt delay and pacing rather than mandating immediate RST retry. Because wire measurements capture family-first-SYN offsets without logical attempt pairing or state tracking, S2 cannot be validly assessed against the RFC 8305 Section 5 10 ms floor and remains NOT_ASSESSED.
    - Firefox introduced an observable delay before initiating IPv4: median CAD was **160.43ms** (mean: 176.97ms, std: 51.38ms), indicating that Firefox does not immediately schedule the secondary address family upon TCP RST.
 4. **S3 (IPv6 RTT 150ms):** 40/40 trials (100.0%) established `DIRECT_IPV6` connections. Because the 150ms IPv6 RTT is shorter than the browsers' CAD timers (~300ms in Chrome, ~400ms in Firefox), the primary IPv6 3-way handshake finished before the CAD timer expired, successfully preventing unnecessary IPv4 fallback attempts.
 5. **S4 (IPv6 RTT 600ms):** When IPv6 path RTT (600ms) substantially exceeded the CAD timer:
    - Chrome fell back to IPv4 in 20/20 trials (100.0%), with median CAD of **300.81ms**. The IPv4 connection finished in ~25ms, winning the race while IPv6 was still awaiting SYN-ACK.
-   - Firefox fell back to IPv4 in 19/20 trials (95.0%, median CAD: **397.94ms**). In 1 trial (`slot-0136-S4-firefox-rep10`), Firefox did not attempt IPv4, completing direct IPv6 setup in 600.95ms.
+   - Firefox fell back to IPv4 in 19/20 trials (95.0%, median CAD: **397.94ms**). In 1 trial (`trial-20261029222109-5c74c26a`, slot-0136-S4-firefox-rep10), no IPv4 TCP SYN packet was observed in the monitored PCAP (bounded by capture interface, trial capture window, and filter). The IPv6 SYN-to-SYN/ACK interval was 600.949 ms (initial SYN at $t = 3.028042\text{ s}$, SYN/ACK arrival at $t = 3.628991\text{ s}$), 601.045 ms — initial SYN to observed client final ACK transmission ($t = 3.629087\text{ s}$), and initial SYN to wire HTTP 200 response was 1,298.191 ms ($t = 4.326233\text{ s}$). Page-load completion timing is not recorded in the packet capture. Wire packets cannot establish internal browser scheduling, timer suppression, or task queue state; the causal mechanism remains INSUFFICIENT_EVIDENCE.
 6. **S5 (IPv6 SYN Loss 50%):** Under 50% SYN loss, connection outcomes varied based on whether the primary IPv6 SYN was dropped and how retransmissions raced against CAD. In 33 trials (18 Chrome, 15 Firefox), IPv6 completed navigation successfully (including 5 trials where an ancillary favicon request or speculative socket preconnect over IPv4 was observed post-navigation). In 7 trials (2 Chrome, 5 Firefox), IPv6 SYN drops allowed IPv4 to complete connection setup first and win the HTTP navigation.
 7. **S6 (Delayed AAAA 500ms):** In all 40/40 trials (100.0%), both Chrome and Firefox established `DIRECT_IPV6` connections, awaiting the late AAAA response rather than connecting immediately over IPv4.
 
@@ -387,7 +387,7 @@ In scenarios S0–S5, DNS responses for both `A` and `AAAA` records were deliver
 - Chrome observed median A latency of **2.60ms** and AAAA latency of **2.04ms**.
 
 ### S6 DNS Asynchrony Analysis
-Scenario S6 evaluated RFC 8305 Section 3 ("Resolution Delay"). The DNS server delivered `A` responses immediately (0ms delay) while delaying `AAAA` responses by 500ms.
+Scenario S6 evaluated RFC 8305 Section 3 ("Hostname Resolution Query Handling: Resolution Delay"). The DNS server delivered `A` responses immediately (0ms delay) while delaying `AAAA` responses by 500ms.
 
 ```
 DNS Query / Connection Timeline in Scenario S6 (Chrome & Firefox):
@@ -563,13 +563,13 @@ The campaign manifest permanently records two documented mismatches between earl
 
 ### Limitations and Threats to Validity
 1. **Single-Site Topology:** Experiments were conducted within a local synthetic network namespace testbed. While tc netem and nftables reproduce packet-level delays and loss with fidelity, real-world WAN phenomena (BGP route flapping, Path MTU Discovery issues, intermediate middleboxes) were not evaluated.
-2. **Profile Isolation vs. Caching:** To guarantee measurement independence, ephemeral browser profiles were used for every trial. This intentionally precluded evaluating RFC 8305 Section 7 ("Statefulness"), which permits clients to cache historical connection failures across sessions.
+2. **Profile Isolation vs. Caching:** To guarantee measurement independence, ephemeral browser profiles were used for every trial. This intentionally precluded evaluating RFC 8305 Section 4 ("Sorting Addresses"), which discusses destination address sorting per RFC 6724, historical RTT information, and previously used addresses. Section 7 ("Supporting IPv6-Only Networks with NAT64 and DNS64") addresses NAT64 and DNS64 operation.
 3. **Transport Scope:** In accordance with PS-028 specifications, measurements evaluated HTTP/1.1 over TCP. Alternate transport protocols such as HTTP/3 over QUIC were out of scope.
 
 ### Future Improvements
 1. Extend telemetry collection to extract raw HTTP payload byte counters directly from socket buffers rather than process stdout.
 2. Incorporate Multi-Prefix IPv6 environments and NAT64/DNS64 synthesis topologies.
-3. Develop stateful multi-trial sequences to explicitly evaluate RFC 8305 Section 7 adaptive past-failure caching.
+3. Develop stateful multi-trial sequences to explicitly evaluate RFC 8305 Section 4 adaptive past-failure caching.
 
 ---
 
@@ -648,6 +648,6 @@ The PS-028 live measurement campaign (`ps028-a10-live-20261030-01`) successfully
 
 1. **IPv6 Preference:** Both browsers exhibit 100% IPv6 preference under normal dual-stack conditions, incurring zero dual-stack connection penalty when IPv6 paths are healthy.
 2. **CAD Timer Implementation:** Google Chrome implements an exceptionally consistent CAD timer centered at **~300ms**, whereas Mozilla Firefox implements a slightly more relaxed CAD timer averaging **~408–441ms**.
-3. **Active Rejection (TCP RST):** Chrome demonstrates immediate fallback (< 1ms CAD) upon receiving a TCP RST, fully satisfying RFC 8305 recommendations. Firefox introduces an observable delay (~160ms) before initiating fallback.
+3. **Active Rejection (TCP RST):** Under TCP RST, Chrome initiated an IPv4 attempt rapidly (< 1ms family-first-SYN offset), while Firefox introduced an observable delay (~160ms). Neither RFC 8305 nor HEv3 mandates immediate retry upon TCP RST; because wire packets capture family-first-SYN offsets without verified logical attempt pairing, S2 cannot be evaluated for the 10 ms floor and remains NOT_ASSESSED.
 4. **Delayed DNS Resolution:** Neither browser initiated an IPv4 fallback after the RFC 8305 Section 3 recommended 50ms Resolution Delay when AAAA records were delayed by 500ms; both waited for the late AAAA response and connected directly over IPv6.
 5. **Measurement Integrity:** The testbed architecture demonstrated robust isolation, zero packet capture loss, atomic manifest tracking, and complete preservation of historical evidence.

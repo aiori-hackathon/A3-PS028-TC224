@@ -19,6 +19,7 @@ import {
   computeCohortMetrics,
   auditPrimaryHandshakeOrdering,
   validateCampaignInvariants,
+  evaluateEvidenceIntegrity,
   AUTHORITATIVE_SCENARIOS,
 } from '../src/lib/historical-evidence.ts';
 
@@ -52,7 +53,7 @@ describe('PS-028 Historical Evidence Explorer Test Suite (TASK 6A Reconciled)', 
     const computedHash = crypto.createHash('sha256').update(rawBundleBytes).digest('hex');
     assert.equal(computedHash, provenance.output_bundle_sha256, 'Computed SHA-256 must match provenance sidecar');
     assert.equal(provenance.generator_script, 'lab/build_demo_bundle.py');
-    assert.equal(provenance.generator_commit, 'dd010ffeb30ec3565f6f70fe7309e919e5489a13');
+    assert.match(provenance.generator_commit, /^[0-9a-f]{40}$/, 'generator_commit must be a 40-character hex commit SHA');
   });
 
   test('3. Valid-trial versus excluded-trial separation', () => {
@@ -227,6 +228,18 @@ describe('PS-028 Historical Evidence Explorer Test Suite (TASK 6A Reconciled)', 
     assert.ok(check2, 'S2 assessment check must exist');
     assert.equal(check2.check_id, 'RFC8305-SEC5-CAD-10MS-FLOOR');
     assert.equal(check2.overall_observation_status, 'NOT_ASSESSED');
+
+    const check1 = bundle.rfc8305_assessment.find((c) => c.check_id === 'RFC8305-SEC2-IPV6-PREFERENCE');
+    assert.ok(check1, 'Check 1 (RFC8305-SEC2-IPV6-PREFERENCE) must exist');
+    assert.equal(check1.rfc_section, 'RFC 8305 Section 2');
+
+    const check5 = bundle.rfc8305_assessment.find((c) => c.check_id === 'RFC8305-SEC3-RESOLUTION-DELAY');
+    assert.ok(check5, 'Check 5 (RFC8305-SEC3-RESOLUTION-DELAY) must exist');
+    assert.equal(check5.rfc_section, 'RFC 8305 Section 3');
+
+    const check6 = bundle.rfc8305_assessment.find((c) => c.check_id === 'RFC8305-SEC4-HISTORICAL-STATE');
+    assert.ok(check6, 'Check 6 (RFC8305-SEC4-HISTORICAL-STATE) must exist');
+    assert.equal(check6.rfc_section, 'RFC 8305 Section 4');
   });
 
   test('14. Absolute epoch timestamps integrity and actual campaign time range', () => {
@@ -632,5 +645,145 @@ describe('PS-028 Historical Evidence Explorer Test Suite (TASK 6A Reconciled)', 
     assert.equal(s4FfRep10.connection_attempts.filter((a) => a.family === 'IPv4').length, 0);
     assert.equal(s4FfRep10.primary_flow?.winning_family?.toLowerCase(), 'ipv6');
     assert.equal(s4FfRep10.metrics?.connection_attempt_delay_ms, null);
+  });
+
+  test('29. S5 invariant strict flow counting (no summary fallback false pass)', () => {
+    // 1. Valid bundle with 95 underlying flows
+    const normalChecks = validateCampaignInvariants(bundle);
+    const s5Normal = normalChecks.find((c) => c.name === 'S5 HTTP/1.1 Subflows');
+    assert.ok(s5Normal, 'S5 invariant check must exist');
+    assert.equal(s5Normal.actual, 95);
+    assert.equal(s5Normal.passed, true);
+
+    // 2. Mock bundle with fewer than 95 flows (e.g. 94)
+    const mockFewer = JSON.parse(JSON.stringify(bundle));
+    const s5TrialFewer = mockFewer.trials.find((t) => t.scenario_id === 'S5' && t.s5_flow_dissection?.length > 0);
+    s5TrialFewer.s5_flow_dissection.pop();
+    const fewerChecks = validateCampaignInvariants(mockFewer);
+    const s5Fewer = fewerChecks.find((c) => c.name === 'S5 HTTP/1.1 Subflows');
+    assert.equal(s5Fewer.actual, 94);
+    assert.equal(s5Fewer.passed, false, 'Fewer than 95 flows must FAIL');
+
+    // 3. Mock bundle with more than 95 flows (e.g. 96)
+    const mockMore = JSON.parse(JSON.stringify(bundle));
+    const s5TrialMore = mockMore.trials.find((t) => t.scenario_id === 'S5' && t.s5_flow_dissection?.length > 0);
+    s5TrialMore.s5_flow_dissection.push({ ...s5TrialMore.s5_flow_dissection[0] });
+    const moreChecks = validateCampaignInvariants(mockMore);
+    const s5More = moreChecks.find((c) => c.name === 'S5 HTTP/1.1 Subflows');
+    assert.equal(s5More.actual, 96);
+    assert.equal(s5More.passed, false, 'More than 95 flows must FAIL');
+
+    // 4. Mock bundle with empty S5 flow data
+    const mockEmpty = JSON.parse(JSON.stringify(bundle));
+    for (const t of mockEmpty.trials) {
+      if (t.scenario_id === 'S5') t.s5_flow_dissection = [];
+    }
+    const emptyChecks = validateCampaignInvariants(mockEmpty);
+    const s5Empty = emptyChecks.find((c) => c.name === 'S5 HTTP/1.1 Subflows');
+    assert.equal(s5Empty.actual, 0);
+    assert.equal(s5Empty.passed, false, 'Empty S5 flows must FAIL');
+
+    // 5. Mock bundle with missing S5 flow data property
+    const mockMissing = JSON.parse(JSON.stringify(bundle));
+    for (const t of mockMissing.trials) {
+      if (t.scenario_id === 'S5') delete t.s5_flow_dissection;
+    }
+    const missingChecks = validateCampaignInvariants(mockMissing);
+    const s5Missing = missingChecks.find((c) => c.name === 'S5 HTTP/1.1 Subflows');
+    assert.equal(s5Missing.actual, 0);
+    assert.equal(s5Missing.passed, false, 'Missing S5 flow property must FAIL');
+
+    // 6. Mock bundle missing reconciliation summary but with 95 underlying flows
+    const mockNoSummary = JSON.parse(JSON.stringify(bundle));
+    delete mockNoSummary.reconciliation_summary;
+    const noSummaryChecks = validateCampaignInvariants(mockNoSummary);
+    const s5NoSummary = noSummaryChecks.find((c) => c.name === 'S5 HTTP/1.1 Subflows');
+    assert.equal(s5NoSummary.actual, 95);
+    assert.equal(s5NoSummary.passed, true, 'Underlying 95 flows must pass even without reconciliation summary');
+
+    // 7. CRITICAL AUDIT CASE: Reconciliation summary claims 95 while underlying dataset is empty
+    const mockDeceptive = JSON.parse(JSON.stringify(bundle));
+    mockDeceptive.reconciliation_summary = { s5_flows_count: 95 };
+    for (const t of mockDeceptive.trials) {
+      if (t.scenario_id === 'S5') t.s5_flow_dissection = [];
+    }
+    const deceptiveChecks = validateCampaignInvariants(mockDeceptive);
+    const s5Deceptive = deceptiveChecks.find((c) => c.name === 'S5 HTTP/1.1 Subflows');
+    assert.equal(s5Deceptive.actual, 0);
+    assert.equal(s5Deceptive.passed, false, 'Summary fallback must NEVER manufacture a pass when underlying flows are empty');
+  });
+
+  test('30. Cryptographic evidence integrity evaluation states and fail-safe policy', () => {
+    const validHash = provenance.output_bundle_sha256;
+    const invalidHash = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+
+    // 1. Matching bundle and sidecar
+    const resMatched = evaluateEvidenceIntegrity(validHash, provenance);
+    assert.equal(resMatched.status, 'HASH_MATCHED');
+    assert.equal(resMatched.isHashMatched, true);
+    assert.equal(resMatched.isAuthenticityEstablished, false, 'Same-origin hash match must NOT claim independent authenticity');
+    assert.equal(resMatched.statusLabel, 'Digest Consistent (Same-Origin)');
+
+    // 2. Mismatching digest
+    const resMismatch = evaluateEvidenceIntegrity(invalidHash, provenance);
+    assert.equal(resMismatch.status, 'HASH_MISMATCHED');
+    assert.equal(resMismatch.isHashMatched, false);
+    assert.equal(resMismatch.isAuthenticityEstablished, false);
+    assert.equal(resMismatch.statusLabel, 'Hash Mismatch (Unverified)');
+
+    // 3. Missing sidecar
+    const resNoSidecar = evaluateEvidenceIntegrity(validHash, null);
+    assert.equal(resNoSidecar.status, 'HASH_UNAVAILABLE');
+    assert.equal(resNoSidecar.isHashMatched, false);
+
+    // 4. Missing computed hash
+    const resNoComputed = evaluateEvidenceIntegrity(null, provenance);
+    assert.equal(resNoComputed.status, 'HASH_UNAVAILABLE');
+    assert.equal(resNoComputed.isHashMatched, false);
+
+    // 5. Missing expected hash in sidecar
+    const emptySidecar = { ...provenance, output_bundle_sha256: '' };
+    const resEmptySidecar = evaluateEvidenceIntegrity(validHash, emptySidecar);
+    assert.equal(resEmptySidecar.status, 'HASH_UNAVAILABLE');
+    assert.equal(resEmptySidecar.isHashMatched, false);
+  });
+
+  test('31. Event-level packet provenance preservation in bundle timeline events', () => {
+    // 1. Inspect trials in bundle to confirm event_index, frame_number, pcap_sha256, source_path exist on PCAP events
+    let pcapEventsChecked = 0;
+    let nonPcapEventsChecked = 0;
+    for (const trial of bundle.trials) {
+      for (const ev of trial.timeline_events || []) {
+        if (ev.source === 'PCAP') {
+          pcapEventsChecked++;
+          assert.ok(typeof ev.event_index === 'number', `Event index must be number for ${trial.trial_id}`);
+          assert.ok(typeof ev.frame_number === 'number', `Frame number must be number for ${trial.trial_id}`);
+          assert.match(ev.pcap_sha256, /^[0-9a-f]{64}$/, `PCAP hash must be 64-char hex for ${trial.trial_id}`);
+          assert.ok(typeof ev.source_path === 'string' && ev.source_path.length > 0, `Source path must exist for ${trial.trial_id}`);
+        } else {
+          nonPcapEventsChecked++;
+          assert.ok(typeof ev.event_index === 'number', `Non-PCAP event index must be number for ${trial.trial_id}`);
+          assert.strictEqual(ev.frame_number, null, `Non-PCAP frame_number must legitimately remain null for ${trial.trial_id}`);
+        }
+      }
+    }
+    assert.ok(pcapEventsChecked > 0, 'Must have verified PCAP events with packet-level provenance');
+    assert.ok(nonPcapEventsChecked > 0, 'Must have verified non-PCAP events with legitimate null frame_number');
+
+    // 2. Direct CSV-to-bundle value comparison for sample trial
+    const sampleTrial = bundle.trials.find((t) => t.trial_id === 'trial-20261029205425-6cb90a54');
+    assert.ok(sampleTrial, 'Sample trial must exist in bundle');
+    const pcapEv = sampleTrial.timeline_events.find((e) => e.source === 'PCAP' && e.frame_number === 102);
+    assert.ok(pcapEv, 'PCAP frame 102 must exist in sample trial');
+    assert.strictEqual(pcapEv.event_index, 86);
+    assert.strictEqual(pcapEv.frame_number, 102);
+    assert.strictEqual(pcapEv.pcap_sha256, '69fd09eb63b53f2be42428e40d99ed61eeef4da47bead93fe129ecab1ba47f72');
+    assert.strictEqual(pcapEv.source_path, 'lab/campaigns/ps028-a10-live-20261030-01/trials/trial-20261029205425-6cb90a54/capture.pcap');
+
+    const harnessEv = sampleTrial.timeline_events.find((e) => e.source === 'HARNESS' && e.event_index === 1);
+    assert.ok(harnessEv, 'HARNESS event 1 must exist in sample trial');
+    assert.strictEqual(harnessEv.event_index, 1);
+    assert.strictEqual(harnessEv.frame_number, null);
+    assert.strictEqual(harnessEv.source_path, 'lab/campaigns/ps028-a10-live-20261030-01/trials/trial-20261029205425-6cb90a54/result.json');
   });
 });

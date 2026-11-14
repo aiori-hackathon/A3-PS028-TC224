@@ -178,18 +178,47 @@
     background: #ffffff;
     border: 0.5pt solid #c5d2f6;
     border-radius: 1.5mm;
-    padding: 2mm;
+    padding: 1.5mm 1.2mm;
     text-align: center;
   }
   .stat-val {
-    font-size: 11pt;
+    font-size: 10.5pt;
     font-weight: 700;
     color: #0000DC;
   }
   .stat-lbl {
     font-size: 5.5pt;
     color: #555;
+    margin-top: 0.4mm;
+  }
+  .stat-caption {
+    font-size: 5.6pt;
+    color: #555;
     margin-top: 0.5mm;
+    line-height: 1.15;
+  }
+  table.timeline-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 5.6pt;
+    line-height: 1.2;
+    margin-top: 0.8mm;
+  }
+  table.timeline-table th {
+    background-color: #0000DC;
+    color: #ffffff;
+    font-weight: 700;
+    padding: 0.8mm 1.5mm;
+    text-align: left;
+    border: 0.5pt solid #0000DC;
+  }
+  table.timeline-table td {
+    padding: 0.65mm 1.5mm;
+    border: 0.5pt solid #d0d7de;
+    vertical-align: top;
+  }
+  table.timeline-table tr:nth-child(even) {
+    background-color: #f6f8fa;
   }
 </style>
 </head>
@@ -199,10 +228,10 @@
 <div class="slide title-slide">
   <div class="title-badge">AIORI HACKATHON 3 · PROBLEM STATEMENT PS-028</div>
   <div class="main-title">Happy Eyeballs IPv4/IPv6 Fallback Measurement</div>
-  <div class="sub-title">Controlled Empirical Evaluation, RFC 8305 Standards Conformance, and Microsecond-Scale Dual-Stack Transport Racing</div>
+  <div class="sub-title">Controlled Empirical Evaluation, Selected RFC 8305 Requirements Assessment, and Dual-Stack Transport Racing</div>
   <div class="team-info">
     <strong>Team AlgoRhythm (TC224)</strong><br>
-    Repository: <code>aiori-hackathon/A3-PS028-TC224</code> · Branch: <code>regional/ps028-phase-cd</code><br>
+    Repository: <code>aiori-hackathon/A3-PS028-TC224</code> · Working Branch: <code>work/ps028-p1-remediation</code> (Historical Derivation: <code>regional/ps028-phase-cd</code>)<br>
     Authoritative Campaign: <code>ps028-a10-live-20261030-01</code> · Verified: November 2026
   </div>
 </div>
@@ -213,23 +242,27 @@
     <div class="slide-title">Abstract & Problem Description</div>
     <div class="slide-badge">Section 1 · Slide 2/11</div>
   </div>
-  <div class="block">
-    <div class="block-title">The Dual-Stack Fallback Challenge</div>
+  <div class="block" style="padding: 1.8mm 3.5mm; margin-bottom: 1.5mm;">
+    <div class="block-title" style="margin-bottom: 0.8mm;">The Dual-Stack Fallback Challenge</div>
     <div class="content-text">
       As the global Internet migrates toward IPv6-dominant networks, client operating systems and browsers operate in mixed dual-stack environments where IPv6 paths may experience silent blackholing, router drops, or severe latency degradation. Standard TCP connection timeouts (21–75 seconds) cause severe application stalls if IPv6 is naively serialized. Happy Eyeballs (RFC 8305) addresses this by racing address families.
     </div>
   </div>
-  <div class="block">
-    <div class="block-title">PS-028 Experimental Campaign Highlights</div>
-    <div class="stat-grid">
+  <div class="block" style="padding: 1.8mm 3.5mm; margin-bottom: 1.5mm;">
+    <div class="block-title" style="margin-bottom: 0.8mm;">PS-028 Experimental Campaign Highlights</div>
+    <div class="stat-grid" style="margin-top: 0.8mm;">
       <div class="stat-card"><div class="stat-val">280</div><div class="stat-lbl">Valid Live Trials (0 Drops)</div></div>
       <div class="stat-card"><div class="stat-val">154 (55.0%)</div><div class="stat-lbl">Direct IPv6 Wins</div></div>
       <div class="stat-card"><div class="stat-val">126 (45.0%)</div><div class="stat-lbl">IPv4 Fallback Wins</div></div>
-      <div class="stat-card"><div class="stat-val">866/881</div><div class="stat-lbl">Passing (881 Unique, 199 100%)</div></div>
+      <div class="stat-card">
+        <div class="stat-val">929/929</div>
+        <div class="stat-lbl">Passing (929 Unique · 100% PASS)</div>
+        <div class="stat-caption">P1 validation snapshot<br>14 Nov 2026 · ee59362ac3f5</div>
+      </div>
     </div>
   </div>
-  <div class="content-text" style="margin-top: 1.5mm;">
-    <strong>Core Findings:</strong> Both Google Chrome 156 and Mozilla Firefox 159 demonstrate robust dual-stack fallback under SYN blackholing (S1) and TCP RST (S2). Under delayed AAAA DNS (S6, 500 ms), both wait for late AAAA responses rather than triggering 50 ms Resolution Delay fallback. <em>Test Inventory Audit:</em> 881 unique tests discovered across repository (788 in <code>lab/</code>, 93 in <code>tests/</code>; 0 duplicate executions): 866 passed, 4 failed, 11 errors in unprivileged environment; 199 focused regression tests pass 100%.
+  <div class="content-text" style="margin-top: 1mm;">
+    <strong>Core Findings:</strong> Both Google Chrome 156 and Mozilla Firefox 159 demonstrated dual-stack fallback under SYN blackholing (S1) and IPv6 TCP RST rejection (S2). Under delayed AAAA DNS (S6, 500 ms), both waited for the AAAA response rather than triggering the 50 ms Resolution Delay.
   </div>
   <div class="slide-footer">
     <span>AIORI-3 PS-028: Happy Eyeballs Fallback Measurement</span>
@@ -249,7 +282,7 @@
       <div class="block">
         <div class="block-title">Happy Eyeballs v2 (RFC 8305) Principles</div>
         <ul class="content-list">
-          <li><strong>IPv6 Preference (§3):</strong> Resolvers return both A and AAAA; clients prefer IPv6 for the initial attempt.</li>
+          <li><strong>IPv6 Preference (§2 / RFC 6724):</strong> Resolvers return both A and AAAA; host destination policy favors IPv6 for initial attempt.</li>
           <li><strong>Resolution Delay (§3):</strong> If A arrives before AAAA, client RECOMMENDED to wait 50 ms before launching IPv4.</li>
           <li><strong>Connection Attempt Delay (CAD, §5):</strong> If IPv6 attempt does not complete, subsequent IPv4 attempt starts after CAD timer (recommended default 250 ms, bounds 100–2000 ms).</li>
           <li><strong>Mandatory Floor (§5):</strong> Subsequent attempts MUST NOT start within 10 ms of previous attempt.</li>
@@ -263,7 +296,7 @@
           <li><strong>Client NS (<code>ps028-cl</code>):</strong> Clean profile execution, unprivileged browser runners, isolated resolver.</li>
           <li><strong>Router NS (<code>ps028-rt</code>):</strong> Dedicated veth routing with Linux <code>tc-netem</code> shaping and <code>nftables</code> stateful dropping.</li>
           <li><strong>Server NS (<code>ps028-sv</code>):</strong> Independent IPv4/IPv6 dual-stack legs (<code>ps028-rt-sv4</code> / <code>ps028-rt-sv6</code>) preventing cross-family impairment coupling.</li>
-          <li><strong>Controlled DNS:</strong> Custom Python UDP DNS server supporting microsecond delay injection per family.</li>
+          <li><strong>Controlled DNS:</strong> Custom Python UDP DNS responder supporting nominal millisecond-valued per-family delay configuration. Effective delay accuracy and scheduling jitter were not independently calibrated to establish microsecond-level precision.</li>
         </ul>
       </div>
     </div>
@@ -308,7 +341,7 @@
       <tr>
         <td><strong>Sattler et al. (ACM IMC 2025)</strong><br>"Lazy Eye Inspection"</td>
         <td>Empirical Browser Study</td>
-        <td>Investigated desktop and mobile browsers; observed significant deviations from RFC 8305 default timers, including aggressive sub-10ms fallback in Chromium on RST.</td>
+        <td>Investigated desktop and mobile browsers. Packet observations included sub-10ms raw family-first-SYN offsets in some Chromium S2 trials following IPv6 TCP RST events. Because logical sequential connection-attempt pairing and socket-level causality were not established, these observations are not treated as measured CAD values or evidence of RFC 8305 §5 non-conformance. S2 remains NOT_ASSESSED against the 10ms mandatory floor.</td>
       </tr>
     </tbody>
   </table>
@@ -541,13 +574,13 @@
     <div class="slide-title">Deployment Timeline: Milestones M1–M7</div>
     <div class="slide-badge">Section 8 · Slide 9/11</div>
   </div>
-  <table class="data-table">
+  <table class="timeline-table">
     <thead>
       <tr>
         <th style="width: 14%;">Milestone</th>
-        <th style="width: 22%;">Focus Area</th>
+        <th style="width: 19%;">Focus Area</th>
         <th>Delivered Architecture & Verifying Artifacts</th>
-        <th style="width: 12%;">Status</th>
+        <th style="width: 14%;">Status</th>
       </tr>
     </thead>
     <tbody>
@@ -584,14 +617,14 @@
       <tr>
         <td><strong>M6 (Phase D)</strong></td>
         <td>Research Sweeps</td>
-        <td>Pre-registered RTT & DNS sweeps (D1–D5 in deterministic simulation mode; zero live network commands executed); crossover intervals; D4 qualitative literature comparison; D5 partner manifest.</td>
+        <td>Pre-registered RTT & DNS sweeps (D1–D5 simulation mode; zero live network commands executed); crossover intervals; D4 literature comparison; D5 partner manifest.</td>
         <td><strong style="color: #c62828;">PAUSED - SIMULATION ONLY</strong></td>
       </tr>
       <tr>
         <td><strong>M7 (Phase E)</strong></td>
         <td>Final Handover</td>
-        <td>PS-028 compliance matrix, offline PCAP replay demonstration tool (<code>lab/demo_replay.py</code>), pseudocode kit, 881 unique tests discovered across repository (788 in lab/, 93 in tests/; 0 duplicate executions; 866 passed, 4 failed, 11 errors in unprivileged sandbox; 199 focused regression tests 100% PASS).</td>
-        <td><strong style="color: #2e7d32;">READY (Owner Handover Pending)</strong></td>
+        <td>PS-028 compliance matrix, offline PCAP replay demonstration tool (<code>lab/demo_replay.py</code>), pseudocode kit; dated P1 validation snapshot (commit <code>ee59362ac3f5</code>: 929 unique tests 100% PASS; separate 16 static checks & 8-stage browser suite; remote CI not configured/recorded).</td>
+        <td><strong style="color: #2e7d32;">COMPLETED (Transferred to aiori-hackathon)</strong></td>
       </tr>
     </tbody>
   </table>
@@ -635,7 +668,7 @@
     <strong>Deliverable Status & Evidence Integrity:</strong><br>
     ✓ Phase C: 280 Valid Live Trials Reconciled & Dissected from Authentic PCAPs (0 Indeterminate Flows)<br>
     ✓ Historical Integrity: 705 Campaign Files Sealed with 100% Cryptographic SHA-256 Proof (Rule R2)<br>
-    ✓ Automated Test Suite: 881 Unique Tests Discovered Across lab/ and tests/ (0 Duplicate Executions; 866 Passed, 4 Failed, 11 Errors in unprivileged sandbox; 199 Focused Regression Tests 100% PASS)<br>
+    ✓ Automated Test Suite: 929 Unique Tests (805 lab, 93 integration, 31 frontend; 929 passed, 0 failures, 0 errors; 100% PASS on commit <code>ee59362ac3f5</code>; separate 16 static checks & 8-stage / 53-assertion real-browser suite; remote CI not configured/recorded)<br>
     ✓ Phase D Sweeps: Pre-Registered Simulation Mode (Zero Live Network/Sudo Operations Executed; Rule R1 Disclosed)
   </div>
 </div>

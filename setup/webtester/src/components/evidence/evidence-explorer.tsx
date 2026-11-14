@@ -7,6 +7,8 @@ import {
   deriveRelativeOffsetMs,
   AUTHORITATIVE_SCENARIOS,
   auditPrimaryHandshakeOrdering,
+  evaluateEvidenceIntegrity,
+  type IntegrityEvaluation,
 } from '@/lib/historical-evidence.ts';
 import {
   ShieldCheck,
@@ -156,6 +158,12 @@ export const EvidenceExplorer: React.FC = () => {
 
   const totalPages = Math.max(1, Math.ceil(filteredTrials.length / pageSize));
 
+  // Cryptographic evidence integrity evaluation
+  const integrity = useMemo(
+    () => evaluateEvidenceIntegrity(computedSha256, provenance),
+    [computedSha256, provenance]
+  );
+
   // Currently selected trial object
   const selectedTrial = useMemo(() => {
     if (!bundle?.trials || !selectedTrialId) return null;
@@ -264,7 +272,29 @@ export const EvidenceExplorer: React.FC = () => {
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8" data-testid="evidence-explorer-mounted">
+      {/* =========================================================================
+          FAIL-SAFE BANNER: Hash Mismatch / Unverified Inspection Mode Notice
+          ========================================================================= */}
+      {integrity.status === 'HASH_MISMATCHED' && (
+        <div
+          data-testid="integrity-mismatch-banner"
+          className="rounded-xl border border-rose-500/50 bg-rose-500/10 p-5 shadow-sm space-y-2 text-rose-900 dark:text-rose-200"
+          role="alert"
+        >
+          <div className="flex items-center gap-2 font-bold text-base text-rose-600 dark:text-rose-400">
+            <AlertTriangle className="size-5 shrink-0" />
+            <span>CRITICAL: Cryptographic Hash Mismatch — Operating in Unverified Inspection Mode</span>
+          </div>
+          <p className="text-xs leading-relaxed">
+            The browser-calculated SHA-256 digest of <code>demo_bundle.json</code> (<code>{integrity.computedHash?.slice(0, 16)}...</code>) does not match the digest recorded in the provenance sidecar (<code>{integrity.expectedHash?.slice(0, 16)}...</code>).
+          </p>
+          <p className="text-xs font-semibold">
+            All analytical summaries, compliance evaluations, and invariant checks are UNVERIFIED and cannot be certified as authentic evidence.
+          </p>
+        </div>
+      )}
+
       {/* =========================================================================
           TOP BANNER: Strict Isolation Notice & Campaign Metadata
           ========================================================================= */}
@@ -285,16 +315,27 @@ export const EvidenceExplorer: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2">
-            {shaMatch === true ? (
-              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded text-xs font-medium bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30">
-                <ShieldCheck className="size-3.5" /> Provenance Verified
+            {integrity.status === 'HASH_MATCHED' ? (
+              <span
+                data-testid="integrity-status-badge"
+                className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded text-xs font-medium bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30"
+                title="Bundle digest matches same-origin sidecar. Independent authenticity is not established."
+              >
+                <ShieldCheck className="size-3.5" /> Digest Consistent (Same-Origin)
               </span>
-            ) : shaMatch === false ? (
-              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded text-xs font-medium bg-rose-500/15 text-rose-700 dark:text-rose-400 border border-rose-500/30">
-                <AlertTriangle className="size-3.5" /> Hash Mismatch
+            ) : integrity.status === 'HASH_MISMATCHED' ? (
+              <span
+                data-testid="integrity-status-badge"
+                className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded text-xs font-medium bg-rose-500/15 text-rose-700 dark:text-rose-400 border border-rose-500/30 font-semibold"
+                title="Bundle hash mismatch: Unverified Mode"
+              >
+                <AlertTriangle className="size-3.5" /> Hash Mismatch (Unverified)
               </span>
             ) : (
-              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded text-xs font-medium bg-muted text-muted-foreground">
+              <span
+                data-testid="integrity-status-badge"
+                className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded text-xs font-medium bg-muted text-muted-foreground"
+              >
                 <ShieldCheck className="size-3.5" /> Hash Check Ready
               </span>
             )}
@@ -463,8 +504,22 @@ export const EvidenceExplorer: React.FC = () => {
 
             <div className="p-4 rounded-lg border bg-card shadow-xs">
               <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Integrity Audit</div>
-              <div className="text-2xl font-bold mt-1 text-emerald-600 dark:text-emerald-400">100%</div>
-              <div className="text-xs text-muted-foreground mt-1">Bit-for-bit SHA-256 match</div>
+              {integrity.status === 'HASH_MATCHED' ? (
+                <>
+                  <div className="text-2xl font-bold mt-1 text-emerald-600 dark:text-emerald-400">Digest Matched</div>
+                  <div className="text-xs text-muted-foreground mt-1">Same-origin digest consistent</div>
+                </>
+              ) : integrity.status === 'HASH_MISMATCHED' ? (
+                <>
+                  <div className="text-2xl font-bold mt-1 text-rose-600 dark:text-rose-400">FAILED</div>
+                  <div className="text-xs text-rose-600 dark:text-rose-400 font-medium mt-1">Hash Mismatch (Unverified)</div>
+                </>
+              ) : (
+                <>
+                  <div className="text-2xl font-bold mt-1 text-muted-foreground">Pending</div>
+                  <div className="text-xs text-muted-foreground mt-1">Integrity check pending</div>
+                </>
+              )}
             </div>
           </div>
 
@@ -477,8 +532,21 @@ export const EvidenceExplorer: React.FC = () => {
                   Dynamic reconciliation of loaded JSON against historical campaign invariants.
                 </p>
               </div>
-              <span className="text-xs font-mono px-2.5 py-1 rounded bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20">
-                All 7 Invariants Verified
+              <span
+                data-testid="invariants-status-badge"
+                className={`text-xs font-mono px-2.5 py-1 rounded border ${
+                  integrity.status === 'HASH_MISMATCHED'
+                    ? 'bg-rose-500/10 text-rose-700 dark:text-rose-400 border-rose-500/20'
+                    : invariantChecks.every((inv) => inv.passed)
+                    ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20'
+                    : 'bg-rose-500/10 text-rose-700 dark:text-rose-400 border-rose-500/20'
+                }`}
+              >
+                {integrity.status === 'HASH_MISMATCHED'
+                  ? 'Unverified (Hash Mismatch)'
+                  : invariantChecks.every((inv) => inv.passed)
+                  ? `${invariantChecks.length} Invariants Satisfied`
+                  : `${invariantChecks.filter((i) => !i.passed).length} Invariant Failed`}
               </span>
             </div>
 
@@ -1364,20 +1432,27 @@ export const EvidenceExplorer: React.FC = () => {
                   <table className="w-full text-xs">
                     <thead className="sticky top-0 bg-card border-b z-10">
                       <tr className="text-left font-medium text-muted-foreground">
+                        <th className="p-2 w-12">#</th>
                         <th className="p-2 w-28">Δt (ms)</th>
                         <th className="p-2 w-44">Absolute Timestamp</th>
-                        <th className="p-2 w-32">Source</th>
-                        <th className="p-2 w-44">Event Type</th>
+                        <th className="p-2 w-28">Source</th>
+                        <th className="p-2 w-40">Event Type</th>
                         <th className="p-2 w-16">Family</th>
                         <th className="p-2 w-16">Stream</th>
-                        <th className="p-2">Details</th>
+                        <th className="p-2 w-16">Frame</th>
+                        <th className="p-2">Details & Provenance</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y font-mono">
                       {selectedTrialTimelineEvents.map((ev, idx) => {
                         const relMs = deriveRelativeOffsetMs(selectedTrial.timeline_events, ev.timestamp);
+                        const frameLabel = ev.frame_number !== null && ev.frame_number !== undefined ? `#${ev.frame_number}` : '—';
+                        const provTitle = `${ev.details}${ev.frame_number ? ` (Frame #${ev.frame_number})` : ''}${ev.pcap_sha256 ? ` | PCAP: ${ev.pcap_sha256.slice(0, 16)}...` : ''}${ev.source_path ? ` | Source: ${ev.source_path}` : ''}`;
                         return (
                           <tr key={idx} className="hover:bg-muted/20">
+                            <td className="p-2 font-mono text-[11px] text-muted-foreground">
+                              {ev.event_index !== null && ev.event_index !== undefined ? ev.event_index : idx + 1}
+                            </td>
                             <td className="p-2 font-semibold text-primary">
                               {relMs !== null ? `+${relMs.toFixed(2)} ms` : '—'}
                             </td>
@@ -1402,8 +1477,15 @@ export const EvidenceExplorer: React.FC = () => {
                             <td className="p-2 font-semibold text-foreground">{ev.event_type}</td>
                             <td className="p-2">{ev.family || '—'}</td>
                             <td className="p-2">{ev.stream_id || '—'}</td>
-                            <td className="p-2 text-muted-foreground font-sans truncate max-w-md" title={ev.details}>
-                              {ev.details}
+                            <td className="p-2 text-muted-foreground font-mono">{frameLabel}</td>
+                            <td className="p-2 text-muted-foreground font-sans max-w-md" title={provTitle}>
+                              <div className="text-foreground truncate">{ev.details}</div>
+                              {ev.source_path && (
+                                <div className="text-[10px] text-muted-foreground/80 font-mono truncate">
+                                  <span>source: {ev.source_path}</span>
+                                  {ev.pcap_sha256 ? <span> | sha256: {ev.pcap_sha256.slice(0, 16)}...</span> : null}
+                                </div>
+                              )}
                             </td>
                           </tr>
                         );
@@ -1494,9 +1576,21 @@ export const EvidenceExplorer: React.FC = () => {
                   Authoritative sidecar details from <code>demo_bundle.json.provenance.json</code>.
                 </p>
               </div>
-              <span className="px-2.5 py-1 rounded text-xs font-mono bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1.5">
-                <ShieldCheck className="size-4" /> Bit-for-bit SHA-256 Match
-              </span>
+              {integrity.status === 'HASH_MISMATCHED' ? (
+                <span
+                  data-testid="provenance-integrity-status-badge"
+                  className="px-2.5 py-1 rounded text-xs font-mono bg-rose-500/10 text-rose-700 dark:text-rose-400 border border-rose-500/20 flex items-center gap-1.5 font-semibold"
+                >
+                  <AlertTriangle className="size-4" /> Cryptographic Mismatch (Unverified)
+                </span>
+              ) : (
+                <span
+                  data-testid="provenance-integrity-status-badge"
+                  className="px-2.5 py-1 rounded text-xs font-mono bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1.5"
+                >
+                  <ShieldCheck className="size-4" /> Bit-for-bit SHA-256 Match
+                </span>
+              )}
             </div>
 
             <div className="grid sm:grid-cols-2 gap-4 text-xs font-mono">

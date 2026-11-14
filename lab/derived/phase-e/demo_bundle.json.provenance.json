@@ -2,7 +2,7 @@
   "bundle_schema_version": "1.0.0",
   "campaign_id": "ps028-a10-live-20261030-01",
   "evidence_type": "HISTORICAL_LIVE",
-  "generator_commit": "dd010ffeb30ec3565f6f70fe7309e919e5489a13",
+  "generator_commit": "f58028752b65a2ad37fa78c82cf7a9e683b41ed1",
   "generator_script": "lab/build_demo_bundle.py",
   "generator_version": "1.0.0",
   "input_files_sha256": {
@@ -11,11 +11,11 @@
     "connection_attempts.csv": "9034dc85d9a8a123d12e8f9c1328cbf506e4f44a65f17d969e6d38c46b082cf7",
     "pcap_sha256_checksums.txt": "78a4fb9fff6d106a296de531e91bd9e48382224e097f8d6114049ed9bf77cb70",
     "reconciliation_report.csv": "d524f245b93a3a1714314b7b0ea3cabc6003b1bb661701953f7c2552d63ae201",
-    "rfc8305_assessment.csv": "c6216eccb1c563eec48d020119e08ccf17f0cae971cac6e7b8fa70c7f389e39f",
+    "rfc8305_assessment.csv": "ba469f59ad432628382e25a4259938f77e609e5e70e452fbd6ba295d8630c7ab",
     "s5_flow_dissection.csv": "73e7b238990e822b30cd926e5f709c36e76730f0c3857747ff78baa6d9ae3ac0",
     "trial_timeline.csv": "8ec432bed4fe7533b82a2735767c90525b95d521d840d5b67fd7024387057de5"
   },
-  "output_bundle_sha256": "268b69048024e4aeada9adca0252791efe56178fc551537221090539108ea29f",
+  "output_bundle_sha256": "42fad72c342c0e986c12502b0f9f82dbfc2d22fed0ea7e2709ee4469588c4b86",
   "rederived_trials_sha256": {
     "trial-20261029205425-6cb90a54.json": "e158923e099f3bd5dd7d95349f4f113c03a0f830ea65de11a5725d76cdc6128d",
     "trial-20261029205924-355df0f7.json": "65ea50d030cfba36843093dcde2216c65abccfb29ab9c0d11205b46173753e39",

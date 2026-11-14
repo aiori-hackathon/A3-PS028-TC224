@@ -169,7 +169,7 @@ class TestTier1DualStackRacing(unittest.TestCase):
         self.assertEqual(v6_attempt.outcome, ConnectionOutcome.TIMEOUT.value)
 
     def test_dual_stack_racing_tcp_rst_immediate_fallback(self):
-        """Under S2 (IPv6 TCP RST), RFC 8305 §5 mandates immediate fallback without waiting for CAD."""
+        """Under S2 (IPv6 TCP RST), simulator models accelerated fallback upon active rejection; note that neither RFC 8305 nor draft HEv3 mandates immediate fallback upon TCP RST."""
         sim = HappyEyeballsSimulator(
             connection_attempt_delay_ms=250.0,
             ipv6_rtt_ms=20.0,

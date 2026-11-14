@@ -286,8 +286,22 @@ def compute_sha256(file_path: Path) -> str:
     return hasher.hexdigest().lower()
 
 
-def get_git_commit_sha(repo_root: Path) -> str:
+def get_git_commit_sha(repo_root: Path, script_rel: Optional[str] = "lab/build_demo_bundle.py") -> str:
     """Retrieve generator git commit SHA without volatile timestamps."""
+    if script_rel:
+        try:
+            proc = subprocess.run(
+                ["git", "log", "-n", "1", "--pretty=format:%H", "--", script_rel],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            sha = proc.stdout.strip()
+            if sha:
+                return sha
+        except Exception:
+            pass
     try:
         proc = subprocess.run(
             ["git", "rev-parse", "HEAD"],
@@ -693,13 +707,17 @@ def build_demonstration_bundle(
             total_events += 1
             tid = r["trial_id"]
             timeline_by_trial.setdefault(tid, []).append({
+                "event_index": parse_int_or_none(r.get("event_index")),
                 "timestamp": parse_float_or_none(r.get("event_timestamp_epoch")),
                 "relative_ms": parse_float_or_none(r.get("relative_ms")),  # Retain as null; Phase C CSV provides absolute epoch timestamps
                 "source": r.get("event_source") or None,
                 "event_type": r.get("event_type"),
                 "family": r.get("address_family") or None,
                 "stream_id": r.get("tcp_stream") or None,
+                "frame_number": parse_int_or_none(r.get("frame_number")),
                 "details": r.get("details"),
+                "pcap_sha256": r.get("pcap_sha256") or None,
+                "source_path": r.get("source_path") or None,
             })
 
     if total_events != EXPECTED_TIMELINE_EVENTS_COUNT:
