@@ -827,7 +827,7 @@ def generate_presentation_html(m: Dict[str, Any]) -> str:
         <td><strong>M7 (Phase E)</strong></td>
         <td>Final Handover</td>
         <td>PS-028 compliance matrix, offline PCAP replay demonstration tool (<code>lab/demo_replay.py</code>), pseudocode kit; dated P1 validation snapshot (commit <code>{p1_commit_short}</code>: {p1_unique} unique tests 100% PASS; separate {p1_smoke} static checks & {p1_browser_stages}-stage browser suite; remote CI not configured/recorded).</td>
-        <td><strong style="color: #2e7d32;">READY (Owner Handover Pending)</strong></td>
+        <td><strong style="color: #2e7d32;">COMPLETED (Transferred to aiori-hackathon)</strong></td>
       </tr>
     </tbody>
   </table>
