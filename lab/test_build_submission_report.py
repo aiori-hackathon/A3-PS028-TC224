@@ -222,6 +222,83 @@ class TestBuildSubmissionReport(unittest.TestCase):
                 content,
                 f"{file_path} must state S2 NOT_ASSESSED status",
             )
+            self.assertNotIn(
+                "881 unique",
+                content.lower(),
+                f"{file_path} must not contain outdated 881 unique tests claim",
+            )
+            self.assertNotIn(
+                "866 passed",
+                content.lower(),
+                f"{file_path} must not contain outdated 866 passed tests claim",
+            )
+            self.assertNotIn(
+                "4 failed",
+                content.lower(),
+                f"{file_path} must not contain outdated 4 failed tests claim",
+            )
+            self.assertNotIn(
+                "11 errors",
+                content.lower(),
+                f"{file_path} must not contain outdated 11 errors claim",
+            )
+            self.assertNotIn(
+                "788 in",
+                content.lower(),
+                f"{file_path} must not contain outdated 788 lab tests claim",
+            )
+            self.assertNotIn(
+                "199 focused",
+                content.lower(),
+                f"{file_path} must not contain outdated 199 focused tests claim",
+            )
+            self.assertIn(
+                "ee59362ac3f5",
+                content,
+                f"{file_path} must reference tested source commit ee59362ac3f5",
+            )
+            self.assertIn(
+                "not configured",
+                content.lower(),
+                f"{file_path} must preserve explicit remote CI status as not configured / not recorded",
+            )
+
+        deck_content = deck_file.read_text(encoding="utf-8")
+        self.assertIn(
+            "929 unique",
+            deck_content.lower(),
+            "Presentation deck must document 929 unique automated tests",
+        )
+        self.assertIn(
+            "805 in <code>lab/</code>",
+            deck_content,
+            "Presentation deck must document 805 lab unit tests",
+        )
+        self.assertIn(
+            "93 in <code>tests/</code>",
+            deck_content,
+            "Presentation deck must document 93 integration tests",
+        )
+        self.assertIn(
+            "31 frontend",
+            deck_content,
+            "Presentation deck must document 31 frontend unit tests",
+        )
+        self.assertIn(
+            "16 static",
+            deck_content.lower(),
+            "Presentation deck must separate 16 static smoke checks",
+        )
+        self.assertIn(
+            "53 assertions",
+            deck_content.lower(),
+            "Presentation deck must separate 53 browser assertions",
+        )
+        self.assertIn(
+            "NOT CONFIGURED / NOT RECORDED",
+            deck_content,
+            "Presentation deck must explicitly state remote CI is NOT CONFIGURED / NOT RECORDED",
+        )
 
         report_file = repo_root / "docs" / "PS028_FINAL_EXPERIMENTAL_REPORT.md"
         report_content = report_file.read_text(encoding="utf-8")

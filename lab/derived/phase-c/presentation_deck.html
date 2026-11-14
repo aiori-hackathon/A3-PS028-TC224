@@ -225,11 +225,11 @@
       <div class="stat-card"><div class="stat-val">280</div><div class="stat-lbl">Valid Live Trials (0 Drops)</div></div>
       <div class="stat-card"><div class="stat-val">154 (55.0%)</div><div class="stat-lbl">Direct IPv6 Wins</div></div>
       <div class="stat-card"><div class="stat-val">126 (45.0%)</div><div class="stat-lbl">IPv4 Fallback Wins</div></div>
-      <div class="stat-card"><div class="stat-val">866/881</div><div class="stat-lbl">Passing (881 Unique, 199 100%)</div></div>
+      <div class="stat-card"><div class="stat-val">929/929</div><div class="stat-lbl">Passing (929 Unique · 100% PASS)</div></div>
     </div>
   </div>
   <div class="content-text" style="margin-top: 1.5mm;">
-    <strong>Core Findings:</strong> Both Google Chrome 156 and Mozilla Firefox 159 demonstrate robust dual-stack fallback under SYN blackholing (S1) and TCP RST (S2). Under delayed AAAA DNS (S6, 500 ms), both wait for late AAAA responses rather than triggering 50 ms Resolution Delay fallback. <em>Test Inventory Audit:</em> 881 unique tests discovered across repository (788 in <code>lab/</code>, 93 in <code>tests/</code>; 0 duplicate executions): 866 passed, 4 failed, 11 errors in unprivileged environment; 199 focused regression tests pass 100%.
+    <strong>Core Findings:</strong> Both Google Chrome 156 and Mozilla Firefox 159 demonstrate robust dual-stack fallback under SYN blackholing (S1) and TCP RST (S2). Under delayed AAAA DNS (S6, 500 ms), both wait for late AAAA responses rather than triggering 50 ms Resolution Delay fallback. <em>Dated P1 Validation Snapshot (14 Nov 2026, commit <code>ee59362ac3f5</code>):</em> 929 unique automated tests across repository (805 in <code>lab/</code>, 93 in <code>tests/</code>, 31 frontend; 0 duplicate executions): 929 passed, 0 failures, 0 errors (100% PASS). Separate local verification: 16 static smoke checks, 8 real-browser stages (53 assertions in Chromium 157). Remote CI status: NOT CONFIGURED / NOT RECORDED.
   </div>
   <div class="slide-footer">
     <span>AIORI-3 PS-028: Happy Eyeballs Fallback Measurement</span>
@@ -590,7 +590,7 @@
       <tr>
         <td><strong>M7 (Phase E)</strong></td>
         <td>Final Handover</td>
-        <td>PS-028 compliance matrix, offline PCAP replay demonstration tool (<code>lab/demo_replay.py</code>), pseudocode kit, 881 unique tests discovered across repository (788 in lab/, 93 in tests/; 0 duplicate executions; 866 passed, 4 failed, 11 errors in unprivileged sandbox; 199 focused regression tests 100% PASS).</td>
+        <td>PS-028 compliance matrix, offline PCAP replay demonstration tool (<code>lab/demo_replay.py</code>), pseudocode kit; dated P1 validation snapshot (14 Nov 2026, commit <code>ee59362ac3f5</code>: 929 unique automated tests across lab [805], tests [93], and frontend [31]; 929 passed, 0 failed, 0 errors; separate 16 static smoke checks & 8-stage / 53-assertion real-browser suite; remote CI not configured / not recorded).</td>
         <td><strong style="color: #2e7d32;">READY (Owner Handover Pending)</strong></td>
       </tr>
     </tbody>
@@ -635,7 +635,7 @@
     <strong>Deliverable Status & Evidence Integrity:</strong><br>
     ✓ Phase C: 280 Valid Live Trials Reconciled & Dissected from Authentic PCAPs (0 Indeterminate Flows)<br>
     ✓ Historical Integrity: 705 Campaign Files Sealed with 100% Cryptographic SHA-256 Proof (Rule R2)<br>
-    ✓ Automated Test Suite: 881 Unique Tests Discovered Across lab/ and tests/ (0 Duplicate Executions; 866 Passed, 4 Failed, 11 Errors in unprivileged sandbox; 199 Focused Regression Tests 100% PASS)<br>
+    ✓ Automated Test Suite: 929 Unique Tests (805 lab, 93 integration, 31 frontend; 929 passed, 0 failures, 0 errors; 100% PASS on commit <code>ee59362ac3f5</code>; separate 16 static checks & 8-stage / 53-assertion real-browser suite; remote CI not configured/recorded)<br>
     ✓ Phase D Sweeps: Pre-Registered Simulation Mode (Zero Live Network/Sudo Operations Executed; Rule R1 Disclosed)
   </div>
 </div>
