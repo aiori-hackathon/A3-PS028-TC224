@@ -270,12 +270,12 @@ class TestBuildSubmissionReport(unittest.TestCase):
             "Presentation deck must document 929 unique automated tests",
         )
         self.assertIn(
-            "805 in <code>lab/</code>",
+            "805 lab",
             deck_content,
             "Presentation deck must document 805 lab unit tests",
         )
         self.assertIn(
-            "93 in <code>tests/</code>",
+            "93 integration",
             deck_content,
             "Presentation deck must document 93 integration tests",
         )
@@ -290,20 +290,38 @@ class TestBuildSubmissionReport(unittest.TestCase):
             "Presentation deck must separate 16 static smoke checks",
         )
         self.assertIn(
-            "53 assertions",
+            "53-assertion",
             deck_content.lower(),
             "Presentation deck must separate 53 browser assertions",
         )
         self.assertIn(
-            "NOT CONFIGURED / NOT RECORDED",
-            deck_content,
-            "Presentation deck must explicitly state remote CI is NOT CONFIGURED / NOT RECORDED",
+            "not configured",
+            deck_content.lower(),
+            "Presentation deck must explicitly state remote CI is not configured / not recorded",
         )
         self.assertIn(
-            "P1 validation snapshot · 14 Nov 2026 · ee59362ac3f5",
+            "P1 validation snapshot",
             deck_content,
             "Presentation deck stat card must display dated P1 snapshot caption",
         )
+        self.assertIn(
+            "14 Nov 2026 · ee59362ac3f5",
+            deck_content,
+            "Presentation deck stat card must display date and commit",
+        )
+        self.assertIn(
+            "SYN blackholing (S1) and IPv6 TCP RST rejection (S2)",
+            deck_content,
+            "Slide 2 must contain concise S1 and S2 fallback findings",
+        )
+        self.assertIn(
+            "delayed AAAA DNS (S6, 500 ms)",
+            deck_content,
+            "Slide 2 must contain concise S6 DNS findings",
+        )
+
+        for m_str in ("M1", "M2 (Batch C1)", "M3 (C2 & C4)", "M4 (Batch C5)", "M5 (C3 & C6)", "M6 (Phase D)", "M7 (Phase E)"):
+            self.assertIn(m_str, deck_content, f"Presentation deck must display {m_str}")
 
         p1_record_file = repo_root / "docs" / "phase-cd" / "p1-validation-record-2026-11-14.md"
         p1_record_content = p1_record_file.read_text(encoding="utf-8")

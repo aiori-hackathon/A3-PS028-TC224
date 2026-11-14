@@ -381,24 +381,47 @@ def generate_presentation_html(m: Dict[str, Any]) -> str:
     background: #ffffff;
     border: 0.5pt solid #c5d2f6;
     border-radius: 1.5mm;
-    padding: 2mm;
+    padding: 1.5mm 1.2mm;
     text-align: center;
   }}
   .stat-val {{
-    font-size: 11pt;
+    font-size: 10.5pt;
     font-weight: 700;
     color: #0000DC;
   }}
   .stat-lbl {{
     font-size: 5.5pt;
     color: #555;
-    margin-top: 0.5mm;
+    margin-top: 0.4mm;
   }}
   .stat-caption {{
-    font-size: 4.6pt;
-    color: #666;
-    margin-top: 0.4mm;
-    line-height: 1.1;
+    font-size: 5.6pt;
+    color: #555;
+    margin-top: 0.5mm;
+    line-height: 1.15;
+  }}
+  table.timeline-table {{
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 5.6pt;
+    line-height: 1.2;
+    margin-top: 0.8mm;
+  }}
+  table.timeline-table th {{
+    background-color: #0000DC;
+    color: #ffffff;
+    font-weight: 700;
+    padding: 0.8mm 1.5mm;
+    text-align: left;
+    border: 0.5pt solid #0000DC;
+  }}
+  table.timeline-table td {{
+    padding: 0.65mm 1.5mm;
+    border: 0.5pt solid #d0d7de;
+    vertical-align: top;
+  }}
+  table.timeline-table tr:nth-child(even) {{
+    background-color: #f6f8fa;
   }}
 </style>
 </head>
@@ -422,27 +445,27 @@ def generate_presentation_html(m: Dict[str, Any]) -> str:
     <div class="slide-title">Abstract & Problem Description</div>
     <div class="slide-badge">Section 1 · Slide 2/11</div>
   </div>
-  <div class="block">
-    <div class="block-title">The Dual-Stack Fallback Challenge</div>
+  <div class="block" style="padding: 1.8mm 3.5mm; margin-bottom: 1.5mm;">
+    <div class="block-title" style="margin-bottom: 0.8mm;">The Dual-Stack Fallback Challenge</div>
     <div class="content-text">
       As the global Internet migrates toward IPv6-dominant networks, client operating systems and browsers operate in mixed dual-stack environments where IPv6 paths may experience silent blackholing, router drops, or severe latency degradation. Standard TCP connection timeouts (21–75 seconds) cause severe application stalls if IPv6 is naively serialized. Happy Eyeballs (RFC 8305) addresses this by racing address families.
     </div>
   </div>
-  <div class="block">
-    <div class="block-title">PS-028 Experimental Campaign Highlights</div>
-    <div class="stat-grid">
+  <div class="block" style="padding: 1.8mm 3.5mm; margin-bottom: 1.5mm;">
+    <div class="block-title" style="margin-bottom: 0.8mm;">PS-028 Experimental Campaign Highlights</div>
+    <div class="stat-grid" style="margin-top: 0.8mm;">
       <div class="stat-card"><div class="stat-val">{m['valid_live']}</div><div class="stat-lbl">Valid Live Trials (0 Drops)</div></div>
       <div class="stat-card"><div class="stat-val">{m['direct_ipv6']} (55.0%)</div><div class="stat-lbl">Direct IPv6 Wins</div></div>
       <div class="stat-card"><div class="stat-val">{m['fallback_ipv4']} (45.0%)</div><div class="stat-lbl">IPv4 Fallback Wins</div></div>
       <div class="stat-card">
         <div class="stat-val">{card_passed}/{card_total}</div>
         <div class="stat-lbl">Passing ({card_unique} Unique · 100% PASS)</div>
-        <div class="stat-caption">P1 validation snapshot · 14 Nov 2026 · {p1_commit_short}</div>
+        <div class="stat-caption">P1 validation snapshot<br>14 Nov 2026 · {p1_commit_short}</div>
       </div>
     </div>
   </div>
-  <div class="content-text" style="margin-top: 1.5mm;">
-    <strong>Core Findings:</strong> Both Google Chrome 156 and Mozilla Firefox 159 demonstrate robust dual-stack fallback under SYN blackholing (S1) and TCP RST (S2). Under delayed AAAA DNS (S6, 500 ms), both wait for late AAAA responses rather than triggering 50 ms Resolution Delay fallback. <em>Dated P1 Validation Snapshot (14 Nov 2026, commit <code>{p1_commit_short}</code>):</em> {p1_unique} unique automated tests across repository ({p1_lab} in <code>lab/</code>, {p1_int} in <code>tests/</code>, {p1_fe} frontend; 0 duplicate executions): {p1_passed} passed, 0 failures, 0 errors (100% PASS). Separate local verification: {p1_smoke} static smoke checks, {p1_browser_stages} real-browser stages ({p1_browser_assertions} assertions in Chromium 157). Remote CI status: NOT CONFIGURED / NOT RECORDED.
+  <div class="content-text" style="margin-top: 1mm;">
+    <strong>Core Findings:</strong> Both Google Chrome 156 and Mozilla Firefox 159 demonstrated dual-stack fallback under SYN blackholing (S1) and IPv6 TCP RST rejection (S2). Under delayed AAAA DNS (S6, 500 ms), both waited for the AAAA response rather than triggering the 50 ms Resolution Delay.
   </div>
   <div class="slide-footer">
     <span>AIORI-3 PS-028: Happy Eyeballs Fallback Measurement</span>
@@ -754,13 +777,13 @@ def generate_presentation_html(m: Dict[str, Any]) -> str:
     <div class="slide-title">Deployment Timeline: Milestones M1–M7</div>
     <div class="slide-badge">Section 8 · Slide 9/11</div>
   </div>
-  <table class="data-table">
+  <table class="timeline-table">
     <thead>
       <tr>
         <th style="width: 14%;">Milestone</th>
-        <th style="width: 22%;">Focus Area</th>
+        <th style="width: 19%;">Focus Area</th>
         <th>Delivered Architecture & Verifying Artifacts</th>
-        <th style="width: 12%;">Status</th>
+        <th style="width: 14%;">Status</th>
       </tr>
     </thead>
     <tbody>
@@ -797,13 +820,13 @@ def generate_presentation_html(m: Dict[str, Any]) -> str:
       <tr>
         <td><strong>M6 (Phase D)</strong></td>
         <td>Research Sweeps</td>
-        <td>Pre-registered RTT & DNS sweeps (D1–D5 in deterministic simulation mode; zero live network commands executed); crossover intervals; D4 qualitative literature comparison; D5 partner manifest.</td>
+        <td>Pre-registered RTT & DNS sweeps (D1–D5 simulation mode; zero live network commands executed); crossover intervals; D4 literature comparison; D5 partner manifest.</td>
         <td><strong style="color: #c62828;">PAUSED - SIMULATION ONLY</strong></td>
       </tr>
       <tr>
         <td><strong>M7 (Phase E)</strong></td>
         <td>Final Handover</td>
-        <td>PS-028 compliance matrix, offline PCAP replay demonstration tool (<code>lab/demo_replay.py</code>), pseudocode kit; dated P1 validation snapshot (14 Nov 2026, commit <code>{p1_commit_short}</code>: {p1_unique} unique automated tests across lab [{p1_lab}], tests [{p1_int}], and frontend [{p1_fe}]; {p1_passed} passed, 0 failed, 0 errors; separate {p1_smoke} static smoke checks & {p1_browser_stages}-stage / {p1_browser_assertions}-assertion real-browser suite; remote CI not configured / not recorded).</td>
+        <td>PS-028 compliance matrix, offline PCAP replay demonstration tool (<code>lab/demo_replay.py</code>), pseudocode kit; dated P1 validation snapshot (commit <code>{p1_commit_short}</code>: {p1_unique} unique tests 100% PASS; separate {p1_smoke} static checks & {p1_browser_stages}-stage browser suite; remote CI not configured/recorded).</td>
         <td><strong style="color: #2e7d32;">READY (Owner Handover Pending)</strong></td>
       </tr>
     </tbody>
