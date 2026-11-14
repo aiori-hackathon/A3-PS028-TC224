@@ -138,7 +138,7 @@ def load_derived_metrics(
         fe_m = re.search(r"\|\s*\*\*Frontend Unit Tests\*\*\s*\|[^|]+\|[^|]+\|\s*\*\*(\d+)\*\*", content)
         metrics["p1_frontend_tests"] = int(fe_m.group(1)) if fe_m else 31
 
-        tot_m = re.search(r"\|\s*\*\*Total Automated Unit Definitions\*\*\s*\|[^|]+\|[^|]+\|\s*\*\*(\d+)\*\*", content)
+        tot_m = re.search(r"\|\s*\*\*(?:Total Unique Automated Tests|Total Automated Unit Definitions)\*\*\s*\|[^|]+\|[^|]+\|\s*\*\*(\d+)\*\*", content)
         metrics["p1_total_tests"] = int(tot_m.group(1)) if tot_m else (metrics["p1_lab_tests"] + metrics["p1_integration_tests"] + metrics["p1_frontend_tests"])
         metrics["p1_unique_tests"] = metrics["p1_total_tests"]
         metrics["p1_tests_passed"] = metrics["p1_total_tests"]
@@ -394,6 +394,12 @@ def generate_presentation_html(m: Dict[str, Any]) -> str:
     color: #555;
     margin-top: 0.5mm;
   }}
+  .stat-caption {{
+    font-size: 4.6pt;
+    color: #666;
+    margin-top: 0.4mm;
+    line-height: 1.1;
+  }}
 </style>
 </head>
 <body>
@@ -428,7 +434,11 @@ def generate_presentation_html(m: Dict[str, Any]) -> str:
       <div class="stat-card"><div class="stat-val">{m['valid_live']}</div><div class="stat-lbl">Valid Live Trials (0 Drops)</div></div>
       <div class="stat-card"><div class="stat-val">{m['direct_ipv6']} (55.0%)</div><div class="stat-lbl">Direct IPv6 Wins</div></div>
       <div class="stat-card"><div class="stat-val">{m['fallback_ipv4']} (45.0%)</div><div class="stat-lbl">IPv4 Fallback Wins</div></div>
-      <div class="stat-card"><div class="stat-val">{card_passed}/{card_total}</div><div class="stat-lbl">Passing ({card_unique} Unique · 100% PASS)</div></div>
+      <div class="stat-card">
+        <div class="stat-val">{card_passed}/{card_total}</div>
+        <div class="stat-lbl">Passing ({card_unique} Unique · 100% PASS)</div>
+        <div class="stat-caption">P1 validation snapshot · 14 Nov 2026 · {p1_commit_short}</div>
+      </div>
     </div>
   </div>
   <div class="content-text" style="margin-top: 1.5mm;">

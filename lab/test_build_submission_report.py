@@ -299,6 +299,24 @@ class TestBuildSubmissionReport(unittest.TestCase):
             deck_content,
             "Presentation deck must explicitly state remote CI is NOT CONFIGURED / NOT RECORDED",
         )
+        self.assertIn(
+            "P1 validation snapshot · 14 Nov 2026 · ee59362ac3f5",
+            deck_content,
+            "Presentation deck stat card must display dated P1 snapshot caption",
+        )
+
+        p1_record_file = repo_root / "docs" / "phase-cd" / "p1-validation-record-2026-11-14.md"
+        p1_record_content = p1_record_file.read_text(encoding="utf-8")
+        self.assertIn(
+            "Total Unique Automated Tests",
+            p1_record_content,
+            "P1 validation record must name the aggregate category 'Total Unique Automated Tests'",
+        )
+        self.assertNotIn(
+            "Total Automated Unit Definitions",
+            p1_record_content,
+            "P1 validation record must not call the aggregate 'Total Automated Unit Definitions'",
+        )
 
         report_file = repo_root / "docs" / "PS028_FINAL_EXPERIMENTAL_REPORT.md"
         report_content = report_file.read_text(encoding="utf-8")

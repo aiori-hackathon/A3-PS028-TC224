@@ -28,7 +28,7 @@ All tests executed against source commit `ee59362ac3f53fad3bc01e65b5d90815697a93
 | **Python Lab Unit & Regression** | `python3 -m unittest discover -s lab -p "test_*.py"` | 21 modules in `lab/` | **805** | **805** | 0 | 0 | 0 | 43.79s |
 | **Python Integration Tier** | `python3 -m unittest discover -s tests -p "test_*.py"` | 2 modules in `tests/` | **93** | **93** | 0 | 0 | 0 | 0.35s |
 | **Frontend Unit Tests** | `node --experimental-strip-types --test test/historical-evidence.test.mjs` | `setup/webtester/test/historical-evidence.test.mjs` | **31** | **31** | 0 | 0 | 0 | 0.67s |
-| **Total Automated Unit Definitions** | Disaggregated Unique Definitions | Unit & Regression Tier | **929** | **929** | **0** | **0** | **0** | **44.81s** |
+| **Total Unique Automated Tests** | Disaggregated Unique Definitions | Unit & Regression Tier | **929** | **929** | **0** | **0** | **0** | **44.81s** |
 
 *Note on Test Inclusion:* The 4 authentic PCAP regression tests in `lab/test_campaign_pcap_regression.py` are discovered and included within the 805 Python lab unit tests. Their separate execution below is a dedicated preservation check, not additional unique test definitions.
 
