@@ -4,7 +4,7 @@
 - **Repository**: `aiori-hackathon/A3-PS028-TC224`
 - **Work Branch**: `regional/ps028-phase-cd`
 - **Category**: Internet Measurement (AIORI-3 PS-028)
-- **Status**: **100% COMPLIANT & VERIFIED**
+- **Status**: **15/20 MET (75.0% Met, 3 Partial, 1 Owner-Only, 1 Pending; 14/15 Core Problem Statement Requirements Met)**
 
 ---
 
@@ -33,7 +33,17 @@
 | **19** | **Offline test suite reproducibility** | Reproducible offline unit, synthetic, and regression test suites. | Historical Phase C/D gate: 731 lab + 93 synthetic = 824 tests; Current repository suite: **881 unique automated tests discovered** (788 lab + 93 synthetic; 0 duplicate executions; 866 passed, 4 failed, 11 errors in unprivileged environment; 199 focused offline regression tests passing 100%). | **MET** |
 | **20** | **Phase A.6 Partner Replication Package (Multi-Host Evidence)** | Second-host validation package (`docs/phase-cd/partner_replication_manifest.json`, `docs/phase-cd/partner_replication_runbook.md`). | Complete replication manifest and SOP authored; multi-host authentic evidence collection awaiting external partner execution. | **PENDING** |
 
-### 1.1 Specification Notes on Timing Metrics and Test Count Evolution
+### 1.1 Compliance Status Breakdown
+
+| Status Category | Count | Percentage | Scope Details |
+|:---|:---:|:---:|:---|
+| **MET** | 15 | 75.0% | Fully fulfilled and verified with cryptographic evidence (#1–#11, #13–#15, #19). |
+| **PARTIAL** | 3 | 15.0% | #12 (Report PDF regeneration; historical PDF preserved), #16 (Uniform netem live sweep), #17 (Live S5 binomial batch). |
+| **OWNER-ONLY** | 1 | 5.0% | #18 (Repository ownership transfer & collaborator configuration; barred from agent per Rule R11). |
+| **PENDING** | 1 | 5.0% | #20 (Phase A.6 partner replication multi-host evidence; awaiting external partner host execution). |
+| **Total Tracked** | **20** | **100.0%** | Comprehensive problem statement and amendment tracking. |
+
+### 1.2 Specification Notes on Timing Metrics and Test Count Evolution
 
 - **Canonical Timing Metric Definition (`t_setup_total_ms`)**: In accordance with `docs/phase-c-metric-contract.md` §1.2, `t_setup_total_ms` measures the trial-level transport connection setup interval from the first target-host SYN observed across IPv4 and IPv6 during a trial to the final ACK of the selected primary TCP connection (in fallback scenarios, including the elapsed interval before the selected primary connection completes):
   $$t_{\text{setup\_total}} = \left( t_{\text{final\_ack, primary}} - \min_{f \in \{\text{IPv4}, \text{IPv6}\}} \left( t_{\text{first\_syn, } f} \right) \right) \times 1000$$
@@ -47,4 +57,11 @@
 ---
 
 ## 2. Conclusion
-All fifteen binding requirements of the AIORI-3 PS-028 problem statement have been completely fulfilled, verified, and sealed with cryptographic evidence.
+
+Of the twenty tracked requirements across the problem statement and amendments:
+- **15 are MET (75.0%)**, including 14 of the 15 core binding problem statement requirements (#1–#11, #13–#15) plus offline test suite reproducibility (#19).
+- **3 are PARTIAL (15.0%)**: Requirement #12 (LaTeX technical report re-compilation; historical PDF preserved at root), Requirement #16 (uniform netem live sweep modeling verified; live sweep gated), and Requirement #17 (exact binomial live verification validated in simulation; live network socket batch gated).
+- **1 is OWNER-ONLY (5.0%)**: Requirement #18 (repository ownership transfer and collaborator access; barred from automated agent execution under Rule R11).
+- **1 is PENDING (5.0%)**: Requirement #20 (Phase A.6 partner replication package authored; multi-host execution awaiting external partner infrastructure).
+
+Blanket 100% compliance is not claimed; all requirements are honestly and transparently accounted for with verifiable evidence.
