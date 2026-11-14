@@ -1,8 +1,11 @@
 # PS-028 Problem Statement Compliance & Verification Matrix
 
-- **Date / Timestamp**: 2026-11-12T07:54:00Z
+- **Date / Timestamp**: 2026-11-14T17:30:00Z (P2 Audit & Reconciliation; originally drafted 2026-11-12T07:54:00Z)
 - **Repository**: `aiori-hackathon/A3-PS028-TC224`
-- **Work Branch**: `regional/ps028-phase-cd`
+- **Working Branch**: `work/ps028-p1-remediation`
+- **Validated Source Commit**: `ee59362ac3f53fad3bc01e65b5d90815697a93d4`
+- **Protected P0 Baseline**: `176f688bacb5858fcc0daedb454200918e427f3f` on `fix/phase-e-bundle-timeline-mapping` (tag: `ps028-p0-accepted-2026-11-14`)
+- **Historical Derivation Branch**: `regional/ps028-phase-cd`
 - **Category**: Internet Measurement (AIORI-3 PS-028)
 - **Status**: **15/20 MET (75.0% Met, 3 Partial, 1 Owner-Only, 1 Pending; 14/15 Core Problem Statement Requirements Met)**
 
@@ -30,7 +33,7 @@
 | **16** | **Amendment A.6 (Uniform netem qdisc on live sweep)** | Pre-registered in `docs/phase-d-experiment-protocol.md` and modeled in `lab/run_research_sweep.py`. | Design and simulation code verified; live execution with `tc netem delay 0ms 0ms` pending live approval gate. | **PARTIAL** |
 | **17** | **Live S5 Validation (Exact Binomial Acceptance on Live Host)** | `lab/self_test_scenarios.py` with pure-Python Clopper-Pearson 99% Exact Binomial CI ($n=200$). | Fully verified in unit tests and dry-run bundle export; live network socket batch execution pending live gate. | **PARTIAL** |
 | **18** | **Repository Ownership Transfer & Collaborator Access** | Ownership transfer and collaborator configuration in GitHub settings. | Checklist provided in `docs/phase-cd/owner_handover_checklist.md`; barred from agent execution per Rule R11. | **OWNER-ONLY** |
-| **19** | **Offline test suite reproducibility** | Reproducible offline unit, synthetic, and regression test suites. | Historical Phase C/D gate: 731 lab + 93 synthetic = 824 tests; Current repository suite: **881 unique automated tests discovered** (788 lab + 93 synthetic; 0 duplicate executions; 866 passed, 4 failed, 11 errors in unprivileged environment; 199 focused offline regression tests passing 100%). | **MET** |
+| **19** | **Offline test suite reproducibility** | Reproducible offline unit, synthetic, and regression test suites. | Historical progression: Phase C/D gate: 725 lab + 93 synthetic = 818 tests; Phase C/D baseline: 731 lab + 93 synthetic = 824 tests; Phase E demo readiness: 825 lab + 93 synthetic = 918 tests; Task 5C deduplicated discovery: 788 lab + 93 synthetic = 881 tests; P0 sealed baseline: 804 lab + 93 synthetic + 31 frontend = 928 unit tests (`lab/derived/phase-c/test_run_record.json`); **Authoritative P1 validation snapshot (14 Nov 2026, commit `ee59362ac3f5`)**: **929 unique automated tests** (805 lab + 93 synthetic + 31 frontend; 100% PASS, 0 failures, 0 errors; separate 16 static smoke checks & 8-stage / 53-assertion browser suite; remote CI not configured/recorded). | **MET** |
 | **20** | **Phase A.6 Partner Replication Package (Multi-Host Evidence)** | Second-host validation package (`docs/phase-cd/partner_replication_manifest.json`, `docs/phase-cd/partner_replication_runbook.md`). | Complete replication manifest and SOP authored; multi-host authentic evidence collection awaiting external partner execution. | **PENDING** |
 
 ### 1.1 Compliance Status Breakdown
@@ -49,10 +52,12 @@
   $$t_{\text{setup\_total}} = \left( t_{\text{final\_ack, primary}} - \min_{f \in \{\text{IPv4}, \text{IPv6}\}} \left( t_{\text{first\_syn, } f} \right) \right) \times 1000$$
   DNS timing is evaluated through separate DNS transaction fields (`dns_transactions`) and Resolution Delay metrics, and must not be conflated with this TCP setup metric. It does not measure user-visible navigation delay, application response time, or page-load performance.
 - **Test Count Evolution & Current Reconciliation**:
-  - **818 tests (`docs/phase-cd/gates/batch_c5.md`)**: Sealed historical gate report snapshot (725 in `lab/` + 93 in `tests/`).
+  - **818 tests (`docs/phase-cd/gates/batch_c5.md`)**: Sealed historical gate report snapshot (725 in `lab/` + 93 in `tests/`) at Phase C/D milestone.
   - **824 tests (`regional/ps028-phase-cd` HEAD)**: Phase C/D baseline incorporating Batch D research sweep simulation tests (731 in `lab/` + 93 in `tests/`).
   - **918 tests (`regional/phase-e-demo-readiness`)**: Phase E demo-readiness baseline (825 in `lab/` + 93 in `tests/`).
-  - **881 tests (Current checkout on `fix/phase-e-bundle-timeline-mapping`)**: Full repository test count (788 in `lab/` across 21 modules + 93 in `tests/` across 5 tiers: 881 unique test cases; 0 duplicate executions following Task 5C runner deduplication; 866 passed, 4 failed, 11 errors in unprivileged environment; 199 focused offline regression tests passing 100%), incorporating 11 regression tests added during Tasks 1–3A and Task 5B (+2 in `test_demo_bundle.py`, +7 in `test_export_campaign_evidence.py`, +1 in `test_analyze.py`, +1 in `test_impair.py`).
+  - **881 tests (Task 5C deduplicated checkout on `fix/phase-e-bundle-timeline-mapping`)**: Deduplicated repository test discovery (788 in `lab/` across 21 modules + 93 in `tests/` across 5 tiers: 881 unique test cases; 0 duplicate executions following Task 5C runner deduplication; 866 passed, 4 failed, 11 unprivileged sandbox errors; 199 focused offline regression tests passing 100%), incorporating 11 regression tests added during Tasks 1–3A and Task 5B (+2 in `test_demo_bundle.py`, +7 in `test_export_campaign_evidence.py`, +1 in `test_analyze.py`, +1 in `test_impair.py`).
+  - **928 tests (Historical P0 accepted baseline)**: Recorded in `lab/derived/phase-c/test_run_record.json` at commit `5c84c93eff12903a1288770029a903aec48ac1a4` (804 in `lab/` + 93 in `tests/` + 31 frontend tests in `setup/webtester/test/historical-evidence.test.mjs`). Preserved as immutable historical P0 evidence.
+  - **929 tests (Authoritative P1 validation snapshot, 14 Nov 2026)**: Documented in `docs/phase-cd/p1-validation-record-2026-11-14.md` on tested source commit `ee59362ac3f53fad3bc01e65b5d90815697a93d4`. Adds +1 regression test (`test_scientific_presentation_claims_accuracy` in `lab/test_build_submission_report.py`) enforcing presentation and evidence integrity (805 in `lab/` + 93 in `tests/` + 31 in `setup/webtester`: 929 unique automated tests; 929 passed, 0 failures, 0 errors, 0 skips; 100% PASS). Separate validations: 16 static smoke checks, 8 browser stages with 53 assertions, 8 static pages built; remote CI not configured/recorded. See `docs/phase-cd/test-inventory-reconciliation.md`.
 
 ---
 
