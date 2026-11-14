@@ -199,7 +199,7 @@ async function runBrowserAcceptanceTests() {
     // -------------------------------------------------------------------------
     // TEST STAGE 6: Negative Case — Cryptographic Hash Mismatch Fail-Safe State
     // -------------------------------------------------------------------------
-    console.log('\n[STAGE 6] Testing cryptographic hash mismatch fail-safe state...');
+    console.log('\n[STAGE 6] Testing cryptographic hash mismatch fail-safe state across all analytical tabs...');
     const mismatchContext = await browser.newContext();
     const mismatchPage = await mismatchContext.newPage();
 
@@ -226,8 +226,48 @@ async function runBrowserAcceptanceTests() {
 
     const mismatchBadge = await mismatchPage.textContent('[data-testid="integrity-status-badge"]');
     assert(mismatchBadge.includes('Hash Mismatch (Unverified)'), 'Badge must reflect unverified state');
+
+    // Overview Invariant badge must report unverified
+    const invariantBadge = await mismatchPage.textContent('[data-testid="invariants-status-badge"]');
+    assert(invariantBadge.includes('Unverified (Hash Mismatch)'), 'Invariant badge must show Unverified (Hash Mismatch)');
+
+    // Exercise all tabs in hash-mismatch state and assert persistent unverified state
+    const tabsToTest = [
+      { name: 'Campaign Overview', button: 'button:has-text("Campaign Overview")' },
+      { name: 'Scenario Comparison', button: 'button:has-text("Scenario & Cohort Comparison")' },
+      { name: 'Trial Explorer', button: 'button:has-text("Trial Explorer")' },
+      { name: 'Selected Trial Detail', button: 'button:has-text("Selected Trial Detail")' },
+      { name: 'Excluded Attempts', button: 'button:has-text("Excluded Attempts")' },
+      { name: 'Provenance & Integrity', button: 'button:has-text("Provenance & Integrity")' },
+      { name: 'RFC 8305 Assessment', button: 'button:has-text("RFC 8305 Assessment")' },
+    ];
+
+    for (const tab of tabsToTest) {
+      await mismatchPage.click(tab.button);
+      await mismatchPage.waitForTimeout(100);
+
+      // Warning banner must remain visible on all tabs
+      const isBannerVisible = await mismatchPage.isVisible('[data-testid="integrity-mismatch-banner"]');
+      assert(isBannerVisible, `Warning banner must remain visible on tab: ${tab.name}`);
+
+      // Top badge must consistently report unverified
+      const badgeText = await mismatchPage.textContent('[data-testid="integrity-status-badge"]');
+      assert(badgeText.includes('Hash Mismatch (Unverified)'), `Integrity badge on ${tab.name} must show Hash Mismatch (Unverified)`);
+
+      // Never display authentic / verified confirmation on any tab
+      const pageText = await mismatchPage.textContent('body');
+      assert(!pageText.includes('Digest Consistent (Same-Origin)'), `Tab ${tab.name} must never show Digest Consistent`);
+      assert(!pageText.includes('Bit-for-bit SHA-256 Match'), `Tab ${tab.name} must never show Bit-for-bit Match in unverified state`);
+
+      // Special check on Provenance tab
+      if (tab.name === 'Provenance & Integrity') {
+        const provBadge = await mismatchPage.textContent('[data-testid="provenance-integrity-status-badge"]');
+        assert(provBadge.includes('Cryptographic Mismatch (Unverified)'), 'Provenance badge must show Cryptographic Mismatch (Unverified)');
+      }
+    }
+
     await mismatchContext.close();
-    console.log('  [PASS] Cryptographic hash mismatch fail-safe behavior verified');
+    console.log('  [PASS] Cryptographic hash mismatch fail-safe behavior verified across all 7 tabs');
 
     // -------------------------------------------------------------------------
     // TEST STAGE 7: Negative Case — S5 Invariant Missing Data Failure State

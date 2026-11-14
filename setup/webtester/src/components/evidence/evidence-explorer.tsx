@@ -1566,9 +1566,21 @@ export const EvidenceExplorer: React.FC = () => {
                   Authoritative sidecar details from <code>demo_bundle.json.provenance.json</code>.
                 </p>
               </div>
-              <span className="px-2.5 py-1 rounded text-xs font-mono bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1.5">
-                <ShieldCheck className="size-4" /> Bit-for-bit SHA-256 Match
-              </span>
+              {integrity.status === 'HASH_MISMATCHED' ? (
+                <span
+                  data-testid="provenance-integrity-status-badge"
+                  className="px-2.5 py-1 rounded text-xs font-mono bg-rose-500/10 text-rose-700 dark:text-rose-400 border border-rose-500/20 flex items-center gap-1.5 font-semibold"
+                >
+                  <AlertTriangle className="size-4" /> Cryptographic Mismatch (Unverified)
+                </span>
+              ) : (
+                <span
+                  data-testid="provenance-integrity-status-badge"
+                  className="px-2.5 py-1 rounded text-xs font-mono bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1.5"
+                >
+                  <ShieldCheck className="size-4" /> Bit-for-bit SHA-256 Match
+                </span>
+              )}
             </div>
 
             <div className="grid sm:grid-cols-2 gap-4 text-xs font-mono">

@@ -1761,7 +1761,7 @@ def assess_rfc8305_conformance(
     for sc in DEFAULT_SCENARIOS:
         by_sc[sc] = [t for t in trials if t.scenario_id == sc]
 
-    # Check 1: RFC 8305 §2 / RFC 6724 §6 - IPv6 Preference
+    # Check 1: RFC 8305 §2 (Overview) / RFC 6724 §2.1, §6 Rule 6, §10.3 - IPv6 Preference
     s0_trials = by_sc["S0"]
     if s0_trials:
         v6_first_count = sum(1 for t in s0_trials if t.winning_address_family == "IPv6")
@@ -1771,8 +1771,8 @@ def assess_rfc8305_conformance(
             recommendation_alignment_status = "ALIGNED"
             overall_observation_status = "OBSERVED_BEHAVIOR"
             summary = (
-                f"Observed alignment with RFC 8305 Section 2 overview assumption and RFC 6724 Section 6 "
-                f"destination address selection: 40/40 (100.0%) valid live trials established primary connection "
+                f"Observed alignment with RFC 8305 Section 2 (Overview) assumption and RFC 6724 Section 6 Rule 6 "
+                f"(higher precedence per Section 2.1 policy table and Section 10.3) destination address selection: 40/40 (100.0%) valid live trials established primary connection "
                 f"over IPv6 on dual-stack baseline without fallback. "
                 f"Scoped to recorded trials under lab conditions; does not infer general client behavior."
                 if (len(s0_trials) == 40 and v6_first_count == 40) else
@@ -1803,7 +1803,7 @@ def assess_rfc8305_conformance(
     assessments.append({
         "check_id": "RFC8305-SEC2-IPV6-PREFERENCE",
         "rfc_section": "RFC 8305 Section 2",
-        "title": "IPv6 Preference on Dual-Stack Baseline",
+        "title": "IPv6 Preference on Dual-Stack Baseline (Overview)",
         "scenario_id": "S0",
         "status": status,
         "mandatory_status": mandatory_status,
@@ -1811,13 +1811,18 @@ def assess_rfc8305_conformance(
         "sample_size": len(s0_trials),
         "evidence_summary": summary,
         "reasoning": (
-            "RFC 8305 Section 2 states the overview assumption that host preference policy favors IPv6 over IPv4, "
-            "as defined in RFC 6724 Section 6 destination address selection. RFC 8305 Section 3 governs DNS query "
-            "handling and does not define address preference. draft-ietf-happy-happyeyeballs-v3-04 Section 5.3 also "
-            "prioritizes IPv6 destination endpoints within groups."
+            "RFC 8305 Section 2 (Overview) states the overview assumption that host preference policy favors IPv6 over IPv4. "
+            "Under RFC 6724 Section 2.1 policy table (::/0 precedence 40 vs ::ffff:0:0/96 precedence 35) and RFC 6724 "
+            "Section 6 Rule 6 (Prefer higher precedence; Rule 2 is Prefer matching scope), IPv6 receives higher precedence, "
+            "as confirmed in RFC 6724 Section 10.3 (Configuring Preference for IPv6 or IPv4). RFC 8305 Section 3 "
+            "(Hostname Resolution Query Handling) governs DNS query handling and does not define address preference. "
+            "draft-ietf-happy-happyeyeballs-v3-04 Section 5.3 also prioritizes IPv6 destination endpoints within groups."
         ),
         "target_parameter": "Dual-Stack IPv6 Preference",
-        "rfc_specification_requirement": "Host policy assumes IPv6 preferred for initial attempt (RFC 8305 Section 2 / RFC 6724 Section 6 / v3 draft -04 Section 5.3)",
+        "rfc_specification_requirement": (
+            "Host policy assumes IPv6 preferred for initial attempt "
+            "(RFC 8305 Section 2 / RFC 6724 Section 2.1, Section 6 Rule 6, Section 10.3 / v3 draft -04 Section 5.3)"
+        ),
         "rfc_recommended_range": "N/A",
         "observed_delay_ms": None,
         "observed_min_delay_ms": None,
@@ -1827,10 +1832,12 @@ def assess_rfc8305_conformance(
         "overall_observation_status": overall_observation_status,
         "observable_behavior_summary": summary,
         "specification_context": (
-            "RFC 8305 Section 2 states the overview assumption that host preference policy favors IPv6 over IPv4, "
-            "as defined in RFC 6724 Section 6 destination address selection. RFC 8305 Section 3 governs DNS query "
-            "handling and does not define address preference. draft-ietf-happy-happyeyeballs-v3-04 Section 5.3 also "
-            "prioritizes IPv6 destination endpoints within groups."
+            "RFC 8305 Section 2 (Overview) states the overview assumption that host preference policy favors IPv6 over IPv4. "
+            "Under RFC 6724 Section 2.1 policy table (::/0 precedence 40 vs ::ffff:0:0/96 precedence 35) and RFC 6724 "
+            "Section 6 Rule 6 (Prefer higher precedence; Rule 2 is Prefer matching scope), IPv6 receives higher precedence, "
+            "as confirmed in RFC 6724 Section 10.3 (Configuring Preference for IPv6 or IPv4). RFC 8305 Section 3 "
+            "(Hostname Resolution Query Handling) governs DNS query handling and does not define address preference. "
+            "draft-ietf-happy-happyeyeballs-v3-04 Section 5.3 also prioritizes IPv6 destination endpoints within groups."
         ),
     })
 
@@ -2310,7 +2317,9 @@ def assess_rfc8305_conformance(
                 f"(pooled median CAD {med_cad:.3f} ms; Google Chrome: 20/20 IPv4 wins [median 300.810 ms]; "
                 f"Firefox: 19/20 IPv4 wins [median 397.940 ms]). All 39 measured CAD values satisfy "
                 f"the 10.000 ms mandatory floor and fall within the recommended [100.000, 2000.000] ms range. "
-                f"In 1/40 trials (Firefox trial trial-20261029222109-5c74c26a), IPv6 completed without an IPv4 attempt being initiated. "
+                f"In 1/40 trials (Firefox trial trial-20261029222109-5c74c26a), direct IPv6 TCP connection setup completed "
+                f"in 600.949 ms (SYN-to-SYN/ACK) and wire HTTP 200 at 1,298.191 ms with physical absence of an IPv4 SYN on the wire; "
+                f"browser-internal scheduling causality remains insufficient evidence. "
                 f"Scoped to recorded trials under lab conditions; does not infer general client non-conformance."
             )
         elif status == "POTENTIAL_CRITERION_MISMATCH":
@@ -2507,7 +2516,7 @@ def assess_rfc8305_conformance(
     assessments.append({
         "check_id": "RFC8305-SEC3-RESOLUTION-DELAY",
         "rfc_section": "RFC 8305 Section 3",
-        "title": "Resolution Delay on Asynchronous A/AAAA DNS Arrival",
+        "title": "Hostname Resolution Query Handling: Resolution Delay",
         "scenario_id": "S6",
         "status": status,
         "mandatory_status": mandatory_status,
@@ -2515,7 +2524,7 @@ def assess_rfc8305_conformance(
         "sample_size": len(s6_trials),
         "evidence_summary": summary,
         "reasoning": (
-            "RFC 8305 Section 3 recommends a 50ms Resolution Delay when a positive A response arrives "
+            "RFC 8305 Section 3 (Hostname Resolution Query Handling) recommends a 50ms Resolution Delay when a positive A response arrives "
             "before a positive AAAA response. If positive AAAA arrives within or exactly at 50ms, an IPv4 "
             "connection attempt that starts before the positive AAAA response is an observed recommendation-level "
             "criterion mismatch; if no IPv4 attempt starts before that positive AAAA response, the trial aligns with this "
@@ -2527,7 +2536,7 @@ def assess_rfc8305_conformance(
             "general browser non-conformance."
         ),
         "target_parameter": "DNS Resolution Delay Pacing",
-        "rfc_specification_requirement": "RECOMMENDED 50 ms Resolution Delay before initiating IPv4 (RFC 8305 Section 3 / v3 draft -04 Section 7)",
+        "rfc_specification_requirement": "RECOMMENDED 50 ms Resolution Delay before initiating IPv4 (RFC 8305 Section 3 Hostname Resolution Query Handling / v3 draft -04 Section 7)",
         "rfc_recommended_range": "[0.000, 50.000] ms",
         "observed_delay_ms": pos_med_s6,
         "observed_min_delay_ms": min(pos_delays_s6) if pos_delays_s6 else None,
@@ -2537,7 +2546,7 @@ def assess_rfc8305_conformance(
         "overall_observation_status": overall_observation_status,
         "observable_behavior_summary": summary,
         "specification_context": (
-            "RFC 8305 Section 3 recommends a 50 ms Resolution Delay when a positive A response arrives before a positive "
+            "RFC 8305 Section 3 (Hostname Resolution Query Handling) recommends a 50 ms Resolution Delay when a positive A response arrives before a positive "
             "AAAA response. If positive AAAA arrives within 50 ms, an IPv4 attempt starting before AAAA arrival is an "
             "observed potential criterion mismatch. If positive AAAA arrives after 50 ms, an IPv4 attempt should be initiated "
             "within the 50 ms window. draft-ietf-happy-happyeyeballs-v3-04 Section 7 discusses DNS answer changes during connection setup."
@@ -2548,7 +2557,7 @@ def assess_rfc8305_conformance(
     assessments.append({
         "check_id": "RFC8305-SEC4-HISTORICAL-STATE",
         "rfc_section": "RFC 8305 Section 4",
-        "title": "Historical Address Selection and State Caching",
+        "title": "Sorting Addresses: Historical Information and State Caching",
         "scenario_id": "ALL",
         "status": "NOT_ASSESSED",
         "mandatory_status": "NOT_ASSESSED",
@@ -2560,14 +2569,14 @@ def assess_rfc8305_conformance(
             "and adaptive failure caching cannot be evaluated."
         ),
         "reasoning": (
-            "RFC 8305 Section 4 specifies sorting addresses, including the use of historical RTT and previously used addresses. "
-            "draft-ietf-happy-happyeyeballs-v3-04 Section 5.3 specifies sorting destination endpoints within groups using "
-            "historical RTT and endpoint-use data. RFC 8305 Section 7 is dedicated to NAT64 and DNS64 support on IPv6-only "
-            "networks, not statefulness or failure caching. Because trials are executed with clean profiles to guarantee "
-            "measurement independence, historical statefulness cannot be evaluated."
+            "RFC 8305 Section 4 (Sorting Addresses) specifies sorting addresses, including the use of RFC 6724 destination-address sorting, "
+            "historical RTT information, and previously used addresses. draft-ietf-happy-happyeyeballs-v3-04 Section 5.3 specifies sorting "
+            "destination endpoints within groups using historical RTT and endpoint-use data. RFC 8305 Section 7 (Supporting IPv6-Only Networks "
+            "with NAT64 and DNS64) is dedicated to NAT64 and DNS64 support on IPv6-only networks, not statefulness or failure caching. "
+            "Because trials are executed with clean profiles to guarantee measurement independence, historical statefulness cannot be evaluated."
         ),
         "target_parameter": "Historical Address Selection and Past State Caching",
-        "rfc_specification_requirement": "MAY remember historical RTT and previously used addresses for sorting (RFC 8305 Section 4 / v3 draft -04 Section 5.3)",
+        "rfc_specification_requirement": "MAY remember historical RTT and previously used addresses for sorting (RFC 8305 Section 4 Sorting Addresses / v3 draft -04 Section 5.3)",
         "rfc_recommended_range": "N/A",
         "observed_delay_ms": None,
         "observed_min_delay_ms": None,
@@ -2581,9 +2590,9 @@ def assess_rfc8305_conformance(
             "and adaptive failure caching cannot be evaluated."
         ),
         "specification_context": (
-            "RFC 8305 Section 4 specifies sorting addresses, including historical RTT and previously used addresses. "
+            "RFC 8305 Section 4 (Sorting Addresses) specifies sorting addresses, including historical RTT and previously used addresses per RFC 6724. "
             "draft-ietf-happy-happyeyeballs-v3-04 Section 5.3 specifies sorting destination endpoints within groups using "
-            "historical RTT and endpoint-use data. RFC 8305 Section 7 is dedicated to NAT64 and DNS64 support on IPv6-only "
+            "historical RTT and endpoint-use data. RFC 8305 Section 7 (Supporting IPv6-Only Networks with NAT64 and DNS64) is dedicated to NAT64 and DNS64 support on IPv6-only "
             "networks. Clean profile isolation per trial prevents cross-trial state evaluation."
         ),
     })

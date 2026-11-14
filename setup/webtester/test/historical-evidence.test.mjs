@@ -228,6 +228,18 @@ describe('PS-028 Historical Evidence Explorer Test Suite (TASK 6A Reconciled)', 
     assert.ok(check2, 'S2 assessment check must exist');
     assert.equal(check2.check_id, 'RFC8305-SEC5-CAD-10MS-FLOOR');
     assert.equal(check2.overall_observation_status, 'NOT_ASSESSED');
+
+    const check1 = bundle.rfc8305_assessment.find((c) => c.check_id === 'RFC8305-SEC2-IPV6-PREFERENCE');
+    assert.ok(check1, 'Check 1 (RFC8305-SEC2-IPV6-PREFERENCE) must exist');
+    assert.equal(check1.rfc_section, 'RFC 8305 Section 2');
+
+    const check5 = bundle.rfc8305_assessment.find((c) => c.check_id === 'RFC8305-SEC3-RESOLUTION-DELAY');
+    assert.ok(check5, 'Check 5 (RFC8305-SEC3-RESOLUTION-DELAY) must exist');
+    assert.equal(check5.rfc_section, 'RFC 8305 Section 3');
+
+    const check6 = bundle.rfc8305_assessment.find((c) => c.check_id === 'RFC8305-SEC4-HISTORICAL-STATE');
+    assert.ok(check6, 'Check 6 (RFC8305-SEC4-HISTORICAL-STATE) must exist');
+    assert.equal(check6.rfc_section, 'RFC 8305 Section 4');
   });
 
   test('14. Absolute epoch timestamps integrity and actual campaign time range', () => {

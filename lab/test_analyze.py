@@ -1052,6 +1052,8 @@ class TestRFC8305Assessment(unittest.TestCase):
         self.assertEqual(sec4["status"], "NOT_ASSESSED")
         self.assertIn("Unsupported check", sec4["evidence_summary"])
         self.assertIn("RFC 8305 Section 4", sec4["rfc_section"])
+        self.assertIn("Sorting Addresses", sec4["title"])
+        self.assertNotIn("Determining Address Order", sec4["title"])
 
         quic = check_map["HEV3-DRAFT04-SEC6.1-QUIC"]
         self.assertEqual(quic["status"], "OUT_OF_SCOPE")
@@ -1807,6 +1809,32 @@ class TestRFC8305Assessment(unittest.TestCase):
             self.assertNotIn("DEVIATION", c["status"])
             self.assertIn(c["mandatory_status"], controlled_vocabulary | {"NOT_APPLICABLE"})
             self.assertIn(c["recommended_status"], controlled_vocabulary | {"NOT_APPLICABLE"})
+
+        # 13. Standards Accuracy: RFC 8305 exact section headings
+        sec2_check = check_map["RFC8305-SEC2-IPV6-PREFERENCE"]
+        sec3_check = check_map["RFC8305-SEC3-RESOLUTION-DELAY"]
+        self.assertEqual(sec2_check["rfc_section"], "RFC 8305 Section 2")
+        self.assertIn("Overview", sec2_check["title"])
+        self.assertEqual(sec3_check["rfc_section"], "RFC 8305 Section 3")
+        self.assertIn("Hostname Resolution Query Handling", sec3_check["title"])
+        self.assertNotIn("Handling Multiple Addresses", sec3_check["title"])
+        self.assertNotIn("Handling Multiple Addresses", sec3_check["specification_context"])
+        self.assertIn("Sorting Addresses", sec4_check["title"])
+        self.assertNotIn("Determining Address Order", sec4_check["title"])
+        self.assertNotIn("Determining Address Order", sec4_check["specification_context"])
+
+        # 14. IPv6 Preference Attribution: RFC 6724 §2.1, §6 Rule 6, §10.3 (NOT Rule 2)
+        self.assertIn("RFC 6724 Section 2.1", sec2_check["specification_context"])
+        self.assertIn("Section 6 Rule 6", sec2_check["specification_context"])
+        self.assertIn("Section 10.3", sec2_check["specification_context"])
+        self.assertIn("Rule 2 is Prefer matching scope", sec2_check["specification_context"])
+        self.assertNotIn("Rule 2 destination address selection", sec2_check["specification_context"])
+
+        # 15. S4 anomalous trial precision: 600.949 ms SYN-ACK vs 1,298.191 ms HTTP 200, causality unverified
+        self.assertIn("600.949 ms", s4_check["evidence_summary"])
+        self.assertIn("1,298.191 ms", s4_check["evidence_summary"])
+        self.assertIn("physical absence of an IPv4 SYN", s4_check["evidence_summary"])
+        self.assertIn("browser-internal scheduling causality remains insufficient evidence", s4_check["evidence_summary"])
 
         # 13. S2 does not attribute immediate retry after RST to an RFC requirement and uses RFC8305-SEC5-CAD-10MS-FLOOR
         self.assertIn("RFC8305-SEC5-CAD-10MS-FLOOR", check_ids)

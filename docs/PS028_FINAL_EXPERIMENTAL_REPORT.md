@@ -368,12 +368,12 @@ S6 (Delayed AAAA 500ms):      [==================== 40 DIRECT_IPV6 ] (0 Fallback
    - Chrome exhibited an exceptionally tight CAD timer distribution: median **300.83ms** (IQR: 0.73ms, mean: 300.95ms, std: 0.63ms).
    - Firefox exhibited a longer, more variable CAD timer: median **408.45ms** (IQR: 149.33ms, mean: 441.60ms, std: 88.09ms).
 3. **S2 (IPv6 TCP RST):** 40/40 trials (100.0%) fell back to IPv4 upon receiving a TCP RST on the IPv6 path.
-   - Chrome exhibited **immediate fallback**: median CAD was **0.71ms** (mean: 1.11ms, std: 1.39ms), conforming to the RFC 8305 recommendation to initiate fallback immediately upon hard connection rejection.
+   - Chrome exhibited **accelerated fallback**: median CAD was **0.71ms** (mean: 1.11ms, std: 1.39ms). Note that neither RFC 8305 nor draft HEv3 contains language requiring immediate fallback upon receiving a TCP RST; RFC 8305 Section 5 specifies connection attempt delay and pacing rather than mandating immediate RST retry. Because wire measurements capture family-first-SYN offsets without logical attempt pairing or state tracking, S2 cannot be validly assessed against the RFC 8305 Section 5 10 ms floor and remains NOT_ASSESSED.
    - Firefox introduced an observable delay before initiating IPv4: median CAD was **160.43ms** (mean: 176.97ms, std: 51.38ms), indicating that Firefox does not immediately schedule the secondary address family upon TCP RST.
 4. **S3 (IPv6 RTT 150ms):** 40/40 trials (100.0%) established `DIRECT_IPV6` connections. Because the 150ms IPv6 RTT is shorter than the browsers' CAD timers (~300ms in Chrome, ~400ms in Firefox), the primary IPv6 3-way handshake finished before the CAD timer expired, successfully preventing unnecessary IPv4 fallback attempts.
 5. **S4 (IPv6 RTT 600ms):** When IPv6 path RTT (600ms) substantially exceeded the CAD timer:
    - Chrome fell back to IPv4 in 20/20 trials (100.0%), with median CAD of **300.81ms**. The IPv4 connection finished in ~25ms, winning the race while IPv6 was still awaiting SYN-ACK.
-   - Firefox fell back to IPv4 in 19/20 trials (95.0%, median CAD: **397.94ms**). In 1 trial (`slot-0136-S4-firefox-rep10`), Firefox did not attempt IPv4, completing direct IPv6 setup in 600.95ms.
+   - Firefox fell back to IPv4 in 19/20 trials (95.0%, median CAD: **397.94ms**). In 1 trial (`trial-20261029222109-5c74c26a`, slot-0136-S4-firefox-rep10), the wire capture confirms the physical absence of an IPv4 SYN on the monitored interface, completing direct IPv6 TCP connection setup (SYN to SYN-ACK) in 600.949 ms (initial SYN at $t = 3.028042\text{ s}$, SYN-ACK at $t = 3.628991\text{ s}$) and HTTP 200 response on the wire at $t = 4.326233\text{ s}$ ($\Delta t = 1,298.191\text{ ms}$). Page-load completion timing is not recorded in the packet capture. Wire packets cannot establish internal browser scheduling, timer suppression, or task queue state; the causal mechanism remains INSUFFICIENT_EVIDENCE.
 6. **S5 (IPv6 SYN Loss 50%):** Under 50% SYN loss, connection outcomes varied based on whether the primary IPv6 SYN was dropped and how retransmissions raced against CAD. In 33 trials (18 Chrome, 15 Firefox), IPv6 completed navigation successfully (including 5 trials where an ancillary favicon request or speculative socket preconnect over IPv4 was observed post-navigation). In 7 trials (2 Chrome, 5 Firefox), IPv6 SYN drops allowed IPv4 to complete connection setup first and win the HTTP navigation.
 7. **S6 (Delayed AAAA 500ms):** In all 40/40 trials (100.0%), both Chrome and Firefox established `DIRECT_IPV6` connections, awaiting the late AAAA response rather than connecting immediately over IPv4.
 
@@ -387,7 +387,7 @@ In scenarios S0–S5, DNS responses for both `A` and `AAAA` records were deliver
 - Chrome observed median A latency of **2.60ms** and AAAA latency of **2.04ms**.
 
 ### S6 DNS Asynchrony Analysis
-Scenario S6 evaluated RFC 8305 Section 3 ("Resolution Delay"). The DNS server delivered `A` responses immediately (0ms delay) while delaying `AAAA` responses by 500ms.
+Scenario S6 evaluated RFC 8305 Section 3 ("Hostname Resolution Query Handling: Resolution Delay"). The DNS server delivered `A` responses immediately (0ms delay) while delaying `AAAA` responses by 500ms.
 
 ```
 DNS Query / Connection Timeline in Scenario S6 (Chrome & Firefox):
@@ -563,7 +563,7 @@ The campaign manifest permanently records two documented mismatches between earl
 
 ### Limitations and Threats to Validity
 1. **Single-Site Topology:** Experiments were conducted within a local synthetic network namespace testbed. While tc netem and nftables reproduce packet-level delays and loss with fidelity, real-world WAN phenomena (BGP route flapping, Path MTU Discovery issues, intermediate middleboxes) were not evaluated.
-2. **Profile Isolation vs. Caching:** To guarantee measurement independence, ephemeral browser profiles were used for every trial. This intentionally precluded evaluating RFC 8305 Section 4 ("Historical Information"), which permits clients to cache historical connection failures across sessions.
+2. **Profile Isolation vs. Caching:** To guarantee measurement independence, ephemeral browser profiles were used for every trial. This intentionally precluded evaluating RFC 8305 Section 4 ("Sorting Addresses"), which discusses destination address sorting per RFC 6724, historical RTT information, and previously used addresses. Section 7 ("Supporting IPv6-Only Networks with NAT64 and DNS64") addresses NAT64 and DNS64 operation.
 3. **Transport Scope:** In accordance with PS-028 specifications, measurements evaluated HTTP/1.1 over TCP. Alternate transport protocols such as HTTP/3 over QUIC were out of scope.
 
 ### Future Improvements
