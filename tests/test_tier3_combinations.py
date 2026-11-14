@@ -41,7 +41,7 @@ class TestTier3Combinations(unittest.TestCase):
         """
         Combination 1: DNS AAAA delayed by 500ms (Scenario S6 style).
         When AAAA arrives, IPv6 SYN receives TCP RST (Scenario S2 style).
-        RFC 8305 §5 mandates immediate switch to IPv4 upon RST.
+        Simulated active rejection accelerates switch to IPv4 upon RST; note that neither RFC 8305 nor draft HEv3 mandates immediate switch upon RST.
         """
         # A returns immediately (0ms). Resolution delay is 50ms.
         # At t=50ms, IPv4 starts because AAAA has not arrived!
