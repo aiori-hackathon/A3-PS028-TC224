@@ -3,7 +3,7 @@
   "sha256": "73e7b238990e822b30cd926e5f709c36e76730f0c3857747ff78baa6d9ae3ac0",
   "row_count": 95,
   "generated_by_command": "python3 lab/export_campaign_evidence.py",
-  "git_commit": "f58028752b65a2ad37fa78c82cf7a9e683b41ed1",
+  "git_commit": "36eb271a543996a1d5d5c40c0c6902cb9c7f4ab0",
   "git_branch": "fix/phase-e-bundle-timeline-mapping",
   "python_version": "3.12.3",
   "tshark_version": "4.2.2",

@@ -134,7 +134,7 @@
     {
       "check_id": "RFC8305-SEC2-IPV6-PREFERENCE",
       "mandatory_floor_status": "NOT_APPLICABLE",
-      "observable_behavior_summary": "Observed alignment with RFC 8305 Section 2 overview assumption and RFC 6724 Section 6 destination address selection: 40/40 (100.0%) valid live trials established primary connection over IPv6 on dual-stack baseline without fallback. Scoped to recorded trials under lab conditions; does not infer general client behavior.",
+      "observable_behavior_summary": "Observed alignment with RFC 8305 Section 2 (Overview) assumption and RFC 6724 Section 6 Rule 6 (higher precedence per Section 2.1 policy table and Section 10.3) destination address selection: 40/40 (100.0%) valid live trials established primary connection over IPv6 on dual-stack baseline without fallback. Scoped to recorded trials under lab conditions; does not infer general client behavior.",
       "observed_delay_ms": "",
       "observed_max_delay_ms": "",
       "observed_min_delay_ms": "",
@@ -142,10 +142,10 @@
       "recommendation_alignment_status": "ALIGNED",
       "rfc_recommended_range": "N/A",
       "rfc_section": "RFC 8305 Section 2",
-      "rfc_specification_requirement": "Host policy assumes IPv6 preferred for initial attempt (RFC 8305 Section 2 / RFC 6724 Section 6 / v3 draft -04 Section 5.3)",
+      "rfc_specification_requirement": "Host policy assumes IPv6 preferred for initial attempt (RFC 8305 Section 2 / RFC 6724 Section 2.1, Section 6 Rule 6, Section 10.3 / v3 draft -04 Section 5.3)",
       "sample_size": "40",
       "scenario_id": "S0",
-      "specification_context": "RFC 8305 Section 2 states the overview assumption that host preference policy favors IPv6 over IPv4, as defined in RFC 6724 Section 6 destination address selection. RFC 8305 Section 3 governs DNS query handling and does not define address preference. draft-ietf-happy-happyeyeballs-v3-04 Section 5.3 also prioritizes IPv6 destination endpoints within groups.",
+      "specification_context": "RFC 8305 Section 2 (Overview) states the overview assumption that host preference policy favors IPv6 over IPv4. Under RFC 6724 Section 2.1 policy table (::/0 precedence 40 vs ::ffff:0:0/96 precedence 35) and RFC 6724 Section 6 Rule 6 (Prefer higher precedence; Rule 2 is Prefer matching scope), IPv6 receives higher precedence, as confirmed in RFC 6724 Section 10.3 (Configuring Preference for IPv6 or IPv4). RFC 8305 Section 3 (Hostname Resolution Query Handling) governs DNS query handling and does not define address preference. draft-ietf-happy-happyeyeballs-v3-04 Section 5.3 also prioritizes IPv6 destination endpoints within groups.",
       "target_parameter": "Dual-Stack IPv6 Preference"
     },
     {
@@ -159,10 +159,10 @@
       "recommendation_alignment_status": "OUTSIDE_RECOMMENDED_RANGE",
       "rfc_recommended_range": "[0.000, 50.000] ms",
       "rfc_section": "RFC 8305 Section 3",
-      "rfc_specification_requirement": "RECOMMENDED 50 ms Resolution Delay before initiating IPv4 (RFC 8305 Section 3 / v3 draft -04 Section 7)",
+      "rfc_specification_requirement": "RECOMMENDED 50 ms Resolution Delay before initiating IPv4 (RFC 8305 Section 3 Hostname Resolution Query Handling / v3 draft -04 Section 7)",
       "sample_size": "40",
       "scenario_id": "S6",
-      "specification_context": "RFC 8305 Section 3 recommends a 50 ms Resolution Delay when a positive A response arrives before a positive AAAA response. If positive AAAA arrives within 50 ms, an IPv4 attempt starting before AAAA arrival is an observed potential criterion mismatch. If positive AAAA arrives after 50 ms, an IPv4 attempt should be initiated within the 50 ms window. draft-ietf-happy-happyeyeballs-v3-04 Section 7 discusses DNS answer changes during connection setup.",
+      "specification_context": "RFC 8305 Section 3 (Hostname Resolution Query Handling) recommends a 50 ms Resolution Delay when a positive A response arrives before a positive AAAA response. If positive AAAA arrives within 50 ms, an IPv4 attempt starting before AAAA arrival is an observed potential criterion mismatch. If positive AAAA arrives after 50 ms, an IPv4 attempt should be initiated within the 50 ms window. draft-ietf-happy-happyeyeballs-v3-04 Section 7 discusses DNS answer changes during connection setup.",
       "target_parameter": "DNS Resolution Delay Pacing"
     },
     {
@@ -176,10 +176,10 @@
       "recommendation_alignment_status": "NOT_ASSESSED",
       "rfc_recommended_range": "N/A",
       "rfc_section": "RFC 8305 Section 4",
-      "rfc_specification_requirement": "MAY remember historical RTT and previously used addresses for sorting (RFC 8305 Section 4 / v3 draft -04 Section 5.3)",
+      "rfc_specification_requirement": "MAY remember historical RTT and previously used addresses for sorting (RFC 8305 Section 4 Sorting Addresses / v3 draft -04 Section 5.3)",
       "sample_size": "280",
       "scenario_id": "ALL",
-      "specification_context": "RFC 8305 Section 4 specifies sorting addresses, including historical RTT and previously used addresses. draft-ietf-happy-happyeyeballs-v3-04 Section 5.3 specifies sorting destination endpoints within groups using historical RTT and endpoint-use data. RFC 8305 Section 7 is dedicated to NAT64 and DNS64 support on IPv6-only networks. Clean profile isolation per trial prevents cross-trial state evaluation.",
+      "specification_context": "RFC 8305 Section 4 (Sorting Addresses) specifies sorting addresses, including historical RTT and previously used addresses per RFC 6724. draft-ietf-happy-happyeyeballs-v3-04 Section 5.3 specifies sorting destination endpoints within groups using historical RTT and endpoint-use data. RFC 8305 Section 7 (Supporting IPv6-Only Networks with NAT64 and DNS64) is dedicated to NAT64 and DNS64 support on IPv6-only networks. Clean profile isolation per trial prevents cross-trial state evaluation.",
       "target_parameter": "Historical Address Selection and Past State Caching"
     },
     {
@@ -202,7 +202,7 @@
     {
       "check_id": "RFC8305-SEC5-CAD-HIGH-LATENCY",
       "mandatory_floor_status": "MEETS_MANDATORY_FLOOR",
-      "observable_behavior_summary": "Observed behavior under 600.000 ms IPv6 path delay: IPv4 connection established first in 39/40 trials (pooled median CAD 305.100 ms; Google Chrome: 20/20 IPv4 wins [median 300.810 ms]; Firefox: 19/20 IPv4 wins [median 397.940 ms]). All 39 measured CAD values satisfy the 10.000 ms mandatory floor and fall within the recommended [100.000, 2000.000] ms range. In 1/40 trials (Firefox trial trial-20261029222109-5c74c26a), IPv6 completed without an IPv4 attempt being initiated. Scoped to recorded trials under lab conditions; does not infer general client non-conformance.",
+      "observable_behavior_summary": "Observed behavior under 600.000 ms IPv6 path delay: IPv4 connection established first in 39/40 trials (pooled median CAD 305.100 ms; Google Chrome: 20/20 IPv4 wins [median 300.810 ms]; Firefox: 19/20 IPv4 wins [median 397.940 ms]). All 39 measured CAD values satisfy the 10.000 ms mandatory floor and fall within the recommended [100.000, 2000.000] ms range. In 1/40 trials (Firefox trial trial-20261029222109-5c74c26a), direct IPv6 TCP connection setup completed in 600.949 ms (SYN-to-SYN/ACK) and wire HTTP 200 at 1,298.191 ms with physical absence of an IPv4 SYN on the wire; browser-internal scheduling causality remains insufficient evidence. Scoped to recorded trials under lab conditions; does not infer general client non-conformance.",
       "observed_delay_ms": "305.100",
       "observed_max_delay_ms": "522.130",
       "observed_min_delay_ms": "299.960",
