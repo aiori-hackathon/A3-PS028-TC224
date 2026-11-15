@@ -1948,6 +1948,18 @@ class TestRFC8305Assessment(unittest.TestCase):
         s2_run2 = json.dumps({c["check_id"]: c for c in report2["rfc8305_assessment"]}["RFC8305-SEC5-CAD-10MS-FLOOR"], sort_keys=True)
         self.assertEqual(s2_run1, s2_run2)
 
+    def test_rfc8305_docstring_and_section_attribution(self):
+        """
+        Workstream Issue #9: Docstring and Assessment RFC Section Attribution.
+        - assess_rfc8305_conformance docstring attributes S0 IPv6 Preference to RFC 8305 §2 / RFC 6724.
+        - S0 is NOT attributed to RFC 8305 §3 in the docstring.
+        - RFC 8305 §3 is correctly attributed to Resolution Delay (S6).
+        """
+        doc = analyze.assess_rfc8305_conformance.__doc__ or ""
+        self.assertNotIn("Address Order & IPv6 Preference (RFC 8305 §3)", doc)
+        self.assertIn("Address Order & IPv6 Preference (RFC 8305 §2 / RFC 6724 §2.1, §6 Rule 6, §10.3) -> S0", doc)
+        self.assertIn("Resolution Delay on Asynchronous DNS (RFC 8305 §3) -> S6", doc)
+
 
 class TestDeterministicOutput(unittest.TestCase):
     """Verifies that generated JSON and CSV summaries are 100% deterministic."""

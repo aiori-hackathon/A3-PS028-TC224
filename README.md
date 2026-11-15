@@ -7,7 +7,7 @@
 |Campaign|`ps028-a10-live-20261030-01`|
 |Evidence and code baseline|Branch `a/lab-foundation` · commit [`002c4453d35d6760760c6a14d2e98618b024f1f2`](https://github.com/aiori-hackathon/A3-PS028-TC224/commit/002c4453d35d6760760c6a14d2e98618b024f1f2)|
 |Phase C/D analysis revision|Branch `regional/ps028-phase-cd` · commit [`b920ebc93f2e6aaae8396b7095b6cd3c8598ade5`](https://github.com/aiori-hackathon/A3-PS028-TC224/commit/b920ebc93f2e6aaae8396b7095b6cd3c8598ade5)|
-|Consolidation target|Branch `regional/p0-remediation` (PR base)|
+|Consolidation target|Branch `fix/phase-e-bundle-timeline-mapping` (PR #10 merged)|
 |Final technical report|[`PS028 Detailed Analysis & Report PDF.pdf`](PS028%20Detailed%20Analysis%20%26%20Report%20PDF.pdf)|
 |Team introduction|https://youtu.be/5LLxlW9f6r4?si=EQjgtt3bIgkQ4Nix|
 |Final Project Demonstration Video|[https://youtu.be/LYngp7dzoRI?si=1mPrapHizazV41zB](https://youtu.be/LYngp7dzoRI?si=1mPrapHizazV41zB)|

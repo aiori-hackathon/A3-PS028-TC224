@@ -1738,7 +1738,7 @@ def assess_rfc8305_conformance(
     """
     Evaluates Happy Eyeballs v2 (RFC 8305) and Happy Eyeballs v3 (draft-ietf-happy-happyeyeballs-v3-04)
     assessment criteria based strictly on observable trial evidence:
-    - Address Order & IPv6 Preference (RFC 8305 §3) -> S0
+    - Address Order & IPv6 Preference (RFC 8305 §2 / RFC 6724 §2.1, §6 Rule 6, §10.3) -> S0
     - Active Failure Inter-Attempt Spacing (RFC 8305 §5 / v3 draft -04 §6) -> S2
     - Connection Attempt Delay on SYN Timeout (RFC 8305 §5 / v3 draft -04 §6) -> S1
     - Latency-Driven Alternative Path Selection (RFC 8305 §5 / v3 draft -04 §6) -> S4 vs S3

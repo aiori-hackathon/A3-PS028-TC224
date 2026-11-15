@@ -8,7 +8,6 @@ import {
   AUTHORITATIVE_SCENARIOS,
   auditPrimaryHandshakeOrdering,
   evaluateEvidenceIntegrity,
-  type IntegrityEvaluation,
 } from '@/lib/historical-evidence.ts';
 import {
   ShieldCheck,
@@ -32,7 +31,6 @@ export const EvidenceExplorer: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [computedSha256, setComputedSha256] = useState<string | null>(null);
-  const [shaMatch, setShaMatch] = useState<boolean | null>(null);
 
   // Active navigation tab
   const [activeTab, setActiveTab] = useState<
@@ -97,10 +95,6 @@ export const EvidenceExplorer: React.FC = () => {
         setBundle(parsedBundle);
         setProvenance(parsedProv);
         setComputedSha256(calculatedHash);
-
-        if (calculatedHash && parsedProv.output_bundle_sha256) {
-          setShaMatch(calculatedHash.toLowerCase() === parsedProv.output_bundle_sha256.toLowerCase());
-        }
 
         // Set default selected trial to the first representative trial
         if (parsedBundle.trials && parsedBundle.trials.length > 0 && !selectedTrialId) {

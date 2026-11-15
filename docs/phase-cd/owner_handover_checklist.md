@@ -2,9 +2,11 @@
 
 - **Team**: AlgoRhythm (TC224)
 - **Problem Statement**: PS-028 (Happy Eyeballs IPv4/IPv6 Fallback Measurement)
-- **Work Branch**: `regional/ps028-phase-cd`
-- **Base Commit**: `7c6ab23c2a378bbc8556fcc15f5911f626502576`
-- **Submission Document**: `PS028_Hackathon_Submission_Presentation.pdf` & `PS028 Detailed Analysis & Report PDF.pdf`
+- **Authoritative Integration Branch**: `fix/phase-e-bundle-timeline-mapping` (PR #10 merged)
+- **Post-P2 Remediation Branch**: `fix/ps028-post-p2-release-readiness`
+- **Historical Derivation Branch**: `regional/ps028-phase-cd`
+- **Protected P0 Acceptance Commit**: `176f688bacb5858fcc0daedb454200918e427f3f` (tag: `ps028-p0-accepted-2026-11-14`)
+- **Submission Documents**: `PS028_Hackathon_Submission_Presentation.pdf` & `PS028 Detailed Analysis & Report PDF.pdf`
 - **Authoritative Campaign**: `ps028-a10-live-20261030-01` (705 cryptographically sealed files)
 
 > [!IMPORTANT]
@@ -20,40 +22,35 @@
 - [x] **Milestone 3 (Batches C2 & C4)**: Generated deterministic ledgers (`attempts.csv` [282 rows], `connection_attempts.csv` [765 flows], `s5_flow_dissection.csv` [95 flows], `trial_timeline.csv` [28,330 events]) with Amendment A13 `.provenance.json` sidecars.
 - [x] **Milestone 4 (Batch C5)**: Decoupled root privileges with `privileged_helper.py`, implemented 5-stage fail-closed DNS reload protocol, passed 48 adversarial challenge tests.
 - [x] **Milestone 5 (Batches C3 & C6)**: Resolved S2 median contradiction, neutralized conformance claims (Rule R7), corrected RFC citations (§3 vs §4), remediated 17 documentation items, and compiled official 11-slide presentation `PS028_Hackathon_Submission_Presentation.pdf`.
-- [x] **Milestone 6 (Phase D)**: Delivered empirical sweeps D1 (target IPv6 RTT) and D2 (one-factor DNS), statistical crossover curves (D3), qualitative comparison with published Firefox 132 (D4), and partner replication framework (D5).
+- [x] **Milestone 6 (Phase D)**: Delivered empirical sweeps D1 (target IPv6 RTT) and D2 (one-factor DNS), statistical crossover curves (D3), qualitative comparison with published Firefox 132 (D4), and partner replication framework (D5). *Note: Phase D live research sweeps remain PAUSED BY OWNER DECISION; simulation and analytical models are fully verified.*
 - [x] **Milestone 7 (Phase E)**: Passed all 824 automated tests (100% PASS), delivered offline prototype replay tool (`lab/demo_replay.py`), and pseudocode snippet.
+- [x] **Milestone 8 (P1 & P2 Remediation Merged via PR #10)**: Strict metric contracts, fail-closed validation parsing, Playwright browser acceptance, and RFC attribution corrections integrated on `fix/phase-e-bundle-timeline-mapping`.
 
 ---
 
-## Owner Handover Steps (Manual)
+## Owner Handover Steps (Status & Manual Actions)
 
-### Step 1: Final Branch Push & Tagging
+### Step 1: Final Integration Branch Verification
 ```bash
-# Review git status on regional/ps028-phase-cd
+# Review git status on fix/phase-e-bundle-timeline-mapping (or remediation branch)
 git status
 
-# Commit any remaining files and push to remote
-git push origin regional/ps028-phase-cd
-
-# Create and push annotated submission tag
-git tag -a v1.0.0-final-submission -m "Final verified submission for AIORI-3 PS-028"
-git push origin v1.0.0-final-submission
+# Inspect release validation record
+cat docs/phase-cd/final-release-validation-record-2026-11-15.md
 ```
 
 ### Step 2: Repository Settings & Collaborators (GitHub Web UI)
 1. Navigate to: `https://github.com/aiori-hackathon/A3-PS028-TC224/settings`
 2. **Collaborators**:
    - Go to **Manage Access** -> **Add people**.
-   - Add user `aiori-hackathon` as a collaborator with Admin / Maintain access.
+   - Confirm team and judge collaborator access.
 3. **Repository Visibility**:
-   - Confirm repository visibility is set to **Private**.
+   - Confirm repository visibility matches organizer requirements.
 
-### Step 3: Ownership Transfer (When Instructed by Hackathon Organizers)
-1. Navigate to: `https://github.com/aiori-hackathon/A3-PS028-TC224/settings`
-2. Scroll to the **Danger Zone** at the bottom.
-3. Click **Transfer ownership**.
-4. Enter target organization/user: `aiori-hackathon`.
-5. Confirm by typing the repository name.
+### Step 3: Ownership Transfer (Completed)
+- **Status**: [x] **COMPLETED** on 14 November 2026.
+- Repository successfully transferred to organisation `aiori-hackathon`.
+- Verified via GitHub API repository metadata (`owner.login: aiori-hackathon`).
 
 ### Step 4: Submission Portal Upload
 Upload the generated submission files to the hackathon portal:

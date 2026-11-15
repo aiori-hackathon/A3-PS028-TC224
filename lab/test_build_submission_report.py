@@ -9,7 +9,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from lab.build_submission_report import load_derived_metrics
+from lab.build_submission_report import (
+    generate_presentation_html,
+    load_derived_metrics,
+    parse_p1_validation_record,
+)
 
 
 class TestBuildSubmissionReport(unittest.TestCase):
@@ -348,6 +352,294 @@ class TestBuildSubmissionReport(unittest.TestCase):
             report_content,
             "Final experimental report must not equate wire timestamps with remote handshake completion",
         )
+
+    # --------------------------------------------------------------------------
+    # Workstream Issue #12: Strict Fail-Closed P1 Validation Record Tests
+    # --------------------------------------------------------------------------
+
+    def _write_valid_p1_record(self, p1_path: Path, **overrides) -> Path:
+        tested_sha = overrides.get("commit_sha", "ee59362ac3f53fad3bc01e65b5d90815697a93d4")
+        lab_counts = overrides.get("lab", (805, 805, 0, 0, 0))
+        int_counts = overrides.get("int", (93, 93, 0, 0, 0))
+        fe_counts = overrides.get("fe", (31, 31, 0, 0, 0))
+        tot_counts = overrides.get("tot", (929, 929, 0, 0, 0))
+        smoke_str = overrides.get("smoke", "(16/16 checks verified; 0 failures)")
+        browser_str = overrides.get("browser", "(8/8 stages passed; 53 assertions verified; 0 errors)")
+        ci_str = overrides.get("ci", "Local validation completed; remote GitHub CI is not configured or recorded.")
+
+        raw_table = overrides.get("raw_table")
+        if raw_table is None:
+            table_content = (
+                "| Tier | Test Command | Module / File Scope | Discovered | Passed | Failed | Errors | Skipped | Duration |\n"
+                "|:---|:---|:---|:---:|:---:|:---:|:---:|:---:|:---:|\n"
+                f"| **Python Lab Unit & Regression** | `lab` | 21 modules | **{lab_counts[0]}** | **{lab_counts[1]}** | {lab_counts[2]} | {lab_counts[3]} | {lab_counts[4]} | 43.79s |\n"
+                f"| **Python Integration Tier** | `tests` | 2 modules | **{int_counts[0]}** | **{int_counts[1]}** | {int_counts[2]} | {int_counts[3]} | {int_counts[4]} | 0.35s |\n"
+                f"| **Frontend Unit Tests** | `fe` | 1 module | **{fe_counts[0]}** | **{fe_counts[1]}** | {fe_counts[2]} | {fe_counts[3]} | {fe_counts[4]} | 0.67s |\n"
+                f"| **Total Unique Automated Tests** | Disaggregated | Unique Tier | **{tot_counts[0]}** | **{tot_counts[1]}** | **{tot_counts[2]}** | **{tot_counts[3]}** | **{tot_counts[4]}** | **44.81s** |\n"
+            )
+        else:
+            table_content = raw_table
+
+        content = (
+            f"# PS-028 Happy Eyeballs — P1 Validation Record (14 November 2026)\n\n"
+            f"- **Tested P1 Source Commit SHA:** `{tested_sha}`\n"
+            f"- **GitHub CI Status:** {ci_str}\n\n"
+            f"{table_content}\n\n"
+            f"### Static Smoke\n\n- Status: PASSED {smoke_str}\n\n"
+            f"### Browser Acceptance\n\n- Status: PASSED {browser_str}\n"
+        )
+        p1_path.write_text(content, encoding="utf-8")
+        return p1_path
+
+    def test_missing_p1_validation_record_fails_closed(self):
+        """Missing P1 validation record must raise FileNotFoundError, not substitute fallbacks."""
+        nonexistent = self.base_dir / "nonexistent_p1_record.md"
+        with self.assertRaises(FileNotFoundError) as ctx:
+            parse_p1_validation_record(nonexistent)
+        self.assertIn("nonexistent_p1_record.md", str(ctx.exception))
+
+    def test_empty_p1_validation_record_fails_closed(self):
+        """Empty P1 validation record must raise ValueError."""
+        p1_file = self.base_dir / "empty_p1.md"
+        p1_file.write_text("")
+        with self.assertRaises(ValueError) as ctx:
+            parse_p1_validation_record(p1_file)
+        self.assertIn("empty", str(ctx.exception).lower())
+
+    def test_missing_tested_source_commit_sha_fails_closed(self):
+        """P1 record missing Tested P1 Source Commit SHA must fail closed."""
+        p1_file = self.base_dir / "missing_commit.md"
+        self._write_valid_p1_record(p1_file)
+        content = p1_file.read_text(encoding="utf-8")
+        # Remove commit line
+        content = "\n".join(l for l in content.splitlines() if "Tested P1 Source Commit SHA" not in l)
+        p1_file.write_text(content, encoding="utf-8")
+
+        with self.assertRaises(ValueError) as ctx:
+            parse_p1_validation_record(p1_file)
+        self.assertIn("Tested P1 Source Commit SHA", str(ctx.exception))
+
+    def test_missing_lab_count_fails_closed(self):
+        """P1 record missing lab count table row must fail closed."""
+        p1_file = self.base_dir / "missing_lab.md"
+        self._write_valid_p1_record(p1_file)
+        content = p1_file.read_text(encoding="utf-8")
+        content = "\n".join(l for l in content.splitlines() if "Python Lab Unit & Regression" not in l)
+        p1_file.write_text(content, encoding="utf-8")
+
+        with self.assertRaises(ValueError) as ctx:
+            parse_p1_validation_record(p1_file)
+        self.assertIn("Python Lab Unit & Regression", str(ctx.exception))
+
+    def test_missing_integration_count_fails_closed(self):
+        """P1 record missing integration tier table row must fail closed."""
+        p1_file = self.base_dir / "missing_int.md"
+        self._write_valid_p1_record(p1_file)
+        content = p1_file.read_text(encoding="utf-8")
+        content = "\n".join(l for l in content.splitlines() if "Python Integration Tier" not in l)
+        p1_file.write_text(content, encoding="utf-8")
+
+        with self.assertRaises(ValueError) as ctx:
+            parse_p1_validation_record(p1_file)
+        self.assertIn("Python Integration Tier", str(ctx.exception))
+
+    def test_missing_frontend_count_fails_closed(self):
+        """P1 record missing frontend unit tests table row must fail closed."""
+        p1_file = self.base_dir / "missing_fe.md"
+        self._write_valid_p1_record(p1_file)
+        content = p1_file.read_text(encoding="utf-8")
+        content = "\n".join(l for l in content.splitlines() if "Frontend Unit Tests" not in l)
+        p1_file.write_text(content, encoding="utf-8")
+
+        with self.assertRaises(ValueError) as ctx:
+            parse_p1_validation_record(p1_file)
+        self.assertIn("Frontend Unit Tests", str(ctx.exception))
+
+    def test_missing_total_test_count_fails_closed(self):
+        """P1 record missing total unique tests table row must fail closed."""
+        p1_file = self.base_dir / "missing_tot.md"
+        self._write_valid_p1_record(p1_file)
+        content = p1_file.read_text(encoding="utf-8")
+        content = "\n".join(l for l in content.splitlines() if "Total Unique Automated Tests" not in l)
+        p1_file.write_text(content, encoding="utf-8")
+
+        with self.assertRaises(ValueError) as ctx:
+            parse_p1_validation_record(p1_file)
+        self.assertIn("Total Unique Automated Tests", str(ctx.exception))
+
+    def test_missing_passed_count_fails_closed(self):
+        """P1 record with missing passed count in table row must fail closed."""
+        p1_file = self.base_dir / "missing_passed.md"
+        bad_table = (
+            "| Tier | Test Command | Module / File Scope | Discovered | Passed | Failed | Errors | Skipped | Duration |\n"
+            "|:---|:---|:---|:---:|:---:|:---:|:---:|:---:|:---:|\n"
+            "| **Python Lab Unit & Regression** | `lab` | 21 modules | **805** |  | 0 | 0 | 0 | 43.79s |\n"
+            "| **Python Integration Tier** | `tests` | 2 modules | **93** | **93** | 0 | 0 | 0 | 0.35s |\n"
+            "| **Frontend Unit Tests** | `fe` | 1 module | **31** | **31** | 0 | 0 | 0 | 0.67s |\n"
+            "| **Total Unique Automated Tests** | Disaggregated | Unique Tier | **929** | **929** | **0** | **0** | **0** | **44.81s** |\n"
+        )
+        self._write_valid_p1_record(p1_file, raw_table=bad_table)
+        with self.assertRaises(ValueError) as ctx:
+            parse_p1_validation_record(p1_file)
+        self.assertIn("Missing Passed count", str(ctx.exception))
+
+    def test_missing_failed_error_skip_counts_fails_closed(self):
+        """P1 record with missing failed/error/skip columns must fail closed."""
+        p1_file = self.base_dir / "missing_cols.md"
+        bad_table = (
+            "| Tier | Test Command | Discovered | Passed |\n"
+            "|:---|:---|:---:|:---:|\n"
+            "| **Python Lab Unit & Regression** | `lab` | **805** | **805** |\n"
+            "| **Python Integration Tier** | `tests` | **93** | **93** |\n"
+            "| **Frontend Unit Tests** | `fe` | **31** | **31** |\n"
+            "| **Total Unique Automated Tests** | Disaggregated | **929** | **929** |\n"
+        )
+        self._write_valid_p1_record(p1_file, raw_table=bad_table)
+        with self.assertRaises(ValueError) as ctx:
+            parse_p1_validation_record(p1_file)
+        self.assertIn("Malformed table row", str(ctx.exception))
+
+    def test_non_integer_counts_fails_closed(self):
+        """P1 record containing non-integer count values must fail closed."""
+        p1_file = self.base_dir / "non_integer.md"
+        bad_table = (
+            "| Tier | Test Command | Module / File Scope | Discovered | Passed | Failed | Errors | Skipped | Duration |\n"
+            "|:---|:---|:---|:---:|:---:|:---:|:---:|:---:|:---:|\n"
+            "| **Python Lab Unit & Regression** | `lab` | 21 modules | **eight_hundred** | **805** | 0 | 0 | 0 | 43.79s |\n"
+            "| **Python Integration Tier** | `tests` | 2 modules | **93** | **93** | 0 | 0 | 0 | 0.35s |\n"
+            "| **Frontend Unit Tests** | `fe` | 1 module | **31** | **31** | 0 | 0 | 0 | 0.67s |\n"
+            "| **Total Unique Automated Tests** | Disaggregated | Unique Tier | **929** | **929** | **0** | **0** | **0** | **44.81s** |\n"
+        )
+        self._write_valid_p1_record(p1_file, raw_table=bad_table)
+        with self.assertRaises(ValueError) as ctx:
+            parse_p1_validation_record(p1_file)
+        self.assertIn("Invalid non-integer or negative", str(ctx.exception))
+
+    def test_negative_counts_fails_closed(self):
+        """P1 record containing negative count values must fail closed."""
+        p1_file = self.base_dir / "negative_count.md"
+        bad_table = (
+            "| Tier | Test Command | Module / File Scope | Discovered | Passed | Failed | Errors | Skipped | Duration |\n"
+            "|:---|:---|:---|:---:|:---:|:---:|:---:|:---:|:---:|\n"
+            "| **Python Lab Unit & Regression** | `lab` | 21 modules | **805** | **805** | -1 | 0 | 0 | 43.79s |\n"
+            "| **Python Integration Tier** | `tests` | 2 modules | **93** | **93** | 0 | 0 | 0 | 0.35s |\n"
+            "| **Frontend Unit Tests** | `fe` | 1 module | **31** | **31** | 0 | 0 | 0 | 0.67s |\n"
+            "| **Total Unique Automated Tests** | Disaggregated | Unique Tier | **929** | **929** | **0** | **0** | **0** | **44.81s** |\n"
+        )
+        self._write_valid_p1_record(p1_file, raw_table=bad_table)
+        with self.assertRaises(ValueError) as ctx:
+            parse_p1_validation_record(p1_file)
+        self.assertIn("Invalid non-integer or negative", str(ctx.exception))
+
+    def test_inconsistent_category_sum_fails_closed(self):
+        """When lab + integration + frontend != total, parser must fail closed."""
+        p1_file = self.base_dir / "inconsistent_sum.md"
+        # Total set to 999 while 805 + 93 + 31 = 929
+        self._write_valid_p1_record(
+            p1_file,
+            lab=(805, 805, 0, 0, 0),
+            int=(93, 93, 0, 0, 0),
+            fe=(31, 31, 0, 0, 0),
+            tot=(999, 999, 0, 0, 0),
+        )
+        with self.assertRaises(ValueError) as ctx:
+            parse_p1_validation_record(p1_file)
+        self.assertIn("Arithmetic inconsistency", str(ctx.exception))
+
+    def test_inconsistent_pass_fail_error_skip_sum_fails_closed(self):
+        """When passed + failed + errors + skipped != discovered, parser must fail closed."""
+        p1_file = self.base_dir / "inconsistent_row_sum.md"
+        # Lab discovered=805, but passed=800, failed=0, errors=0, skipped=0 (sums to 800)
+        self._write_valid_p1_record(
+            p1_file,
+            lab=(805, 800, 0, 0, 0),
+            tot=(929, 924, 0, 0, 0),
+        )
+        with self.assertRaises(ValueError) as ctx:
+            parse_p1_validation_record(p1_file)
+        self.assertIn("breakdown does not sum to discovered count", str(ctx.exception))
+
+    def test_malformed_markdown_table_fails_closed(self):
+        """Malformed markdown table with corrupted rows must fail closed."""
+        p1_file = self.base_dir / "malformed_table.md"
+        p1_file.write_text(
+            "# P1 Record\n\n"
+            "- **Tested P1 Source Commit SHA:** `ee59362ac3f53fad3bc01e65b5d90815697a93d4`\n"
+            "- **GitHub CI Status:** NOT CONFIGURED\n\n"
+            "| not a real table row\n"
+        )
+        with self.assertRaises(ValueError) as ctx:
+            parse_p1_validation_record(p1_file)
+        self.assertIn("Missing required table row", str(ctx.exception))
+
+    def test_missing_smoke_test_metadata_fails_closed(self):
+        """Missing static smoke test metadata must fail closed."""
+        p1_file = self.base_dir / "missing_smoke.md"
+        self._write_valid_p1_record(p1_file)
+        content = p1_file.read_text(encoding="utf-8")
+        content = "\n".join(l for l in content.splitlines() if "checks verified" not in l)
+        p1_file.write_text(content, encoding="utf-8")
+
+        with self.assertRaises(ValueError) as ctx:
+            parse_p1_validation_record(p1_file)
+        self.assertIn("smoke verification metadata", str(ctx.exception).lower())
+
+    def test_missing_browser_stage_metadata_fails_closed(self):
+        """Missing browser acceptance metadata must fail closed."""
+        p1_file = self.base_dir / "missing_browser.md"
+        self._write_valid_p1_record(p1_file)
+        content = p1_file.read_text(encoding="utf-8")
+        content = "\n".join(l for l in content.splitlines() if "stages passed" not in l)
+        p1_file.write_text(content, encoding="utf-8")
+
+        with self.assertRaises(ValueError) as ctx:
+            parse_p1_validation_record(p1_file)
+        self.assertIn("browser acceptance metadata", str(ctx.exception).lower())
+
+    def test_record_with_only_historical_commit_no_results_fails_closed(self):
+        """A record that contains only the historical commit SHA but no test counts must fail closed."""
+        p1_file = self.base_dir / "commit_only.md"
+        p1_file.write_text(
+            "# PS-028 P1 Validation Record\n\n"
+            "- **Tested P1 Source Commit SHA:** `ee59362ac3f53fad3bc01e65b5d90815697a93d4`\n"
+            "- **GitHub CI Status:** Local validation completed\n"
+        )
+        with self.assertRaises(ValueError) as ctx:
+            parse_p1_validation_record(p1_file)
+        self.assertIn("Missing required table row", str(ctx.exception))
+
+    def test_renderer_invoked_with_incomplete_metrics_fails_closed(self):
+        """generate_presentation_html must fail closed when validation keys are missing, never defaulting to 929."""
+        incomplete_metrics = {
+            "valid_live": 280,
+            "direct_ipv6": 154,
+            "fallback_ipv4": 126,
+            # Missing all p1_* metrics
+        }
+        with self.assertRaises(KeyError) as ctx:
+            generate_presentation_html(incomplete_metrics)
+        self.assertIn("Required P1 validation metric", str(ctx.exception))
+
+    def test_valid_historical_p1_record_produces_dated_snapshot(self):
+        """Valid historical P1 validation record parses exact counts without substitution."""
+        p1_file = self.base_dir / "valid_p1.md"
+        self._write_valid_p1_record(p1_file)
+        metrics = parse_p1_validation_record(p1_file)
+
+        self.assertEqual(metrics["p1_commit_sha"], "ee59362ac3f53fad3bc01e65b5d90815697a93d4")
+        self.assertEqual(metrics["p1_lab_tests"], 805)
+        self.assertEqual(metrics["p1_integration_tests"], 93)
+        self.assertEqual(metrics["p1_frontend_tests"], 31)
+        self.assertEqual(metrics["p1_total_tests"], 929)
+        self.assertEqual(metrics["p1_unique_tests"], 929)
+        self.assertEqual(metrics["p1_tests_passed"], 929)
+        self.assertEqual(metrics["p1_tests_failed"], 0)
+        self.assertEqual(metrics["p1_tests_errors"], 0)
+        self.assertEqual(metrics["p1_tests_skipped"], 0)
+        self.assertEqual(metrics["p1_static_smoke_checks"], 16)
+        self.assertEqual(metrics["p1_browser_stages"], 8)
+        self.assertEqual(metrics["p1_browser_assertions"], 53)
+        self.assertIn("not configured", metrics["p1_ci_status"].lower())
 
 
 

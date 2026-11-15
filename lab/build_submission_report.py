@@ -24,6 +24,153 @@ DERIVED_DIR = REPO_ROOT / "lab" / "derived" / "phase-c"
 OUTPUT_PDF = REPO_ROOT / "PS028_Hackathon_Submission_Presentation.pdf"
 HTML_TEMP = REPO_ROOT / "lab" / "derived" / "phase-c" / "presentation_deck.html"
 
+# Historical P1 validation snapshot reference (commit: ee59362ac3f5)
+HISTORICAL_P1_COMMIT = "ee59362ac3f53fad3bc01e65b5d90815697a93d4"
+
+
+
+def parse_p1_validation_record(
+    record_path: Optional[Path] = None,
+) -> Dict[str, Any]:
+    """
+    Parses and strictly validates the authoritative dated P1 validation record.
+    Enforces strict fail-closed validation:
+    - Fails if the document is missing or empty.
+    - Rejects missing commit SHA, missing counts, malformed markdown, or unparseable fields.
+    - Rejects non-integers, negative numbers, or contradictory metadata.
+    - Verifies arithmetic:
+        lab + integration + frontend == total unique tests
+        passed + failed + errors + skipped == recorded total
+        per-row breakdown sums match discovered total.
+    - Never uses silent default fallbacks (e.g. 805, 93, 31, 929).
+    """
+    target_path = record_path or (REPO_ROOT / "docs" / "phase-cd" / "p1-validation-record-2026-11-14.md")
+    target_path = Path(target_path)
+
+    if not target_path.is_file():
+        raise FileNotFoundError(f"Required authoritative P1 validation record missing: {target_path}")
+
+    content = target_path.read_text(encoding="utf-8")
+    if not content.strip():
+        raise ValueError(f"Authoritative P1 validation record {target_path} is empty")
+
+    metrics: Dict[str, Any] = {"p1_validation_record_file": str(target_path)}
+
+    # 1. Tested source commit SHA
+    commit_m = re.search(r"\*\*Tested P1 Source Commit SHA:\*\*\s*`([a-f0-9]{7,40})`", content)
+    if not commit_m:
+        raise ValueError(f"Missing or invalid Tested P1 Source Commit SHA in {target_path}")
+    metrics["p1_commit_sha"] = commit_m.group(1)
+
+    # 2. Markdown Table Parsing
+    def _parse_row_counts(line: str, row_label: str) -> Dict[str, int]:
+        parts = [p.strip() for p in line.split("|")]
+        # markdown table row surrounded by pipes: | Tier | Cmd | Scope | Discovered | Passed | Failed | Errors | Skipped | Duration |
+        if len(parts) < 10:
+            raise ValueError(f"Malformed table row for '{row_label}': expected at least 8 pipe-delimited columns, got {len(parts)-2}")
+
+        col_names = ["Discovered", "Passed", "Failed", "Errors", "Skipped"]
+        col_indices = [4, 5, 6, 7, 8]
+        parsed = {}
+        for name, idx in zip(col_names, col_indices):
+            raw = parts[idx].replace("*", "").strip()
+            if not raw:
+                raise ValueError(f"Missing {name} count in row '{row_label}'")
+            if not re.fullmatch(r"\d+", raw):
+                raise ValueError(f"Invalid non-integer or negative {name} count '{parts[idx]}' in row '{row_label}'")
+            val = int(raw)
+            if val < 0:
+                raise ValueError(f"Negative {name} count ({val}) in row '{row_label}'")
+            parsed[name.lower()] = val
+
+        disc = parsed["discovered"]
+        total_parts = parsed["passed"] + parsed["failed"] + parsed["errors"] + parsed["skipped"]
+        if total_parts != disc:
+            raise ValueError(
+                f"Row '{row_label}' breakdown does not sum to discovered count: "
+                f"{parsed['passed']} passed + {parsed['failed']} failed + {parsed['errors']} errors + {parsed['skipped']} skipped = {total_parts} != {disc}"
+            )
+        return parsed
+
+    tier_patterns = {
+        "lab": r"\|\s*\*\*Python Lab Unit & Regression\*\*\s*\|",
+        "int": r"\|\s*\*\*Python Integration Tier\*\*\s*\|",
+        "fe": r"\|\s*\*\*Frontend Unit Tests\*\*\s*\|",
+        "tot": r"\|\s*\*\*(?:Total Unique Automated Tests|Total Automated Unit Definitions)\*\*\s*\|",
+    }
+
+    tier_data: Dict[str, Dict[str, int]] = {}
+    for tier_key, pattern in tier_patterns.items():
+        matched_line = None
+        for line in content.splitlines():
+            if re.search(pattern, line):
+                matched_line = line
+                break
+        if not matched_line:
+            raise ValueError(f"Missing required table row matching '{pattern}' in {target_path}")
+        tier_data[tier_key] = _parse_row_counts(matched_line, tier_key)
+
+    lab = tier_data["lab"]
+    it = tier_data["int"]
+    fe = tier_data["fe"]
+    tot = tier_data["tot"]
+
+    # Arithmetic checks across tiers
+    if lab["discovered"] + it["discovered"] + fe["discovered"] != tot["discovered"]:
+        raise ValueError(
+            f"Arithmetic inconsistency: lab ({lab['discovered']}) + integration ({it['discovered']}) + frontend ({fe['discovered']}) != total ({tot['discovered']})"
+        )
+    if lab["passed"] + it["passed"] + fe["passed"] != tot["passed"]:
+        raise ValueError(
+            f"Arithmetic inconsistency in passed tests: lab ({lab['passed']}) + integration ({it['passed']}) + frontend ({fe['passed']}) != total ({tot['passed']})"
+        )
+    if lab["failed"] + it["failed"] + fe["failed"] != tot["failed"]:
+        raise ValueError("Arithmetic inconsistency in failed tests")
+    if lab["errors"] + it["errors"] + fe["errors"] != tot["errors"]:
+        raise ValueError("Arithmetic inconsistency in error tests")
+    if lab["skipped"] + it["skipped"] + fe["skipped"] != tot["skipped"]:
+        raise ValueError("Arithmetic inconsistency in skipped tests")
+
+    metrics["p1_lab_tests"] = lab["discovered"]
+    metrics["p1_integration_tests"] = it["discovered"]
+    metrics["p1_frontend_tests"] = fe["discovered"]
+    metrics["p1_total_tests"] = tot["discovered"]
+    metrics["p1_unique_tests"] = tot["discovered"]
+    metrics["p1_tests_passed"] = tot["passed"]
+    metrics["p1_tests_failed"] = tot["failed"]
+    metrics["p1_tests_errors"] = tot["errors"]
+    metrics["p1_tests_skipped"] = tot["skipped"]
+
+    # 3. Static Distribution and Smoke Verification
+    smoke_m = re.search(r"\((\d+)/(\d+)\s+checks verified", content)
+    if not smoke_m:
+        raise ValueError(f"Missing static smoke verification metadata in {target_path}")
+    smoke_verified = int(smoke_m.group(1))
+    smoke_total = int(smoke_m.group(2))
+    if smoke_verified < 0 or smoke_total <= 0 or smoke_verified > smoke_total:
+        raise ValueError(f"Invalid static smoke verification counts: {smoke_verified}/{smoke_total}")
+    metrics["p1_static_smoke_checks"] = smoke_verified
+
+    # 4. Genuine Browser Acceptance Suite
+    browser_m = re.search(r"\((\d+)/(\d+)\s+stages passed;\s+(\d+)\s+assertions verified", content)
+    if not browser_m:
+        raise ValueError(f"Missing browser acceptance metadata in {target_path}")
+    browser_stages_passed = int(browser_m.group(1))
+    browser_stages_total = int(browser_m.group(2))
+    browser_assertions = int(browser_m.group(3))
+    if browser_stages_passed < 0 or browser_stages_total <= 0 or browser_stages_passed > browser_stages_total or browser_assertions < 0:
+        raise ValueError(f"Invalid browser acceptance counts: {browser_stages_passed}/{browser_stages_total}, assertions={browser_assertions}")
+    metrics["p1_browser_stages"] = browser_stages_passed
+    metrics["p1_browser_assertions"] = browser_assertions
+
+    # 5. Remote GitHub CI Status
+    ci_m = re.search(r"\*\*GitHub CI Status:\*\*\s*(.+)", content)
+    if not ci_m or not ci_m.group(1).strip():
+        raise ValueError(f"Missing GitHub CI status in {target_path}")
+    metrics["p1_ci_status"] = ci_m.group(1).strip()
+
+    return metrics
+
 
 def load_derived_metrics(
     derived_dir: Optional[Path] = None,
@@ -115,60 +262,9 @@ def load_derived_metrics(
         metrics["focused_tests"] = "NOT_RECORDED"
         metrics["test_run_metadata"] = None
 
-    # Authoritative P1 validation snapshot (14 November 2026)
-    p1_candidates = [
-        p1_record_path,
-        REPO_ROOT / "docs" / "phase-cd" / "p1-validation-record-2026-11-14.md",
-        REPO_ROOT / "docs" / "phase-c" / "p1-validation-record-2026-11-14.md",
-    ]
-    p1_file = next((p for p in p1_candidates if p and Path(p).is_file()), None)
-    if p1_file:
-        content = Path(p1_file).read_text(encoding="utf-8")
-        metrics["p1_validation_record_file"] = str(p1_file)
-
-        commit_m = re.search(r"\*\*Tested P1 Source Commit SHA:\*\*\s*`([a-f0-9]+)`", content)
-        metrics["p1_commit_sha"] = commit_m.group(1) if commit_m else "ee59362ac3f53fad3bc01e65b5d90815697a93d4"
-
-        lab_m = re.search(r"\|\s*\*\*Python Lab Unit & Regression\*\*\s*\|[^|]+\|[^|]+\|\s*\*\*(\d+)\*\*", content)
-        metrics["p1_lab_tests"] = int(lab_m.group(1)) if lab_m else 805
-
-        int_m = re.search(r"\|\s*\*\*Python Integration Tier\*\*\s*\|[^|]+\|[^|]+\|\s*\*\*(\d+)\*\*", content)
-        metrics["p1_integration_tests"] = int(int_m.group(1)) if int_m else 93
-
-        fe_m = re.search(r"\|\s*\*\*Frontend Unit Tests\*\*\s*\|[^|]+\|[^|]+\|\s*\*\*(\d+)\*\*", content)
-        metrics["p1_frontend_tests"] = int(fe_m.group(1)) if fe_m else 31
-
-        tot_m = re.search(r"\|\s*\*\*(?:Total Unique Automated Tests|Total Automated Unit Definitions)\*\*\s*\|[^|]+\|[^|]+\|\s*\*\*(\d+)\*\*", content)
-        metrics["p1_total_tests"] = int(tot_m.group(1)) if tot_m else (metrics["p1_lab_tests"] + metrics["p1_integration_tests"] + metrics["p1_frontend_tests"])
-        metrics["p1_unique_tests"] = metrics["p1_total_tests"]
-        metrics["p1_tests_passed"] = metrics["p1_total_tests"]
-        metrics["p1_tests_failed"] = 0
-        metrics["p1_tests_errors"] = 0
-
-        smoke_m = re.search(r"\((\d+)/(\d+)\s+checks verified", content)
-        metrics["p1_static_smoke_checks"] = int(smoke_m.group(1)) if smoke_m else 16
-
-        browser_m = re.search(r"\((\d+)/(\d+)\s+stages passed;\s+(\d+)\s+assertions verified", content)
-        metrics["p1_browser_stages"] = int(browser_m.group(1)) if browser_m else 8
-        metrics["p1_browser_assertions"] = int(browser_m.group(3)) if browser_m else 53
-
-        ci_m = re.search(r"\*\*GitHub CI Status:\*\*\s*(.+)", content)
-        metrics["p1_ci_status"] = ci_m.group(1).strip() if ci_m else "NOT CONFIGURED / NOT RECORDED"
-    else:
-        metrics["p1_validation_record_file"] = None
-        metrics["p1_commit_sha"] = "ee59362ac3f53fad3bc01e65b5d90815697a93d4"
-        metrics["p1_lab_tests"] = 805
-        metrics["p1_integration_tests"] = 93
-        metrics["p1_frontend_tests"] = 31
-        metrics["p1_total_tests"] = 929
-        metrics["p1_unique_tests"] = 929
-        metrics["p1_tests_passed"] = 929
-        metrics["p1_tests_failed"] = 0
-        metrics["p1_tests_errors"] = 0
-        metrics["p1_static_smoke_checks"] = 16
-        metrics["p1_browser_stages"] = 8
-        metrics["p1_browser_assertions"] = 53
-        metrics["p1_ci_status"] = "NOT CONFIGURED / NOT RECORDED"
+    # Authoritative P1 validation snapshot (14 November 2026) - strictly parsed and fail-closed
+    p1_metrics = parse_p1_validation_record(p1_record_path)
+    metrics.update(p1_metrics)
 
     # Historical files verified: count directly from authoritative campaign checksums manifest
     base_campaign = campaign_dir or (REPO_ROOT / "lab" / "campaigns" / "ps028-a10-live-20261030-01")
@@ -185,21 +281,38 @@ def load_derived_metrics(
 
 def generate_presentation_html(m: Dict[str, Any]) -> str:
     """Renders 11-slide HTML matching Proposed-structure-hackathon.pdf."""
-    p1_commit_short = str(m.get("p1_commit_sha", "ee59362ac3f53fad3bc01e65b5d90815697a93d4"))[:12]
-    p1_lab = m.get("p1_lab_tests", 805)
-    p1_int = m.get("p1_integration_tests", 93)
-    p1_fe = m.get("p1_frontend_tests", 31)
-    p1_total = m.get("p1_total_tests", 929)
-    p1_unique = m.get("p1_unique_tests", 929)
-    p1_passed = m.get("p1_tests_passed", 929)
-    p1_smoke = m.get("p1_static_smoke_checks", 16)
-    p1_browser_stages = m.get("p1_browser_stages", 8)
-    p1_browser_assertions = m.get("p1_browser_assertions", 53)
-    p1_ci_status = m.get("p1_ci_status", "NOT CONFIGURED / NOT RECORDED")
+    required_keys = [
+        "p1_commit_sha",
+        "p1_lab_tests",
+        "p1_integration_tests",
+        "p1_frontend_tests",
+        "p1_total_tests",
+        "p1_unique_tests",
+        "p1_tests_passed",
+        "p1_static_smoke_checks",
+        "p1_browser_stages",
+        "p1_browser_assertions",
+        "p1_ci_status",
+    ]
+    for k in required_keys:
+        if k not in m or m[k] is None:
+            raise KeyError(f"Required P1 validation metric '{k}' missing from metrics dictionary")
 
-    card_passed = m.get("p1_tests_passed", m.get("tests_passed", 929))
-    card_total = m.get("p1_total_tests", m.get("total_tests", 929))
-    card_unique = m.get("p1_unique_tests", m.get("unique_tests", 929))
+    p1_commit_short = str(m["p1_commit_sha"])[:12]
+    p1_lab = m["p1_lab_tests"]
+    p1_int = m["p1_integration_tests"]
+    p1_fe = m["p1_frontend_tests"]
+    p1_total = m["p1_total_tests"]
+    p1_unique = m["p1_unique_tests"]
+    p1_passed = m["p1_tests_passed"]
+    p1_smoke = m["p1_static_smoke_checks"]
+    p1_browser_stages = m["p1_browser_stages"]
+    p1_browser_assertions = m["p1_browser_assertions"]
+    p1_ci_status = m["p1_ci_status"]
+
+    card_passed = m["p1_tests_passed"]
+    card_total = m["p1_total_tests"]
+    card_unique = m["p1_unique_tests"]
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -434,7 +547,7 @@ def generate_presentation_html(m: Dict[str, Any]) -> str:
   <div class="sub-title">Controlled Empirical Evaluation, Selected RFC 8305 Requirements Assessment, and Dual-Stack Transport Racing</div>
   <div class="team-info">
     <strong>Team AlgoRhythm (TC224)</strong><br>
-    Repository: <code>aiori-hackathon/A3-PS028-TC224</code> · Working Branch: <code>work/ps028-p1-remediation</code> (Historical Derivation: <code>regional/ps028-phase-cd</code>)<br>
+    Repository: <code>aiori-hackathon/A3-PS028-TC224</code> · Integration Branch: <code>fix/phase-e-bundle-timeline-mapping</code> (P1 Source: <code>work/ps028-p1-remediation</code> · Derivation: <code>regional/ps028-phase-cd</code>)<br>
     Authoritative Campaign: <code>ps028-a10-live-20261030-01</code> · Verified: November 2026
   </div>
 </div>

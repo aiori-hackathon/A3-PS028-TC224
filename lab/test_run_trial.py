@@ -2588,6 +2588,8 @@ class TestCaptureFilterBufferAndDropAccountingRegression(unittest.TestCase):
         self.assertIn("--disable-client-side-phishing-detection", cmd_str)
         self.assertIn("--safebrowsing-disable-auto-update", cmd_str)
         self.assertIn("--disable-features=OptimizationHints,Translate", cmd_str)
+        self.assertIn("DnsOverHttps", cmd_str)
+        self.assertIn("--dns-over-https-mode=off", cmd_str)
         self.assertIn("--disable-breakpad", cmd_str)
         self.assertIn("--disable-background-timer-throttling", cmd_str)
 
@@ -2862,6 +2864,41 @@ class TestFirefoxSupportRegression(unittest.TestCase):
         content = user_js.read_text(encoding="utf-8")
         self.assertIn("app.update.auto", content)
         self.assertIn("network.dns.disablePrefetch", content)
+        self.assertIn('user_pref("network.trr.mode", 5)', content)
+
+    def test_browser_doh_and_trr_controls_verified(self):
+        """
+        Workstream Measurement Safeguards: Browser DoH and TRR Controls Verification.
+        - Verifies that Chrome launch configuration explicitly disables DoH via --dns-over-https-mode=off and DnsOverHttps feature flag.
+        - Verifies that Firefox profile explicitly disables TRR via network.trr.mode = 5.
+        - Verifies that verify_browser_dns_controls raises BrowserPreflightError if controls are absent.
+        """
+        # Valid Chrome args
+        chrome_args = [
+            "--headless=new",
+            "--dns-over-https-mode=off",
+            "--disable-features=OptimizationHints,Translate,DnsOverHttps",
+        ]
+        res_chrome = run_trial.verify_browser_dns_controls("google-chrome", chrome_args)
+        self.assertTrue(res_chrome["doh_trr_controlled"])
+
+        # Chrome missing DoH flag fails
+        with self.assertRaises(run_trial.BrowserPreflightError):
+            run_trial.verify_browser_dns_controls("google-chrome", ["--headless=new"])
+
+        # Firefox with user.js containing network.trr.mode = 5
+        ff_prof = self.temp_dir / "ff_prof"
+        ff_prof.mkdir()
+        user_js = ff_prof / "user.js"
+        user_js.write_text('user_pref("network.trr.mode", 5);\n', encoding="utf-8")
+        res_ff = run_trial.verify_browser_dns_controls("firefox", ["--headless"], profile_dir=ff_prof)
+        self.assertTrue(res_ff["doh_trr_controlled"])
+
+        # Firefox with missing user.js or missing trr pref fails
+        bad_prof = self.temp_dir / "bad_ff_prof"
+        bad_prof.mkdir()
+        with self.assertRaises(run_trial.BrowserPreflightError):
+            run_trial.verify_browser_dns_controls("firefox", ["--headless"], profile_dir=bad_prof)
 
     def test_parse_firefox_telemetry_ipv6_success(self):
         """Telemetry log with IPv6 connection records HTTP 200 and IPv6 winning family."""

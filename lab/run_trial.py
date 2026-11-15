@@ -3595,7 +3595,12 @@ def verify_browser_paths_writable(
                     'user_pref("network.prefetch-next", false);\n'
                     'user_pref("toolkit.telemetry.enabled", false);\n'
                     'user_pref("geo.enabled", false);\n'
-                    'user_pref("geo.provider.network.url", "");\n',
+                    'user_pref("geo.provider.network.url", "");\n'
+                    '// Explicitly disable Firefox Trusted Recursive Resolver (TRR / DoH)\n'
+                    '// Mode 5: TRR explicitly disabled / off (standard local OS resolver only)\n'
+                    'user_pref("network.trr.mode", 5);\n'
+                    'user_pref("network.trr.uri", "");\n'
+                    'user_pref("network.trr.bootstrapAddress", "");\n',
                     encoding="utf-8"
                 )
                 if os.geteuid() == 0:
@@ -3676,6 +3681,56 @@ def verify_browser_paths_writable(
         "netlog_path": netlog_path,
         "crashpad_dir": crashpad_dir
     }
+
+
+def verify_browser_dns_controls(
+    browser_name: str,
+    cmd_args: List[str],
+    profile_dir: Optional[Path] = None,
+) -> Dict[str, Any]:
+    """
+    Verifies that explicit DoH / TRR controls are active in browser configuration.
+    - Chrome / Chromium: requires '--dns-over-https-mode=off' and 'DnsOverHttps' in '--disable-features'.
+    - Firefox: requires profile user.js to explicitly set 'network.trr.mode' to 5 (TRR disabled).
+    Raises BrowserPreflightError if mandatory DNS controls are absent.
+    """
+    bname = browser_name.lower()
+    res: Dict[str, Any] = {
+        "browser": browser_name,
+        "doh_trr_controlled": False,
+        "controls_verified": [],
+    }
+
+    if "chromium" in bname or "chrome" in bname:
+        has_mode_off = "--dns-over-https-mode=off" in cmd_args
+        has_feature_disabled = any(
+            arg.startswith("--disable-features=") and "DnsOverHttps" in arg
+            for arg in cmd_args
+        )
+        if not (has_mode_off and has_feature_disabled):
+            raise BrowserPreflightError(
+                f"Chrome DoH controls missing: --dns-over-https-mode=off ({has_mode_off}), "
+                f"disable-features DnsOverHttps ({has_feature_disabled})"
+            )
+        res["doh_trr_controlled"] = True
+        res["controls_verified"] = [
+            "--dns-over-https-mode=off",
+            "DnsOverHttps in --disable-features",
+        ]
+    elif "firefox" in bname:
+        if profile_dir is not None:
+            user_js = Path(profile_dir) / "user.js"
+            if not user_js.is_file():
+                raise BrowserPreflightError(f"Firefox profile user.js missing at {user_js}")
+            content = user_js.read_text(encoding="utf-8")
+            if 'user_pref("network.trr.mode", 5)' not in content:
+                raise BrowserPreflightError(
+                    'Firefox TRR controls missing: user_pref("network.trr.mode", 5) not set in user.js'
+                )
+            res["doh_trr_controlled"] = True
+            res["controls_verified"] = ["network.trr.mode=5 in user.js"]
+
+    return res
 
 
 def run_browser(
@@ -3781,7 +3836,8 @@ def run_browser(
             "--disable-domain-reliability",
             "--disable-client-side-phishing-detection",
             "--safebrowsing-disable-auto-update",
-            "--disable-features=OptimizationHints,Translate",
+            "--disable-features=OptimizationHints,Translate,DnsOverHttps",
+            "--dns-over-https-mode=off",
             "--disable-breakpad",
             "--disable-background-timer-throttling",
             "--disable-sync",
