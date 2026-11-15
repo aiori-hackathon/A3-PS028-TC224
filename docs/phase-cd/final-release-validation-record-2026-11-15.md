@@ -1,8 +1,8 @@
 # PS-028 Final Release Validation Record
 
-- **Document Version**: 1.0.0
-- **Validation Date / UTC Timestamp**: 2026-11-15T07:35:00Z
-- **Validated Source Commit SHA (Code Under Test)**: `2f08f9518539d180572197362eb95f761c4170e6`
+- **Document Version**: 1.1.0
+- **Validation Date / UTC Timestamp**: 2026-11-15T08:55:00Z
+- **Validated Source Commit SHA (Code Under Test)**: `a6da745c947c36f7a1cadbd87d94dea8cfb94d86`
 - **Integration Base Commit SHA**: `d7dc6714a03bac8f0058742eda664f6bdb7e77b5` (PR #10 merged HEAD)
 - **Local Remediation Branch**: `fix/ps028-post-p2-release-readiness`
 - **Authoritative Integration Branch**: `fix/phase-e-bundle-timeline-mapping`
@@ -21,10 +21,10 @@ This document establishes the authoritative, independently reproducible final re
 All confirmed post-P2 source defects have been resolved:
 1. **Silent Fallback Elimination (Issue #12)**: Strict fail-closed parsing implemented in `lab/build_submission_report.py` with 19 dedicated negative/malformed regression tests in `lab/test_build_submission_report.py`.
 2. **RFC Attribution Correction (Issue #9)**: Docstring corrected in `lab/analyze.py` to cite RFC 8305 Section 2 and RFC 6724 Section 2.1, 6 Rule 6, 10.3 (instead of Section 3), with dedicated unit test in `lab/test_analyze.py`.
-3. **Measurement Safeguards**: Browser DoH and TRR disablement flags strictly enforced in `lab/run_trial.py` (`--dns-over-https-mode=off`, `--disable-features=OptimizationHints,Translate,DnsOverHttps`, Firefox `network.trr.mode = 5`), audited via `lab/test_run_trial.py`.
+3. **Measurement Safeguards (Browser DoH & TRR Controls)**: Audited Google Chrome binary strings and confirmed that Chrome does not implement a `--dns-over-https-mode` CLI switch. Implemented effective profile-level disablement via `Local State` and `Default/Preferences` (`dns_over_https.mode = "off"`), `--user-data-dir` argument binding, and `DnsOverHttps` feature flag disablement in `lab/run_trial.py`. Wired `verify_browser_dns_controls()` into `run_browser()` prior to process spawn, aborting launch on any tampered/missing configuration. Empirically validated effective `secure_dns_mode = 0` (kOff) across all DNS transactions via real Chrome netlog parsing in `lab/test_run_trial.py`. Preserved classification strictly as `BROWSER DNS CONFIGURATION VERIFIED — LIVE DNS PATH NOT YET EXPERIMENTALLY VERIFIED`.
 4. **Expanded Real-Browser Playwright Suite (Issue #13)**: Interactive search (positive/negative/clear), pagination boundary controls, filter reset, timeline multi-source filtering, timeline text search, exclusions inspection, provenance display, and RFC 8305 content assertions exercised in genuine Chromium across 14 stages and 242 assertions.
 5. **Documentation & Branch Metadata (Issues #15, #16, #17, Handover, Reconciliation)**: Reconciled 818-test and 881-test historical milestones, updated compliance matrix and owner handover checklist, and updated README integration branch metadata.
-6. **Fresh Complete Release Validation (Issues #19 & #20)**: Full test execution against validated commit `2f08f9518539d180572197362eb95f761c4170e6`.
+6. **Fresh Complete Release Validation (Issues #19 & #20)**: Full test execution against validated commit `a6da745c947c36f7a1cadbd87d94dea8cfb94d86`.
 
 ---
 
@@ -53,12 +53,12 @@ All confirmed post-P2 source defects have been resolved:
   python3 -m unittest discover -s lab -p "test_*.py"
   ```
 - **Results**:
-  - **Total Discovered**: 826
-  - **Passed**: 826
+  - **Total Discovered**: 828
+  - **Passed**: 828
   - **Failed**: 0
   - **Errors**: 0
   - **Skipped**: 0
-  - **Duration**: 42.738s
+  - **Duration**: 51.814s
   - **Pass Rate**: **100.0%**
 
 ### 3.2 Tier 2: Synthetic, E2E & Adversarial Integration Suite
@@ -94,10 +94,10 @@ All confirmed post-P2 source defects have been resolved:
   - **Pass Rate**: **100.0%**
 
 ### 3.4 Summary: Total Unique Automated Tests
-$$\mathbf{826 \text{ (Lab)} + 93 \text{ (Integration)} + 31 \text{ (Frontend)} = 950 \text{ Total Unique Automated Tests}}$$
+$$\mathbf{828 \text{ (Lab)} + 93 \text{ (Integration)} + 31 \text{ (Frontend)} = 952 \text{ Total Unique Automated Tests}}$$
 
-- **Total Discovered & Executed**: **950**
-- **Total Passed**: **950**
+- **Total Discovered & Executed**: **952**
+- **Total Passed**: **952**
 - **Total Failed**: **0**
 - **Total Errors**: **0**
 - **Total Skipped**: **0**
@@ -135,7 +135,7 @@ To preserve scientific authenticity and avoid conflating distinct development mi
 | **5** | Task 5C Deduplicated Discovery | 2026-11-14 | `fix/phase-e-bundle-timeline-mapping` | 788 | 93 | — | **881** | 866 PASS, 4 FAIL, 11 ERR (unprivileged sandbox) |
 | **6** | Historical P0 Baseline | 2026-11-14 | `5c84c93` (frozen at `176f688`) | 804 | 93 | 31 | **928** | 100% PASS |
 | **7** | Historical P1 Validation Snapshot | 2026-11-14 | `ee59362ac3f5` on `work/ps028-p1-remediation` | 805 | 93 | 31 | **929** | 100% PASS |
-| **8** | **Post-P2 Release Readiness (Current)** | **2026-11-15** | `2f08f9518539` on `fix/ps028-post-p2-release-readiness` | **826** | **93** | **31** | **950** | **100% PASS (0 fail, 0 err, 0 skip)** |
+| **8** | **Post-P2 Release Readiness (Current)** | **2026-11-15** | `a6da745c947c` on `fix/ps028-post-p2-release-readiness` | **828** | **93** | **31** | **952** | **100% PASS (0 fail, 0 err, 0 skip)** |
 
 ---
 
@@ -146,7 +146,7 @@ To reproduce this validation from a clean checkout of branch `fix/ps028-post-p2-
 ```bash
 # 1. Verify commit SHA and worktree status
 git rev-parse HEAD
-# Expected: 2f08f9518539d180572197362eb95f761c4170e6 (or docs commit HEAD)
+# Expected: a6da745c947c36f7a1cadbd87d94dea8cfb94d86 (or docs commit HEAD)
 
 # 2. Verify immutable historical campaign integrity
 sha256sum -c lab/derived/phase-c/historical_integrity_before.sha256 | grep -v "OK$" || echo "100% MATCH"
