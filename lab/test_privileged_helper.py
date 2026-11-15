@@ -279,6 +279,22 @@ class TestBrowserIdentityAndPrivilegeDropping(unittest.TestCase):
 
     def setUp(self):
         self.temp_dir = Path(tempfile.mkdtemp(prefix="ps028_browser_id_"))
+        self.user_home = (self.temp_dir / "user_home").resolve()
+        self.user_home.mkdir(parents=True, exist_ok=True)
+        self.test_ident = UserIdentity(
+            uid=1000,
+            gid=1000,
+            username="ps028_user",
+            home_dir=self.user_home,
+            shell="/bin/bash",
+        )
+        _orig_resolve = identity.resolve_user_by_uid
+        self._ident_patcher = patch(
+            "lab.identity.resolve_user_by_uid",
+            side_effect=lambda u: self.test_ident if u == 1000 else _orig_resolve(u)
+        )
+        self._ident_patcher.start()
+        self.addCleanup(self._ident_patcher.stop)
 
     def tearDown(self):
         shutil.rmtree(self.temp_dir, ignore_errors=True)
@@ -351,6 +367,22 @@ class TestSnapBrowserNamespaceMountsAndLaunch(unittest.TestCase):
     def setUp(self):
         self.temp_dir = Path(tempfile.mkdtemp(prefix="ps028_snap_test_"))
         self.mounts_file = self.temp_dir / "mounts"
+        self.user_home = (self.temp_dir / "user_home").resolve()
+        self.user_home.mkdir(parents=True, exist_ok=True)
+        self.test_ident = UserIdentity(
+            uid=1000,
+            gid=1000,
+            username="ps028_user",
+            home_dir=self.user_home,
+            shell="/bin/bash",
+        )
+        _orig_resolve = identity.resolve_user_by_uid
+        self._ident_patcher = patch(
+            "lab.identity.resolve_user_by_uid",
+            side_effect=lambda u: self.test_ident if u == 1000 else _orig_resolve(u)
+        )
+        self._ident_patcher.start()
+        self.addCleanup(self._ident_patcher.stop)
 
     def tearDown(self):
         shutil.rmtree(self.temp_dir, ignore_errors=True)

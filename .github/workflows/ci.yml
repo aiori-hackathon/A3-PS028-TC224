@@ -24,6 +24,24 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install system dependencies (TShark)
+        run: |
+          sudo apt-get update
+          EXPECTED_VER=$(grep "^tshark=" lab/system_packages.txt | cut -d'=' -f2)
+          echo "Expected TShark version from manifest: ${EXPECTED_VER}"
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "tshark=${EXPECTED_VER}"
+          INSTALLED_VER=$(dpkg-query -W -f='${Version}' tshark)
+          echo "Installed TShark version: ${INSTALLED_VER}"
+          if [ "${INSTALLED_VER}" != "${EXPECTED_VER}" ]; then
+            echo "[ERROR] Installed TShark version '${INSTALLED_VER}' differs from pinned manifest '${EXPECTED_VER}'" >&2
+            exit 1
+          fi
+          echo "[OK] Verified exact pinned TShark package: ${INSTALLED_VER}"
+          command -v tshark
+          tshark --version
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -99,6 +117,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5

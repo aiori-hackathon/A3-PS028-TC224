@@ -704,16 +704,21 @@ def run_demonstration(
 
         if summary_mode:
             status_tag = "[PASS]" if record["status"] == "PASS" else "[FAIL]"
-            fam = record.get("primary_flow", {}).get("family", "NONE")
-            code = record.get("primary_flow", {}).get("http_status_code", "NONE")
+            fam_val = record.get("primary_flow", {}).get("family")
+            fam_str = str(fam_val) if fam_val is not None else "NONE"
+            code_val = record.get("primary_flow", {}).get("http_status_code")
+            code_str = str(code_val) if code_val is not None else "N/A"
             t_conn = record.get("metrics", {}).get("t_connect_ms")
             t_conn_str = f"{t_conn:.2f}ms" if t_conn is not None else "N/A"
             cad = record.get("metrics", {}).get("connection_attempt_delay_ms")
             cad_str = f"{cad:.2f}ms" if cad is not None else "N/A"
+            scen_id = record.get("scenario_id", "??")
+            browser_name = record.get("browser", "unknown")
+            trial_id = record.get("trial_id", "unknown")
             print(
-                f"{status_tag} {record['scenario_id']:2} {record['browser']:13} "
-                f"Winner={fam:4} HTTP={code} t_conn={t_conn_str:8} CAD={cad_str:8} "
-                f"Trial={record['trial_id']}"
+                f"{status_tag} {scen_id:2} {browser_name:13} "
+                f"Winner={fam_str:4} HTTP={code_str} t_conn={t_conn_str:8} CAD={cad_str:8} "
+                f"Trial={trial_id}"
             )
             if record["errors"]:
                 for err in record["errors"]:
@@ -744,7 +749,10 @@ def run_demonstration(
 
             print(f"  [PCAP Summary] TCP Streams Detected: {record.get('tcp_stream_count', 0)}")
             print(f"  [Winning Flow] Stream #{pf.get('stream_id')}: {pf.get('family')} -> {srv_str}")
-            print(f"                 RFC 9293 t_connect_ms: {t_conn:.2f} ms (SYN -> Client Final ACK)")
+            if t_conn is not None:
+                print(f"                 RFC 9293 t_connect_ms: {t_conn:.2f} ms (SYN -> Client Final ACK)")
+            else:
+                print(f"                 RFC 9293 t_connect_ms: N/A")
             if t_setup is not None:
                 print(f"                 Total Setup Time:     {t_setup:.2f} ms (First SYN any family -> Final ACK)")
 

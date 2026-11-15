@@ -258,12 +258,44 @@ Additional validation was executed successfully:
 - **Workflow Name**: `PS-028 Continuous Integration`
 - **Triggers**: Push to `fix/phase-e-bundle-timeline-mapping`, PRs to `main`, `workflow_dispatch`.
 - **Jobs**:
-  1. `python-tests`: Python 3.12 runner verifying 705 campaign checksums, running 838 lab tests and 93 integration tests.
+  1. `python-tests`: Python 3.12 runner verifying 705 campaign checksums, installing TShark, running 838 lab tests and 93 integration tests.
   2. `frontend-validation`: Node.js 22 runner running 31 frontend unit tests, Astro check, static build, 16 smoke checks, and 14-stage genuine-Chromium browser acceptance tests.
   3. `artifacts-validation`: Dual Python/Node runner building and validating both submission PDFs (11 pages presentation, $\ge 18$ pages report) and uploading artifacts via `actions/upload-artifact@v4`.
 - **Reporting Boundary**: Local reproducible offline test passes (962 passed, exit code 0) are strictly distinguished from remote GitHub Actions workflow executions.
 
-### 7.5 Final Compliance Matrix Summary
+### 7.5 Remote GitHub Actions Run #1 Forensic Audit and Remediation Record
+
+- **Historical Remote CI Run**: Run ID `43729601462`
+- **Run URL**: `https://github.com/aiori-hackathon/A3-PS028-TC224/actions/runs/43729601462`
+- **Triggering Commit**: `b296df488aac9fe77dcd6dec17ab611b2c6ef3a2` on `fix/phase-e-bundle-timeline-mapping`
+- **Remote Results**:
+  - `frontend-validation`: **PASS** (100% of unit, check, build, smoke, and Playwright browser acceptance tests passed).
+  - `python-tests`: **FAIL** (630 discovered, failures=18, errors=18).
+  - `artifacts-validation`: **SKIPPED** (due to `needs: [python-tests, frontend-validation]` fail-closed gate).
+
+#### Forensic Classification of the 18 Errors and 18 Failures:
+1. **Missing Python Dependency (`dnspython==2.6.1`)** (13 Errors):
+   - `dnspython==2.6.1` was required by `lab/dns_server.py` but absent from `requirements.txt`.
+   - Resulted in module import failures for `lab/test_dns_server.py` and `lab/test_run_trial.py` during unittest discovery, truncating discovered lab test count to 630 instead of 838 ($838 - 210 + 2 = 630$).
+   - Caused 5 errors in `lab.test_impair` (DNS patch helper) and 5 errors in `lab.test_preflight`.
+2. **Missing System Dependency (`tshark`)** (1 Error, 17 Failures):
+   - Runner image lacked TShark CLI, required for authentic PCAP packet dissection.
+   - Resulted in 1 error in `lab.test_c2_adversarial_challenge` (missing mandatory PCAP timeline events) and 17 failures (1 in `lab.test_campaign_pcap_regression`, 14 in `lab.test_demo_replay` representative trials, 2 in demo replay assertions).
+3. **Shallow Git Checkout (`fetch-depth: 1`)** (1 Failure):
+   - Default checkout did not fetch historical generator commit `f58028752b65a2ad37fa78c82cf7a9e683b41ed1`, causing `lab.test_demo_bundle::test_provenance_sidecar_generator_revision` to fail.
+4. **Environment User Identity Lookup** (3 Errors):
+   - Tests patching UID/GID to 1000 caused `identity.resolve_user_by_uid` to resolve user `packer` (`/home/packer`) on GitHub runner VM images, resulting in `PermissionError: [Errno 13]` when runner (UID 1001) attempted to create crashpad directories.
+5. **Presentation Layer Null Formatting** (1 Error):
+   - `lab/demo_replay.py` summary formatting raised `TypeError: unsupported format string passed to NoneType.__format__` when primary-flow metrics were `None` during a failed replay.
+
+#### Root-Cause Remediation Implemented:
+- `requirements.txt`: Added exact pinned dependency `dnspython==2.6.1`.
+- `.github/workflows/ci.yml`: Added `fetch-depth: 0` to checkout steps and added dedicated non-interactive TShark system package installation (`sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tshark`) with `command -v tshark` and `tshark --version` verification.
+- `lab/test_privileged_helper.py`: Isolated browser home directory in `TestBrowserIdentityAndPrivilegeDropping` and `TestSnapBrowserNamespaceMountsAndLaunch` to a test-owned temporary directory `self.user_home` via `_orig_resolve` patch.
+- `lab/demo_replay.py`: Safe string formatting for `None` values (`NONE` / `N/A`) preserving underlying metrics and fail-closed non-zero exit codes without data fabrication.
+- **Local Validation Evidence**: Captured in `lab/logs/release_validation_ci_remediation_20261115.log` (838 lab + 93 integration + 31 frontend = 962 automated tests passed, 0 failures, 0 errors, 16 smoke checks passed).
+
+### 7.6 Final Compliance Matrix Summary
 
 - **Total Tracked Requirements**: 20
 - **MET**: **16 (80.0%)** — All 15 Core Problem Statement Requirements Met (#1–#15) + Ownership Transfer (#18).

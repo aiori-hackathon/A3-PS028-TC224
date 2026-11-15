@@ -6,3 +6,4 @@
 
 PyYAML==6.0.1
 markdown-it-py>=3.0.0
+dnspython==2.6.1
