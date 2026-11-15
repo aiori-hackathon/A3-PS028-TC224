@@ -2996,10 +2996,21 @@ class TestFirefoxSupportRegression(unittest.TestCase):
         Empirically verifies using the real installed Google Chrome binary (if present)
         that Local State dns_over_https.mode='off' and feature flag disable result in
         effective secure_dns_mode = 0 (kOff) in Chrome's network stack netlog.
+
+        Scope: BROWSER DNS CONFIGURATION VERIFIED — LIVE DNS PATH NOT YET EXPERIMENTALLY VERIFIED.
+        Note: Observed events are internal resolver configuration events (DNS_CONFIG_CHANGED)
+        and host resolution job request events (HOST_RESOLVER_MANAGER_JOB); live wire-level
+        DNS packet transactions on the network interface are not evaluated here.
         """
         chrome_bin = "/usr/bin/google-chrome"
         if not Path(chrome_bin).is_file():
             self.skipTest(f"Google Chrome binary not installed at {chrome_bin}")
+
+        # Verify actual Chrome binary version against declared pinned version
+        ver_proc = subprocess.run([chrome_bin, "--version"], capture_output=True, text=True, timeout=5)
+        self.assertEqual(ver_proc.returncode, 0)
+        chrome_ver = ver_proc.stdout.strip()
+        self.assertIn("Google Chrome 157.0.8103.50", chrome_ver, f"Expected pinned Chrome 157.0.8103.50, got '{chrome_ver}'")
 
         profile = self.temp_dir / "real_chrome_proof_prof"
         profile.mkdir()
@@ -3032,24 +3043,62 @@ class TestFirefoxSupportRegression(unittest.TestCase):
         # Verify preflight passes
         dns_ctrl = run_trial.verify_browser_dns_controls("google-chrome", cmd, profile_dir=profile, browser_path=chrome_bin)
         self.assertTrue(dns_ctrl["doh_trr_controlled"])
+        self.assertEqual(
+            dns_ctrl.get("classification"),
+            "BROWSER DNS CONFIGURATION VERIFIED — LIVE DNS PATH NOT YET EXPERIMENTALLY VERIFIED"
+        )
 
         # Execute Chrome process
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
         self.assertEqual(proc.returncode, 0)
         self.assertTrue(netlog_path.is_file(), "Netlog file must be created by Chrome")
 
-        # Inspect netlog for secure_dns_mode
+        # Inspect netlog for secure_dns_mode and event types
         netlog_data = json.loads(netlog_path.read_text(encoding="utf-8", errors="ignore"))
+        constants = netlog_data.get("constants", {})
+        log_event_types = constants.get("logEventTypes", {})
+        type_id_to_name = {v: k for k, v in log_event_types.items()}
+
         events = netlog_data.get("events", [])
-        secure_modes = [
-            ev.get("params", {}).get("secure_dns_mode")
-            for ev in events
+        events_with_mode = [
+            ev for ev in events
             if "secure_dns_mode" in ev.get("params", {})
         ]
-        self.assertTrue(len(secure_modes) > 0, "Netlog must record DNS transactions")
-        # Every recorded secure_dns_mode must be 0 (kOff)
-        for mode in secure_modes:
-            self.assertEqual(mode, 0, f"Expected secure_dns_mode 0 (kOff), got {mode}")
+        # Ensure test fails if zero relevant observations are found
+        self.assertGreater(
+            len(events_with_mode), 0,
+            "Netlog must record at least one resolver event containing secure_dns_mode"
+        )
+
+        observed_event_names = {
+            type_id_to_name.get(ev.get("type"), str(ev.get("type")))
+            for ev in events_with_mode
+        }
+        distinct_modes = {
+            ev.get("params", {}).get("secure_dns_mode")
+            for ev in events_with_mode
+        }
+
+        # Verify distinct observed secure_dns_mode values are strictly {0} (0 = kOff)
+        self.assertEqual(distinct_modes, {0}, f"Expected all secure_dns_mode values to be 0 (kOff), got {distinct_modes}")
+
+        # Verify observed event types: must include resolver configuration and/or host resolution jobs
+        self.assertTrue(
+            observed_event_names.issubset({"DNS_CONFIG_CHANGED", "HOST_RESOLVER_MANAGER_JOB"}),
+            f"Unexpected event types containing secure_dns_mode: {observed_event_names}"
+        )
+        self.assertIn("DNS_CONFIG_CHANGED", observed_event_names, "Netlog must record DNS_CONFIG_CHANGED resolver configuration")
+
+        # Verify specific parameters of resolver configuration events
+        config_events = [
+            ev for ev in events_with_mode
+            if type_id_to_name.get(ev.get("type")) == "DNS_CONFIG_CHANGED"
+        ]
+        for cfg in config_events:
+            p = cfg.get("params", {})
+            self.assertEqual(p.get("secure_dns_mode"), 0)
+            self.assertFalse(p.get("can_use_secure_dns_transactions"), "can_use_secure_dns_transactions must be False")
+            self.assertEqual(p.get("doh_config", {}).get("servers"), [], "doh_config.servers must be empty")
 
     def test_parse_firefox_telemetry_ipv6_success(self):
         """Telemetry log with IPv6 connection records HTTP 200 and IPv6 winning family."""
