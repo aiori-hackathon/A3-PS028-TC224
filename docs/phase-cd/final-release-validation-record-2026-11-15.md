@@ -1,16 +1,16 @@
 # PS-028 Final Release Validation Record
 
-- **Document Version**: 1.2.0
-- **Validation Date / UTC Timestamp**: 2026-11-15T09:28:00Z
-- **Validated Source Commit SHA (Code Under Test)**: `a398c6e5c4dd51103456ab4f5748cea50162126f`
+- **Document Version**: 1.3.0
+- **Validation Date / UTC Timestamp**: 2026-11-15T15:00:00Z
+- **Validated Source Commit SHA (Code Under Test)**: Exact HEAD on `fix/phase-e-bundle-timeline-mapping`
 - **Integration Base Commit SHA**: `d7dc6714a03bac8f0058742eda664f6bdb7e77b5` (PR #10 merged HEAD)
-- **Local Remediation Branch**: `fix/ps028-post-p2-release-readiness`
+- **Historical Remediation Branch**: `fix/ps028-post-p2-release-readiness`
 - **Authoritative Integration Branch**: `fix/phase-e-bundle-timeline-mapping`
 - **Historical P1 Source Branch**: `work/ps028-p1-remediation` (tested commit `ee59362ac3f53fad3bc01e65b5d90815697a93d4`)
 - **Historical Derivation Branch**: `regional/ps028-phase-cd`
 - **Protected P0 Acceptance Tag**: `ps028-p0-accepted-2026-11-14` (commit `176f688bacb5858fcc0daedb454200918e427f3f`)
 - **Repository**: `https://github.com/aiori-hackathon/A3-PS028-TC224.git`
-- **Problem Statement Compliance Status**: **16 MET, 3 PARTIAL, 1 PENDING** (16/20 Met; 14/15 Core Problem Statement Requirements Met)
+- **Problem Statement Compliance Status**: **17 MET, 2 PARTIAL, 1 PENDING** (17/20 Met; 15/15 Core Problem Statement Requirements Met)
 
 ---
 
@@ -208,3 +208,64 @@ Additional validation was executed successfully:
 | Failures | 0 |
 | Errors | 0 |
 | Exit codes | 0 for both commands |
+
+---
+
+## 7. Final Release Closure & GitHub Actions CI Integration (15 Nov 2026)
+
+- **Authoritative Integration Branch**: `fix/phase-e-bundle-timeline-mapping`
+- **Audit Timestamp**: `2026-11-15T15:00:00Z`
+- **Scope**: Final two-day release closure, reproducible PDF generation, and GitHub Actions CI workflow integration.
+
+### 7.1 Automated Technical Report PDF Generation Pipeline (Requirement #12)
+
+- **Script**: `lab/build_technical_report_pdf.py`
+- **Test Suite**: `lab/test_build_technical_report_pdf.py` (10 unit/regression tests, all passed in 1.3s)
+- **Authoritative Source**: `docs/PS028_FINAL_EXPERIMENTAL_REPORT.md`
+- **Generated Target Artifact**: `PS028 Detailed Analysis & Report PDF.pdf` (455,157 bytes, 22 pages, 104 streams)
+- **Temporary Artifacts**: `lab/derived/phase-c/technical_report.html` (393,260 bytes), `lab/derived/phase-c/technical_report.pdf`
+- **Styling & Engine**:
+  - Publication-quality A4 academic layout ($22\text{ mm}$ top/bottom, $16\text{ mm}$ left/right margins).
+  - Offline vendored KaTeX math rendering (`lab/resources/katex/`) for all equations ($\bar{x} \pm t_{0.975, n-1} \cdot \frac{s}{\sqrt{n}}$, $t_{\text{connect}}$, $t_{\text{setup\_total}}$) without network calls.
+  - Executive cover page with campaign metadata table and AIORI hackathon banner.
+  - Auto-generated Table of Contents linking directly to section anchors.
+  - Shaded table headers, syntax-highlighted code blocks, blockquotes, and unorphaned headings (`break-after: avoid;`).
+  - Running headers (`PS-028 Final Technical Validation Report`) and footers (`AIORI-3 PS-028 • Page X of Y`) via Playwright / Chromium with Chrome CLI fallback.
+  - Strict fail-closed validation: asserts file existence, size $\ge 400\text{ KB}$, page count $\ge 18$, and stream counts before updating the root submission artifact.
+
+### 7.2 Full Test Suite Inventory Across Entire Repository
+
+| Tier | Test Suite Scope | Test Runner Command | Discovered | Passed | Failed | Errors | Skipped | Pass Rate |
+|---|---|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| **Lab Unit & Regression** | `lab/test_*.py` (22 modules, +10 PDF tests) | `python3 -m unittest discover -s lab -p "test_*.py"` | 838 | 838 | 0 | 0 | 0 | **100.0%** |
+| **Integration & Adversarial** | `tests/test_*.py` (5 tiers) | `python3 -m unittest discover -s tests -p "test_*.py"` | 93 | 93 | 0 | 0 | 0 | **100.0%** |
+| **Frontend Unit Tests** | `setup/webtester/test/historical-evidence.test.mjs` | `npm test --prefix setup/webtester` | 31 | 31 | 0 | 0 | 0 | **100.0%** |
+| **Total Automated Tests** | **Comprehensive Full Repository Discovery** | | **962** | **962** | **0** | **0** | **0** | **100.0%** |
+
+### 7.3 Separate Validations & Distribution Checks
+
+| Validation Item | Command / Procedure | Result | Status |
+|---|---|---|:---:|
+| **Historical Campaign Integrity** | `sha256sum -c lab/derived/phase-c/historical_integrity_before.sha256` | 705 / 705 files bit-for-bit matched | **PASS** |
+| **Presentation PDF Compilation** | `python3 lab/build_submission_report.py` | 207,985 bytes, exactly 11 pages | **PASS** |
+| **Technical Report PDF Compilation** | `python3 lab/build_technical_report_pdf.py` | 455,157 bytes, 22 pages, 104 streams | **PASS** |
+| **Static Production Distribution** | `npm run build --prefix setup/webtester` | 8 static pages built | **PASS** |
+| **Distribution Smoke Tests** | `npm run test:smoke --prefix setup/webtester` | 16 / 16 checks passed | **PASS** |
+| **Genuine Browser Acceptance** | `npm run test:browser --prefix setup/webtester` | 14 / 14 stages passed (242 assertions) | **PASS** |
+
+### 7.4 GitHub Actions Continuous Integration (`.github/workflows/ci.yml`)
+
+- **Workflow Name**: `PS-028 Continuous Integration`
+- **Triggers**: Push to `fix/phase-e-bundle-timeline-mapping`, PRs to `main`, `workflow_dispatch`.
+- **Jobs**:
+  1. `python-tests`: Python 3.12 runner verifying 705 campaign checksums, running 838 lab tests and 93 integration tests.
+  2. `frontend-validation`: Node.js 22 runner running 31 frontend unit tests, Astro check, static build, 16 smoke checks, and 14-stage genuine-Chromium browser acceptance tests.
+  3. `artifacts-validation`: Dual Python/Node runner building and validating both submission PDFs (11 pages presentation, $\ge 18$ pages report) and uploading artifacts via `actions/upload-artifact@v4`.
+- **Reporting Boundary**: Local reproducible offline test passes (962 passed, exit code 0) are strictly distinguished from remote GitHub Actions workflow executions.
+
+### 7.5 Final Compliance Matrix Summary
+
+- **Total Tracked Requirements**: 20
+- **MET**: **17 (85.0%)** — All 15 Core Problem Statement Requirements Met (#1–#15) + Ownership Transfer (#18) + Offline Suite Reproducibility & CI (#19).
+- **PARTIAL**: **2 (10.0%)** — #16 (Uniform netem live sweep; live research excluded by owner decision) and #17 (Live S5 binomial batch; simulation verified).
+- **PENDING**: **1 (5.0%)** — #20 (Partner replication package authored; scheduled as final separate milestone).

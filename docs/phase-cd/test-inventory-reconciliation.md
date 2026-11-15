@@ -23,15 +23,15 @@ An early statement in `README.md` line 201 claiming "the recorded suite reports 
 - **Correction**: The true verified initial testbed baseline comprised **524 automated tests** (431 lab tests in `lab/` + 93 integration tests in `tests/`).
 - **Policy**: The figure 400 is not a validated inventory milestone, is not an authentic historical test count, and must not be cited as an empirical test baseline.
 
-### 1.2 Eight-Milestone Chronology
-The repository's authentic, independently supported test baselines follow a verified **eight-milestone chronology**:
-$$\mathbf{524 \longrightarrow 818 \longrightarrow 824 \longrightarrow 918 \longrightarrow 881 \longrightarrow 928 \longrightarrow 929 \longrightarrow 952}$$
+### 1.2 Nine-Milestone Chronology
+The repository's authentic, independently supported test baselines follow a verified **nine-milestone chronology**:
+$$\mathbf{524 \longrightarrow 818 \longrightarrow 824 \longrightarrow 918 \longrightarrow 881 \longrightarrow 928 \longrightarrow 929 \longrightarrow 952 \longrightarrow 962}$$
 
 Earlier historical records represent authentic milestones of their respective development phases. They must not be erased, overwritten, or conflated with the authoritative P1 validation snapshot or fresh release validation.
 
 ---
 
-## 2. Eight-Milestone Chronology of Test Baselines
+## 2. Nine-Milestone Chronology of Test Baselines
 
 The table below details the full sequence of test suite milestones across the repository lifecycle:
 
@@ -44,7 +44,8 @@ The table below details the full sequence of test suite milestones across the re
 | **5** | **Task 5C Deduplicated Discovery** | 2026-11-14 | `fix/phase-e-bundle-timeline-mapping` | 788 | 93 | — | **881** | 866 PASS, 4 FAIL, 11 ERR (status: PARTIALLY RESOLVED — aggregate post-hoc classification; original per-test tracebacks unavailable) | Full repository discovery following Task 5C deduplication (renamed Batch C5 re-export runner eliminating 48 duplicate runs; 11 regression tests added). 199 focused offline tests passed 100%. See §2.1 for detailed failure reconciliation. |
 | **6** | **Historical P0 Test-Execution Baseline** | 2026-11-14 | Source: `5c84c93eff12903a1288770029a903aec48ac1a4`<br>Frozen: `176f688bacb5858fcc0daedb454200918e427f3f` | 804 | 93 | 31 | **928** | 100% PASS | Sealed in `lab/derived/phase-c/test_run_record.json`. Incorporates 31 frontend unit tests (`setup/webtester/test/historical-evidence.test.mjs`) + 16 offline lab tests. Preserved as immutable P0 evidence. |
 | **7** | **Historical P1 Validation Snapshot** | 2026-11-14 | `ee59362ac3f53fad3bc01e65b5d90815697a93d4` on `work/ps028-p1-remediation` | 805 | 93 | 31 | **929** | 100% PASS (0 fail, 0 err, 0 skip) | Documented in `docs/phase-cd/p1-validation-record-2026-11-14.md`. Adds +1 regression test (`test_scientific_presentation_claims_accuracy` in `lab/test_build_submission_report.py`). |
-| **8** | **Post-P2 Release Readiness Validation** | **2026-11-15** | `a398c6e5c4dd` on `fix/ps028-post-p2-release-readiness` | **828** | **93** | **31** | **952** | **100% PASS (0 fail, 0 err, 0 skip)** | Fresh release-readiness suite: incorporates fail-closed P1 parser regression suite (+19 in `lab/test_build_submission_report.py`), RFC attribution audit (+1 in `lab/test_analyze.py`), and browser DNS controls verification with real Chrome netlog verification (+3 in `lab/test_run_trial.py`), alongside expanded 14-stage Playwright acceptance in genuine Chromium. |
+| **8** | **Post-P2 Release Readiness Validation** | 2026-11-15 | `a398c6e5c4dd` on `fix/ps028-post-p2-release-readiness` | 828 | 93 | 31 | **952** | 100% PASS (0 fail, 0 err, 0 skip) | Release-readiness suite: incorporates fail-closed P1 parser regression suite (+19 in `lab/test_build_submission_report.py`), RFC attribution audit (+1 in `lab/test_analyze.py`), and browser DNS controls verification with real Chrome netlog verification (+3 in `lab/test_run_trial.py`), alongside expanded 14-stage Playwright acceptance in genuine Chromium (242 assertions). |
+| **9** | **Final Release Closure & CI Validation** | **2026-11-15** | Exact HEAD on `fix/phase-e-bundle-timeline-mapping` | **838** | **93** | **31** | **962** | **100% PASS (0 fail, 0 err, 0 skip)** | Authoritative integration branch release baseline: incorporates automated technical report PDF generator and regression suite (+10 in `lab/test_build_technical_report_pdf.py`), establishing 962 unique automated tests passing 100%, 16 static smoke checks, 14-stage / 242-assertion Chromium acceptance suite, and automated GitHub Actions CI workflow (`.github/workflows/ci.yml`). |
 
 ---
 
@@ -141,10 +142,14 @@ The following acceptance checks validate distribution integrity and browser runt
 
 ---
 
-## 5. Remote CI Disclosure
+## 5. GitHub Actions Continuous Integration (CI) Disclosure
 
-- **Remote CI Pipeline**: **NOT CONFIGURED / NOT RECORDED**.
-- All reported passes reflect local, reproducible offline executions on Linux x86_64 within the project worktree. Local offline test pass rates must never be reported as remote CI passes.
+- **Workflow Configuration**: Configured and validated in `.github/workflows/ci.yml` (triggers on push to `fix/phase-e-bundle-timeline-mapping`, PRs to `main`, and `workflow_dispatch`).
+- **Workflow Scope**:
+  1. `python-tests`: Python 3.12 runner on Ubuntu 24.04 verifying the 705-file cryptographic checksum manifest (Rule R2), running 838 lab tests (`lab/test_*.py`) and 93 integration tests (`tests/test_*.py`).
+  2. `frontend-validation`: Node.js 22 runner executing 31 Evidence Explorer unit tests, Astro template/TypeScript validation (`npm run check`), static production site build, 16 static smoke checks (`npm run test:smoke`), and 14-stage / 242-assertion genuine Chromium browser acceptance tests (`npm run test:browser`).
+  3. `artifacts-validation`: Dual Python 3.12 / Node.js 22 runner compiling both official submission PDFs (`PS028_Hackathon_Submission_Presentation.pdf` [11 pages] and `PS028 Detailed Analysis & Report PDF.pdf` [>=18 pages]), asserting page counts and file sizes, and uploading artifacts.
+- **Reporting Precision**: Local, reproducible offline executions on Linux x86_64 (962 passed, exit code 0) are strictly distinguished from remote GitHub Actions workflow runs. Local test execution logs are preserved in `docs/phase-cd/final-release-validation-record-2026-11-15.md`.
 
 ---
 

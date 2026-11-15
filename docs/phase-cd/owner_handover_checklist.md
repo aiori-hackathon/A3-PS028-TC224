@@ -22,9 +22,10 @@
 - [x] **Milestone 3 (Batches C2 & C4)**: Generated deterministic ledgers (`attempts.csv` [282 rows], `connection_attempts.csv` [765 flows], `s5_flow_dissection.csv` [95 flows], `trial_timeline.csv` [28,330 events]) with Amendment A13 `.provenance.json` sidecars.
 - [x] **Milestone 4 (Batch C5)**: Decoupled root privileges with `privileged_helper.py`, implemented 5-stage fail-closed DNS reload protocol, passed 48 adversarial challenge tests.
 - [x] **Milestone 5 (Batches C3 & C6)**: Resolved S2 median contradiction, neutralized conformance claims (Rule R7), corrected RFC citations (§3 vs §4), remediated 17 documentation items, and compiled official 11-slide presentation `PS028_Hackathon_Submission_Presentation.pdf`.
-- [x] **Milestone 6 (Phase D)**: Delivered empirical sweeps D1 (target IPv6 RTT) and D2 (one-factor DNS), statistical crossover curves (D3), qualitative comparison with published Firefox 132 (D4), and partner replication framework (D5). *Note: Phase D live research sweeps remain PAUSED BY OWNER DECISION; simulation and analytical models are fully verified.*
-- [x] **Milestone 7 (Phase E)**: Passed all 824 automated tests (100% PASS), delivered offline prototype replay tool (`lab/demo_replay.py`), and pseudocode snippet.
+- [ ] **Milestone 6 (Phase D)**: Phase D live research sweeps (D1 target IPv6 RTT, D2 one-factor DNS, D3 empirical crossover, D4 Firefox live comparisons) are EXCLUDED FROM CURRENT DELIVERY PLAN by owner decision. Historical analytical models and simulation sweeps (`is_simulation=true`) are preserved offline in `lab/derived/phase-d/`.
+- [x] **Milestone 7 (Phase E)**: Passed automated tests, delivered offline prototype replay tool (`lab/demo_replay.py`), and interactive Evidence Explorer.
 - [x] **Milestone 8 (P1 & P2 Remediation Merged via PR #10)**: Strict metric contracts, fail-closed validation parsing, Playwright browser acceptance, and RFC attribution corrections integrated on `fix/phase-e-bundle-timeline-mapping`.
+- [ ] **Milestone 9 (Partner Verification)**: Partner verification runbook and manifest prepared for canonical core campaign (S0–S6, 2 browsers, 20 reps, 280 planned trials; no Phase D endpoints); execution scheduled as final separate milestone.
 
 ---
 
@@ -56,5 +57,5 @@ cat docs/phase-cd/final-release-validation-record-2026-11-15.md
 Upload the generated submission files to the hackathon portal:
 1. **Presentation Slide Deck**: `PS028_Hackathon_Submission_Presentation.pdf` (11 slides matching `Proposed-structure-hackathon.pdf` geometry).
 2. **Technical Report**: `PS028 Detailed Analysis & Report PDF.pdf`.
-3. **Repository Link**: `https://github.com/aiori-hackathon/A3-PS028-TC224` (Branch `regional/ps028-phase-cd`).
+3. **Repository Link**: `https://github.com/aiori-hackathon/A3-PS028-TC224` (Authoritative branch `fix/phase-e-bundle-timeline-mapping`).
 4. **Demonstration Video**: Links documented in `README.md`.

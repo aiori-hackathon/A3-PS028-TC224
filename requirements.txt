@@ -2,5 +2,7 @@
 # Pinned for reproducible scientific environment execution on Python 3.12+ (Ubuntu 24.04 LTS / WSL2).
 # The core measurement analyzer and evidence exporter use the Python standard library.
 # The scenario configuration parser requires PyYAML.
+# The technical report PDF builder requires markdown-it-py.
 
 PyYAML==6.0.1
+markdown-it-py>=3.0.0
