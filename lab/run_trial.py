@@ -3676,6 +3676,55 @@ def verify_browser_paths_writable(
         except OSError:
             pass
 
+    # For Chrome/Chromium, write explicit DoH disable preferences into user-data-dir
+    if "chromium" in b_family or "chrome" in b_family:
+        try:
+            local_state_file = profile_dir / "Local State"
+            ls_data: Dict[str, Any] = {}
+            if local_state_file.is_file():
+                try:
+                    ls_data = json.loads(local_state_file.read_text(encoding="utf-8"))
+                except Exception:
+                    ls_data = {}
+            if not isinstance(ls_data, dict):
+                ls_data = {}
+            ls_data["dns_over_https"] = {
+                "mode": "off",
+                "templates": "",
+                "automatic_mode_fallback_to_doh": False,
+            }
+            local_state_file.write_text(json.dumps(ls_data, indent=2), encoding="utf-8")
+
+            default_dir = profile_dir / "Default"
+            default_dir.mkdir(parents=True, exist_ok=True)
+            pref_file = default_dir / "Preferences"
+            pref_data: Dict[str, Any] = {}
+            if pref_file.is_file():
+                try:
+                    pref_data = json.loads(pref_file.read_text(encoding="utf-8"))
+                except Exception:
+                    pref_data = {}
+            if not isinstance(pref_data, dict):
+                pref_data = {}
+            pref_data["dns_over_https"] = {
+                "mode": "off",
+                "templates": "",
+                "automatic_mode_fallback_to_doh": False,
+            }
+            pref_file.write_text(json.dumps(pref_data, indent=2), encoding="utf-8")
+
+            if os.geteuid() == 0:
+                for target_path in [local_state_file, default_dir, pref_file]:
+                    try:
+                        os.chown(str(target_path), target_uid, target_gid)
+                        os.chmod(str(target_path), 0o644 if target_path.is_file() else 0o755)
+                    except OSError:
+                        pass
+        except OSError as exc:
+            raise BrowserPreflightError(
+                f"Failed to initialize Chrome DoH configuration in profile '{profile_dir}': {exc}"
+            ) from exc
+
     return {
         "profile_dir": profile_dir,
         "netlog_path": netlog_path,
@@ -3687,48 +3736,147 @@ def verify_browser_dns_controls(
     browser_name: str,
     cmd_args: List[str],
     profile_dir: Optional[Path] = None,
+    browser_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Verifies that explicit DoH / TRR controls are active in browser configuration.
-    - Chrome / Chromium: requires '--dns-over-https-mode=off' and 'DnsOverHttps' in '--disable-features'.
-    - Firefox: requires profile user.js to explicitly set 'network.trr.mode' to 5 (TRR disabled).
-    Raises BrowserPreflightError if mandatory DNS controls are absent.
+    Verifies that explicit DoH / TRR controls are active in browser configuration
+    and bound to the exact execution profile and process arguments.
+
+    - Chrome / Chromium:
+      1. Validates that profile_dir is provided, exists, and is a directory.
+      2. Validates profile_dir / "Local State" contains "dns_over_https.mode" == "off".
+      3. Validates profile_dir / "Default" / "Preferences" contains "dns_over_https.mode" == "off".
+      4. Validates cmd_args contains '--user-data-dir=' matching profile_dir.resolve().
+      5. Validates cmd_args contains '--disable-features=' with 'DnsOverHttps'.
+    - Firefox:
+      1. Validates that profile_dir is provided, exists, and is a directory.
+      2. Validates profile_dir / "user.js" exists and sets 'user_pref("network.trr.mode", 5)'.
+      3. Validates cmd_args contains '--profile' pointing to profile_dir.resolve().
+
+    Classification:
+      BROWSER DNS CONFIGURATION VERIFIED — LIVE DNS PATH NOT YET EXPERIMENTALLY VERIFIED
+
+    Raises BrowserPreflightError if mandatory DNS controls are absent or inconsistent.
     """
     bname = browser_name.lower()
     res: Dict[str, Any] = {
         "browser": browser_name,
         "doh_trr_controlled": False,
+        "classification": "BROWSER DNS CONFIGURATION VERIFIED — LIVE DNS PATH NOT YET EXPERIMENTALLY VERIFIED",
         "controls_verified": [],
+        "profile_dir": str(profile_dir) if profile_dir else None,
+        "browser_path": browser_path,
     }
 
+    if profile_dir is None:
+        raise BrowserPreflightError(
+            f"Preflight DNS control verification failed: profile_dir is None for {browser_name}"
+        )
+
+    resolved_profile = Path(profile_dir).resolve()
+    if not resolved_profile.is_dir():
+        raise BrowserPreflightError(
+            f"Preflight DNS control verification failed: profile_dir '{resolved_profile}' does not exist or is not a directory"
+        )
+
     if "chromium" in bname or "chrome" in bname:
-        has_mode_off = "--dns-over-https-mode=off" in cmd_args
+        # 1. Verify Local State file in profile_dir
+        local_state_file = resolved_profile / "Local State"
+        if not local_state_file.is_file():
+            raise BrowserPreflightError(
+                f"Chrome DoH control missing: Local State file not found in profile '{resolved_profile}'"
+            )
+        try:
+            ls_data = json.loads(local_state_file.read_text(encoding="utf-8"))
+            ls_mode = ls_data.get("dns_over_https", {}).get("mode") if isinstance(ls_data, dict) else None
+            if ls_mode != "off":
+                raise BrowserPreflightError(
+                    f"Chrome DoH control invalid in Local State: expected dns_over_https.mode='off', got '{ls_mode}'"
+                )
+        except json.JSONDecodeError as exc:
+            raise BrowserPreflightError(
+                f"Chrome DoH control malformed: Local State in '{resolved_profile}' is not valid JSON: {exc}"
+            ) from exc
+
+        # 2. Verify Preferences file in Default profile
+        pref_file = resolved_profile / "Default" / "Preferences"
+        if not pref_file.is_file():
+            raise BrowserPreflightError(
+                f"Chrome DoH control missing: Default/Preferences file not found in profile '{resolved_profile}'"
+            )
+        try:
+            pref_data = json.loads(pref_file.read_text(encoding="utf-8"))
+            pref_mode = pref_data.get("dns_over_https", {}).get("mode") if isinstance(pref_data, dict) else None
+            if pref_mode != "off":
+                raise BrowserPreflightError(
+                    f"Chrome DoH control invalid in Default/Preferences: expected dns_over_https.mode='off', got '{pref_mode}'"
+                )
+        except json.JSONDecodeError as exc:
+            raise BrowserPreflightError(
+                f"Chrome DoH control malformed: Default/Preferences in '{resolved_profile}' is not valid JSON: {exc}"
+            ) from exc
+
+        # 3. Verify user-data-dir in command line matches profile
+        udd_arg = None
+        for arg in cmd_args:
+            if arg.startswith("--user-data-dir="):
+                udd_arg = arg.split("=", 1)[1]
+                break
+        if not udd_arg:
+            raise BrowserPreflightError(
+                f"Chrome command line missing mandatory switch '--user-data-dir=' in {cmd_args}"
+            )
+        if Path(udd_arg).resolve() != resolved_profile:
+            raise BrowserPreflightError(
+                f"Chrome command line user-data-dir mismatch: switch points to '{udd_arg}', "
+                f"expected verified profile '{resolved_profile}'"
+            )
+
+        # 4. Verify Chromium feature flag disable
         has_feature_disabled = any(
             arg.startswith("--disable-features=") and "DnsOverHttps" in arg
             for arg in cmd_args
         )
-        if not (has_mode_off and has_feature_disabled):
+        if not has_feature_disabled:
             raise BrowserPreflightError(
-                f"Chrome DoH controls missing: --dns-over-https-mode=off ({has_mode_off}), "
-                f"disable-features DnsOverHttps ({has_feature_disabled})"
+                "Chrome DoH feature disable missing: 'DnsOverHttps' not found in '--disable-features=' command-line flags"
             )
+
         res["doh_trr_controlled"] = True
         res["controls_verified"] = [
-            "--dns-over-https-mode=off",
-            "DnsOverHttps in --disable-features",
+            f"Local State dns_over_https.mode='off' in {local_state_file}",
+            f"Default/Preferences dns_over_https.mode='off' in {pref_file}",
+            f"Command line user-data-dir bound to {resolved_profile}",
+            "DnsOverHttps in --disable-features command-line flags",
         ]
+
     elif "firefox" in bname:
-        if profile_dir is not None:
-            user_js = Path(profile_dir) / "user.js"
-            if not user_js.is_file():
-                raise BrowserPreflightError(f"Firefox profile user.js missing at {user_js}")
-            content = user_js.read_text(encoding="utf-8")
-            if 'user_pref("network.trr.mode", 5)' not in content:
-                raise BrowserPreflightError(
-                    'Firefox TRR controls missing: user_pref("network.trr.mode", 5) not set in user.js'
-                )
-            res["doh_trr_controlled"] = True
-            res["controls_verified"] = ["network.trr.mode=5 in user.js"]
+        user_js = resolved_profile / "user.js"
+        if not user_js.is_file():
+            raise BrowserPreflightError(f"Firefox profile user.js missing at '{user_js}'")
+        content = user_js.read_text(encoding="utf-8")
+        if 'user_pref("network.trr.mode", 5)' not in content:
+            raise BrowserPreflightError(
+                'Firefox TRR controls missing: user_pref("network.trr.mode", 5) not set in user.js'
+            )
+
+        # Verify profile switch in command line
+        profile_flag_present = False
+        for i, arg in enumerate(cmd_args):
+            if arg in ("--profile", "-profile") and i + 1 < len(cmd_args):
+                if Path(cmd_args[i + 1]).resolve() == resolved_profile:
+                    profile_flag_present = True
+                    break
+        if not profile_flag_present:
+            raise BrowserPreflightError(
+                f"Firefox command line missing '--profile {resolved_profile}' matching verified profile"
+            )
+
+        res["doh_trr_controlled"] = True
+        res["controls_verified"] = [
+            f"network.trr.mode=5 in {user_js}",
+            f"Command line profile bound to {resolved_profile}",
+        ]
 
     return res
 
@@ -3858,6 +4006,18 @@ def run_browser(
         cmd.extend(extra_args)
 
     cmd.append(target_url)
+
+    # Enforce preflight browser DNS controls verification before process launch
+    dns_ctrl = verify_browser_dns_controls(
+        browser_name=browser_name,
+        cmd_args=cmd,
+        profile_dir=profile_dir,
+        browser_path=browser_path
+    )
+    if not dns_ctrl.get("doh_trr_controlled"):
+        raise BrowserPreflightError(
+            f"Preflight DNS control verification failed for {browser_name}: {dns_ctrl}"
+        )
 
     t0 = time.time()
     timed_out = False

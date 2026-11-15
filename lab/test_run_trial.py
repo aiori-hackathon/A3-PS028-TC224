@@ -2869,36 +2869,187 @@ class TestFirefoxSupportRegression(unittest.TestCase):
     def test_browser_doh_and_trr_controls_verified(self):
         """
         Workstream Measurement Safeguards: Browser DoH and TRR Controls Verification.
-        - Verifies that Chrome launch configuration explicitly disables DoH via --dns-over-https-mode=off and DnsOverHttps feature flag.
+        - Verifies that Chrome configuration explicitly disables DoH via Local State, Default/Preferences, and feature flag.
         - Verifies that Firefox profile explicitly disables TRR via network.trr.mode = 5.
-        - Verifies that verify_browser_dns_controls raises BrowserPreflightError if controls are absent.
+        - Verifies that verify_browser_dns_controls raises BrowserPreflightError if controls are absent or inconsistent.
         """
-        # Valid Chrome args
+        # Valid Chrome profile setup
+        chrome_prof = self.temp_dir / "valid_chrome_prof"
+        chrome_prof.mkdir()
+        ls_file = chrome_prof / "Local State"
+        ls_file.write_text(json.dumps({"dns_over_https": {"mode": "off", "templates": ""}}), encoding="utf-8")
+        def_dir = chrome_prof / "Default"
+        def_dir.mkdir()
+        pref_file = def_dir / "Preferences"
+        pref_file.write_text(json.dumps({"dns_over_https": {"mode": "off", "templates": ""}}), encoding="utf-8")
+
         chrome_args = [
             "--headless=new",
-            "--dns-over-https-mode=off",
+            f"--user-data-dir={chrome_prof.resolve()}",
             "--disable-features=OptimizationHints,Translate,DnsOverHttps",
         ]
-        res_chrome = run_trial.verify_browser_dns_controls("google-chrome", chrome_args)
+        res_chrome = run_trial.verify_browser_dns_controls("google-chrome", chrome_args, profile_dir=chrome_prof)
         self.assertTrue(res_chrome["doh_trr_controlled"])
+        self.assertEqual(res_chrome["classification"], "BROWSER DNS CONFIGURATION VERIFIED — LIVE DNS PATH NOT YET EXPERIMENTALLY VERIFIED")
+        self.assertEqual(len(res_chrome["controls_verified"]), 4)
 
-        # Chrome missing DoH flag fails
+        # Chrome missing profile_dir fails
         with self.assertRaises(run_trial.BrowserPreflightError):
-            run_trial.verify_browser_dns_controls("google-chrome", ["--headless=new"])
+            run_trial.verify_browser_dns_controls("google-chrome", chrome_args, profile_dir=None)
 
-        # Firefox with user.js containing network.trr.mode = 5
+        # Chrome non-existent profile_dir fails
+        with self.assertRaises(run_trial.BrowserPreflightError):
+            run_trial.verify_browser_dns_controls("google-chrome", chrome_args, profile_dir=self.temp_dir / "nonexistent")
+
+        # Chrome missing Local State fails
+        no_ls_prof = self.temp_dir / "no_ls_prof"
+        no_ls_prof.mkdir()
+        with self.assertRaises(run_trial.BrowserPreflightError):
+            run_trial.verify_browser_dns_controls("google-chrome", chrome_args, profile_dir=no_ls_prof)
+
+        # Chrome Local State with mode != 'off' fails
+        bad_ls_prof = self.temp_dir / "bad_ls_prof"
+        bad_ls_prof.mkdir()
+        (bad_ls_prof / "Local State").write_text(json.dumps({"dns_over_https": {"mode": "automatic"}}), encoding="utf-8")
+        with self.assertRaises(run_trial.BrowserPreflightError):
+            run_trial.verify_browser_dns_controls("google-chrome", chrome_args, profile_dir=bad_ls_prof)
+
+        # Chrome missing Default/Preferences fails
+        no_pref_prof = self.temp_dir / "no_pref_prof"
+        no_pref_prof.mkdir()
+        (no_pref_prof / "Local State").write_text(json.dumps({"dns_over_https": {"mode": "off"}}), encoding="utf-8")
+        with self.assertRaises(run_trial.BrowserPreflightError):
+            run_trial.verify_browser_dns_controls("google-chrome", chrome_args, profile_dir=no_pref_prof)
+
+        # Chrome user-data-dir mismatch fails
+        mismatched_args = [
+            "--headless=new",
+            "--user-data-dir=/tmp/other_dir",
+            "--disable-features=OptimizationHints,Translate,DnsOverHttps",
+        ]
+        with self.assertRaises(run_trial.BrowserPreflightError):
+            run_trial.verify_browser_dns_controls("google-chrome", mismatched_args, profile_dir=chrome_prof)
+
+        # Chrome missing DnsOverHttps feature flag fails
+        no_flag_args = [
+            "--headless=new",
+            f"--user-data-dir={chrome_prof.resolve()}",
+            "--disable-features=OptimizationHints,Translate",
+        ]
+        with self.assertRaises(run_trial.BrowserPreflightError):
+            run_trial.verify_browser_dns_controls("google-chrome", no_flag_args, profile_dir=chrome_prof)
+
+        # Firefox with user.js containing network.trr.mode = 5 and matching --profile flag
         ff_prof = self.temp_dir / "ff_prof"
         ff_prof.mkdir()
         user_js = ff_prof / "user.js"
         user_js.write_text('user_pref("network.trr.mode", 5);\n', encoding="utf-8")
-        res_ff = run_trial.verify_browser_dns_controls("firefox", ["--headless"], profile_dir=ff_prof)
+        ff_args = ["--headless", "--profile", str(ff_prof.resolve()), "--no-remote"]
+        res_ff = run_trial.verify_browser_dns_controls("firefox", ff_args, profile_dir=ff_prof)
         self.assertTrue(res_ff["doh_trr_controlled"])
+        self.assertEqual(res_ff["classification"], "BROWSER DNS CONFIGURATION VERIFIED — LIVE DNS PATH NOT YET EXPERIMENTALLY VERIFIED")
 
         # Firefox with missing user.js or missing trr pref fails
         bad_prof = self.temp_dir / "bad_ff_prof"
         bad_prof.mkdir()
         with self.assertRaises(run_trial.BrowserPreflightError):
-            run_trial.verify_browser_dns_controls("firefox", ["--headless"], profile_dir=bad_prof)
+            run_trial.verify_browser_dns_controls("firefox", ff_args, profile_dir=bad_prof)
+
+        # Firefox with wrong trr mode (e.g. mode 2) fails
+        bad_trr_prof = self.temp_dir / "bad_trr_prof"
+        bad_trr_prof.mkdir()
+        (bad_trr_prof / "user.js").write_text('user_pref("network.trr.mode", 2);\n', encoding="utf-8")
+        with self.assertRaises(run_trial.BrowserPreflightError):
+            run_trial.verify_browser_dns_controls("firefox", ff_args, profile_dir=bad_trr_prof)
+
+        # Firefox with mismatched --profile argument fails
+        mismatched_ff_args = ["--headless", "--profile", "/tmp/wrong_ff", "--no-remote"]
+        with self.assertRaises(run_trial.BrowserPreflightError):
+            run_trial.verify_browser_dns_controls("firefox", mismatched_ff_args, profile_dir=ff_prof)
+
+    @patch("subprocess.run")
+    def test_run_browser_invokes_dns_preflight_and_aborts_before_spawn_on_failure(self, mock_run):
+        """
+        run_browser must invoke verify_browser_dns_controls before any process spawn;
+        if DNS controls are missing or tampered, it raises BrowserPreflightError and never spawns a process.
+        """
+        profile = self.temp_dir / "tampered_prof"
+        profile.mkdir()
+
+        # Simulate tampered profile where Local State has mode="automatic"
+        ls = profile / "Local State"
+        ls.write_text(json.dumps({"dns_over_https": {"mode": "automatic"}}), encoding="utf-8")
+
+        # Patch verify_browser_paths_writable so it does not overwrite the tampered state
+        with patch("lab.run_trial.verify_browser_paths_writable"):
+            with self.assertRaises(run_trial.BrowserPreflightError):
+                run_trial.run_browser(
+                    browser_name="google-chrome",
+                    browser_path="/usr/bin/google-chrome",
+                    target_url="http://test.he.test/",
+                    profile_dir=profile
+                )
+            mock_run.assert_not_called()
+
+    def test_real_chrome_effective_configuration_netlog_proof(self):
+        """
+        Empirically verifies using the real installed Google Chrome binary (if present)
+        that Local State dns_over_https.mode='off' and feature flag disable result in
+        effective secure_dns_mode = 0 (kOff) in Chrome's network stack netlog.
+        """
+        chrome_bin = "/usr/bin/google-chrome"
+        if not Path(chrome_bin).is_file():
+            self.skipTest(f"Google Chrome binary not installed at {chrome_bin}")
+
+        profile = self.temp_dir / "real_chrome_proof_prof"
+        profile.mkdir()
+
+        # Preflight configuration via verify_browser_paths_writable
+        env = run_trial.get_browser_env(os.getuid(), os.getgid())
+        paths = run_trial.verify_browser_paths_writable(
+            profile_dir=profile,
+            target_uid=os.getuid(),
+            target_gid=os.getgid(),
+            browser_name="google-chrome",
+            env=env
+        )
+
+        netlog_path = profile / "netlog_proof.json"
+        cmd = [
+            chrome_bin,
+            "--headless=new",
+            "--no-sandbox",
+            "--disable-gpu",
+            f"--user-data-dir={profile.resolve()}",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--disable-features=OptimizationHints,Translate,DnsOverHttps",
+            f"--log-net-log={netlog_path.resolve()}",
+            "--dump-dom",
+            "data:text/html,<html><body>Proof</body></html>"
+        ]
+
+        # Verify preflight passes
+        dns_ctrl = run_trial.verify_browser_dns_controls("google-chrome", cmd, profile_dir=profile, browser_path=chrome_bin)
+        self.assertTrue(dns_ctrl["doh_trr_controlled"])
+
+        # Execute Chrome process
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        self.assertEqual(proc.returncode, 0)
+        self.assertTrue(netlog_path.is_file(), "Netlog file must be created by Chrome")
+
+        # Inspect netlog for secure_dns_mode
+        netlog_data = json.loads(netlog_path.read_text(encoding="utf-8", errors="ignore"))
+        events = netlog_data.get("events", [])
+        secure_modes = [
+            ev.get("params", {}).get("secure_dns_mode")
+            for ev in events
+            if "secure_dns_mode" in ev.get("params", {})
+        ]
+        self.assertTrue(len(secure_modes) > 0, "Netlog must record DNS transactions")
+        # Every recorded secure_dns_mode must be 0 (kOff)
+        for mode in secure_modes:
+            self.assertEqual(mode, 0, f"Expected secure_dns_mode 0 (kOff), got {mode}")
 
     def test_parse_firefox_telemetry_ipv6_success(self):
         """Telemetry log with IPv6 connection records HTTP 200 and IPv6 winning family."""
