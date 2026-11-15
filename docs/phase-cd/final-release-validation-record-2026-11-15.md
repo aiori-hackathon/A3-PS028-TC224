@@ -188,3 +188,23 @@ A complete log of test executions for this release validation has been persisted
 Historical logs are preserved immutable at:
 - `lab/logs/unit_tests_run.log` (2026-11-09 baseline run)
 - `lab/logs/ps028-a10-live-20261030-01.log` (2026-10-30 campaign execution log)
+
+---
+
+### Supplementary validation — Chrome DNS and lab regression
+
+**Validated source commit:** `a398c6e5c4dd51103456ab4f5748cea50162126f`
+
+**Execution checkout:** `6e95f4699b3e59f13a7cd0abd3859ddc4e63a30c`
+
+The source revision under test was unchanged from the validated source commit.
+
+Additional validation was executed successfully:
+
+| Test | Result |
+|---|---|
+| Focused real Chrome NetLog configuration test | 1 passed |
+| Full lab unit and regression suite | 828 passed |
+| Failures | 0 |
+| Errors | 0 |
+| Exit codes | 0 for both commands |
