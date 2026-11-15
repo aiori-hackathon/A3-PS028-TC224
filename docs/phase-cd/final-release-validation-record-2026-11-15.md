@@ -1,8 +1,8 @@
 # PS-028 Final Release Validation Record
 
-- **Document Version**: 1.1.0
-- **Validation Date / UTC Timestamp**: 2026-11-15T08:55:00Z
-- **Validated Source Commit SHA (Code Under Test)**: `a6da745c947c36f7a1cadbd87d94dea8cfb94d86`
+- **Document Version**: 1.2.0
+- **Validation Date / UTC Timestamp**: 2026-11-15T09:28:00Z
+- **Validated Source Commit SHA (Code Under Test)**: `a398c6e5c4dd51103456ab4f5748cea50162126f`
 - **Integration Base Commit SHA**: `d7dc6714a03bac8f0058742eda664f6bdb7e77b5` (PR #10 merged HEAD)
 - **Local Remediation Branch**: `fix/ps028-post-p2-release-readiness`
 - **Authoritative Integration Branch**: `fix/phase-e-bundle-timeline-mapping`
@@ -21,10 +21,10 @@ This document establishes the authoritative, independently reproducible final re
 All confirmed post-P2 source defects have been resolved:
 1. **Silent Fallback Elimination (Issue #12)**: Strict fail-closed parsing implemented in `lab/build_submission_report.py` with 19 dedicated negative/malformed regression tests in `lab/test_build_submission_report.py`.
 2. **RFC Attribution Correction (Issue #9)**: Docstring corrected in `lab/analyze.py` to cite RFC 8305 Section 2 and RFC 6724 Section 2.1, 6 Rule 6, 10.3 (instead of Section 3), with dedicated unit test in `lab/test_analyze.py`.
-3. **Measurement Safeguards (Browser DoH & TRR Controls)**: Audited Google Chrome binary strings and confirmed that Chrome does not implement a `--dns-over-https-mode` CLI switch. Implemented effective profile-level disablement via `Local State` and `Default/Preferences` (`dns_over_https.mode = "off"`), `--user-data-dir` argument binding, and `DnsOverHttps` feature flag disablement in `lab/run_trial.py`. Wired `verify_browser_dns_controls()` into `run_browser()` prior to process spawn, aborting launch on any tampered/missing configuration. Empirically validated effective `secure_dns_mode = 0` (kOff) across all DNS transactions via real Chrome netlog parsing in `lab/test_run_trial.py`. Preserved classification strictly as `BROWSER DNS CONFIGURATION VERIFIED — LIVE DNS PATH NOT YET EXPERIMENTALLY VERIFIED`.
+3. **Measurement Safeguards (Browser DoH & TRR Controls)**: Audited Google Chrome binary strings and confirmed that Chrome does not implement a `--dns-over-https-mode` CLI switch. Implemented effective profile-level disablement via `Local State` and `Default/Preferences` (`dns_over_https.mode = "off"`), `--user-data-dir` argument binding, and `DnsOverHttps` feature flag disablement in `lab/run_trial.py`. Wired `verify_browser_dns_controls()` into `run_browser()` prior to process spawn, aborting launch on any tampered/missing configuration. Empirically validated effective `secure_dns_mode = 0` (kOff) in Chrome's network stack via real Chrome netlog parsing in `lab/test_run_trial.py` across 10 observed internal resolver configuration (`DNS_CONFIG_CHANGED`) and host resolution job request (`HOST_RESOLVER_MANAGER_JOB`) events (confirming `can_use_secure_dns_transactions: false` and empty DoH servers `[]`). Preserved classification strictly as `BROWSER DNS CONFIGURATION VERIFIED — LIVE DNS PATH NOT YET EXPERIMENTALLY VERIFIED`.
 4. **Expanded Real-Browser Playwright Suite (Issue #13)**: Interactive search (positive/negative/clear), pagination boundary controls, filter reset, timeline multi-source filtering, timeline text search, exclusions inspection, provenance display, and RFC 8305 content assertions exercised in genuine Chromium across 14 stages and 242 assertions.
-5. **Documentation & Branch Metadata (Issues #15, #16, #17, Handover, Reconciliation)**: Reconciled 818-test and 881-test historical milestones, updated compliance matrix and owner handover checklist, and updated README integration branch metadata.
-6. **Fresh Complete Release Validation (Issues #19 & #20)**: Full test execution against validated commit `a6da745c947c36f7a1cadbd87d94dea8cfb94d86`.
+5. **Documentation & Branch Metadata (Issues #15, #16, #17, Handover, Reconciliation)**: Reconciled 818-test and 881-test historical milestones (with 881 status qualified as `PARTIALLY RESOLVED — aggregate post-hoc classification; original per-test tracebacks unavailable`), updated compliance matrix and owner handover checklist, and updated README integration branch metadata.
+6. **Fresh Complete Release Validation (Issues #19 & #20)**: Full test execution against validated commit `a398c6e5c4dd51103456ab4f5748cea50162126f`.
 
 ---
 
@@ -132,10 +132,10 @@ To preserve scientific authenticity and avoid conflating distinct development mi
 | **2** | Batch C5 Sealed Gate Snapshot | 2026-11-12 | `docs/phase-cd/gates/batch_c5.md` | 725 | 93 | — | **818** | 100% PASS |
 | **3** | Phase C/D Baseline | 2026-11-12 | `regional/ps028-phase-cd` HEAD | 731 | 93 | — | **824** | 100% PASS |
 | **4** | Phase E Demo Readiness | 2026-11-13 | `regional/phase-e-demo-readiness` | 825 | 93 | — | **918** | 100% PASS |
-| **5** | Task 5C Deduplicated Discovery | 2026-11-14 | `fix/phase-e-bundle-timeline-mapping` | 788 | 93 | — | **881** | 866 PASS, 4 FAIL, 11 ERR (unprivileged sandbox) |
+| **5** | Task 5C Deduplicated Discovery | 2026-11-14 | `fix/phase-e-bundle-timeline-mapping` | 788 | 93 | — | **881** | 866 PASS, 4 FAIL, 11 ERR (status: PARTIALLY RESOLVED — aggregate post-hoc classification; original per-test tracebacks unavailable) |
 | **6** | Historical P0 Baseline | 2026-11-14 | `5c84c93` (frozen at `176f688`) | 804 | 93 | 31 | **928** | 100% PASS |
 | **7** | Historical P1 Validation Snapshot | 2026-11-14 | `ee59362ac3f5` on `work/ps028-p1-remediation` | 805 | 93 | 31 | **929** | 100% PASS |
-| **8** | **Post-P2 Release Readiness (Current)** | **2026-11-15** | `a6da745c947c` on `fix/ps028-post-p2-release-readiness` | **828** | **93** | **31** | **952** | **100% PASS (0 fail, 0 err, 0 skip)** |
+| **8** | **Post-P2 Release Readiness (Current)** | **2026-11-15** | `a398c6e5c4dd` on `fix/ps028-post-p2-release-readiness` | **828** | **93** | **31** | **952** | **100% PASS (0 fail, 0 err, 0 skip)** |
 
 ---
 
@@ -146,7 +146,7 @@ To reproduce this validation from a clean checkout of branch `fix/ps028-post-p2-
 ```bash
 # 1. Verify commit SHA and worktree status
 git rev-parse HEAD
-# Expected: a6da745c947c36f7a1cadbd87d94dea8cfb94d86 (or docs commit HEAD)
+# Expected: a398c6e5c4dd51103456ab4f5748cea50162126f (or docs commit HEAD)
 
 # 2. Verify immutable historical campaign integrity
 sha256sum -c lab/derived/phase-c/historical_integrity_before.sha256 | grep -v "OK$" || echo "100% MATCH"

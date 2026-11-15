@@ -41,14 +41,16 @@ The table below details the full sequence of test suite milestones across the re
 | **2** | **Batch C5 Sealed Gate** | 2026-11-12 | `docs/phase-cd/gates/batch_c5.md` | 725 | 93 | — | **818** | 100% PASS | Sealed Phase C/D gate report snapshot prior to Batch D simulation tests. |
 | **3** | **Phase C/D Baseline** | 2026-11-12 | `regional/ps028-phase-cd` HEAD | 731 | 93 | — | **824** | 100% PASS | Phase C/D baseline incorporating Batch D research sweep simulation tests (+6 in `lab/`). |
 | **4** | **Phase E Demo Readiness** | 2026-11-13 | `regional/phase-e-demo-readiness` | 825 | 93 | — | **918** | 100% PASS | Phase E demo-readiness baseline including bundle export and timeline mapping tests (+94 in `lab/`). |
-| **5** | **Task 5C Deduplicated Discovery** | 2026-11-14 | `fix/phase-e-bundle-timeline-mapping` | 788 | 93 | — | **881** | 866 PASS, 4 FAIL, 11 ERR (unprivileged sandbox) | Full repository discovery following Task 5C deduplication (renamed Batch C5 re-export runner eliminating 48 duplicate runs; 11 regression tests added). 199 focused offline tests passed 100%. See §2.1 for detailed failure reconciliation. |
+| **5** | **Task 5C Deduplicated Discovery** | 2026-11-14 | `fix/phase-e-bundle-timeline-mapping` | 788 | 93 | — | **881** | 866 PASS, 4 FAIL, 11 ERR (status: PARTIALLY RESOLVED — aggregate post-hoc classification; original per-test tracebacks unavailable) | Full repository discovery following Task 5C deduplication (renamed Batch C5 re-export runner eliminating 48 duplicate runs; 11 regression tests added). 199 focused offline tests passed 100%. See §2.1 for detailed failure reconciliation. |
 | **6** | **Historical P0 Test-Execution Baseline** | 2026-11-14 | Source: `5c84c93eff12903a1288770029a903aec48ac1a4`<br>Frozen: `176f688bacb5858fcc0daedb454200918e427f3f` | 804 | 93 | 31 | **928** | 100% PASS | Sealed in `lab/derived/phase-c/test_run_record.json`. Incorporates 31 frontend unit tests (`setup/webtester/test/historical-evidence.test.mjs`) + 16 offline lab tests. Preserved as immutable P0 evidence. |
 | **7** | **Historical P1 Validation Snapshot** | 2026-11-14 | `ee59362ac3f53fad3bc01e65b5d90815697a93d4` on `work/ps028-p1-remediation` | 805 | 93 | 31 | **929** | 100% PASS (0 fail, 0 err, 0 skip) | Documented in `docs/phase-cd/p1-validation-record-2026-11-14.md`. Adds +1 regression test (`test_scientific_presentation_claims_accuracy` in `lab/test_build_submission_report.py`). |
-| **8** | **Post-P2 Release Readiness Validation** | **2026-11-15** | `a6da745c947c` on `fix/ps028-post-p2-release-readiness` | **828** | **93** | **31** | **952** | **100% PASS (0 fail, 0 err, 0 skip)** | Fresh release-readiness suite: incorporates fail-closed P1 parser regression suite (+19 in `lab/test_build_submission_report.py`), RFC attribution audit (+1 in `lab/test_analyze.py`), and browser DNS controls verification with real Chrome netlog verification (+3 in `lab/test_run_trial.py`), alongside expanded 14-stage Playwright acceptance in genuine Chromium. |
+| **8** | **Post-P2 Release Readiness Validation** | **2026-11-15** | `a398c6e5c4dd` on `fix/ps028-post-p2-release-readiness` | **828** | **93** | **31** | **952** | **100% PASS (0 fail, 0 err, 0 skip)** | Fresh release-readiness suite: incorporates fail-closed P1 parser regression suite (+19 in `lab/test_build_submission_report.py`), RFC attribution audit (+1 in `lab/test_analyze.py`), and browser DNS controls verification with real Chrome netlog verification (+3 in `lab/test_run_trial.py`), alongside expanded 14-stage Playwright acceptance in genuine Chromium. |
 
 ---
 
 ### 2.1 Detailed Historical Failure Reconciliation for 881-Test Milestone
+
+- **Forensic Reconciliation Status**: `PARTIALLY RESOLVED — aggregate post-hoc classification; original per-test tracebacks unavailable.`
 
 During the Task 5C deduplication milestone on 14 November 2026, running unprivileged full repository discovery (`python3 -m unittest discover -s lab` and `discover -s tests`) across the entire repository yielded:
 - **Discovered unique tests**: 881 (788 in `lab/` across 21 test modules, 93 in `tests/` across 5 tiers)
@@ -71,12 +73,13 @@ Based on commit history analysis (`a2b2c50`, `a19c416`), test harness inspection
    - *Mechanism*: An outdated test fixture in telemetry parsing asserted legacy schema fields that were superseded during the Phase E contract freeze, causing assertion mismatches.
    - *Remediation*: Updated fixtures to enforce strict fail-closed telemetry validation matching the canonical evidence schema.
 
-#### Transparent Disclosure Regarding Historical Log Artifacts
+#### Transparent Disclosure Regarding Historical Log Artifacts & Forensic Limitations
 
 An audit of repository log files reveals that `lab/logs/unit_tests_run.log` was recorded on **2026-11-09** during the initial 400-test baseline run and was **not** updated during the Task 5C unprivileged execution run. In accordance with the project's strict **Scientific Authenticity and Historical Evidence Preservation Rules**:
 - The historical log `lab/logs/unit_tests_run.log` is preserved verbatim as an immutable snapshot of that 2026-11-09 run.
-- Individual line-by-line terminal tracebacks from the ephemeral Task 5C unprivileged execution were not captured to a persistent disk log at the time of execution.
-- We report the exact failure counts (4 failures, 11 errors) and technical classifications derived from the codebase and commit record without fabricating synthetic traceback logs.
+- Individual line-by-line terminal tracebacks from the ephemeral Task 5C unprivileged execution were not captured or persisted to a disk log at the time of execution.
+- While the four technical failure classes above are authentically reconstructed from the codebase and commit record (`a2b2c50`, `a19c416`), they represent an aggregate post-hoc classification and cannot be independently mapped to individual historical test names or tracebacks.
+- In accordance with scientific documentation standards, we explicitly report this limitation rather than fabricating synthetic test names, tracebacks, or individual causal assignments.
 
 ---
 
