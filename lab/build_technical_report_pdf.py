@@ -79,8 +79,33 @@ def convert_markdown_to_html(source_md_path: Path) -> Tuple[str, str, str]:
     except ImportError as e:
         raise RuntimeError("Required dependency 'markdown-it-py' is not installed.") from e
 
+    # Protect code blocks and LaTeX math from commonmark backslash unescaping
+    code_blocks: List[str] = []
+    def save_code(m: re.Match) -> str:
+        idx = len(code_blocks)
+        code_blocks.append(m.group(0))
+        return f"@@CODE_BLOCK_{idx}_PROTECT@@"
+
+    math_blocks: List[str] = []
+    def save_math(m: re.Match) -> str:
+        idx = len(math_blocks)
+        math_blocks.append(m.group(0))
+        return f"@@MATH_BLOCK_{idx}_PROTECT@@"
+
+    # Step 1: protect code
+    text_st1 = re.sub(r"(```[\s\S]*?```|`[^`\n]+?`)", save_code, text)
+    # Step 2: protect math
+    text_st2 = re.sub(r"(\$\$[\s\S]*?\$\$|\$[^\$\n]+?\$)", save_math, text_st1)
+    # Step 3: restore code blocks before markdown rendering
+    for idx, orig_code in enumerate(code_blocks):
+        text_st2 = text_st2.replace(f"@@CODE_BLOCK_{idx}_PROTECT@@", orig_code)
+
     md = MarkdownIt("commonmark").enable("table").enable("strikethrough")
-    rendered_body = md.render(text)
+    rendered_body = md.render(text_st2)
+
+    # Step 4: restore math blocks after markdown rendering so LaTeX notation remains exact
+    for idx, orig_math in enumerate(math_blocks):
+        rendered_body = rendered_body.replace(f"@@MATH_BLOCK_{idx}_PROTECT@@", orig_math)
 
     # Process H2 and H3 headings for IDs and TOC
     toc_items: List[Tuple[int, str, str]] = []
@@ -394,7 +419,7 @@ __AUTO_RENDER_JS__
             <tr><td class="label">Authoritative Integration Branch</td><td><code>fix/phase-e-bundle-timeline-mapping</code></td></tr>
             <tr><td class="label">Evaluated Browsers</td><td>Google Chrome 156.0.8078.73 & Mozilla Firefox 159.0</td></tr>
             <tr><td class="label">Total Matrix Slots & Trials</td><td>280 Planned Slots, 280 Valid Live Trials, 2 Historical Exclusions</td></tr>
-            <tr><td class="label">Problem Statement Compliance</td><td>17 MET, 2 PARTIAL, 1 PENDING (15/15 Core PS Requirements Met)</td></tr>
+            <tr><td class="label">Problem Statement Compliance</td><td>16 MET, 3 PARTIAL, 1 PENDING (15/15 Core PS Requirements Met)</td></tr>
         </table>
     </div>
     

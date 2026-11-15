@@ -10,7 +10,7 @@
 - **Historical Derivation Branch**: `regional/ps028-phase-cd`
 - **Protected P0 Acceptance Tag**: `ps028-p0-accepted-2026-11-14` (commit `176f688bacb5858fcc0daedb454200918e427f3f`)
 - **Repository**: `https://github.com/aiori-hackathon/A3-PS028-TC224.git`
-- **Problem Statement Compliance Status**: **17 MET, 2 PARTIAL, 1 PENDING** (17/20 Met; 15/15 Core Problem Statement Requirements Met)
+- **Problem Statement Compliance Status**: **16 MET, 3 PARTIAL, 1 PENDING** (16/20 Met; 15/15 Core Problem Statement Requirements Met)
 
 ---
 
@@ -266,6 +266,6 @@ Additional validation was executed successfully:
 ### 7.5 Final Compliance Matrix Summary
 
 - **Total Tracked Requirements**: 20
-- **MET**: **17 (85.0%)** — All 15 Core Problem Statement Requirements Met (#1–#15) + Ownership Transfer (#18) + Offline Suite Reproducibility & CI (#19).
-- **PARTIAL**: **2 (10.0%)** — #16 (Uniform netem live sweep; live research excluded by owner decision) and #17 (Live S5 binomial batch; simulation verified).
+- **MET**: **16 (80.0%)** — All 15 Core Problem Statement Requirements Met (#1–#15) + Ownership Transfer (#18).
+- **PARTIAL**: **3 (15.0%)** — #16 (Uniform netem live sweep; live research excluded by owner decision), #17 (Live S5 binomial batch; simulation verified), and #19 (Offline test suite validated; remote CI execution pending on GitHub).
 - **PENDING**: **1 (5.0%)** — #20 (Partner replication package authored; scheduled as final separate milestone).

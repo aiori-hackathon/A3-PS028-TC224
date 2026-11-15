@@ -8,7 +8,7 @@
 - **Protected P0 Baseline**: `176f688bacb5858fcc0daedb454200918e427f3f` on `fix/phase-e-bundle-timeline-mapping` (tag: `ps028-p0-accepted-2026-11-14`)
 - **Historical Derivation Branch**: `regional/ps028-phase-cd`
 - **Category**: Internet Measurement (AIORI-3 PS-028)
-- **Status**: **17/20 MET (85.0% Met, 2 Partial, 0 Owner-Only, 1 Pending; 15/15 Core Problem Statement Requirements Met)**
+- **Status**: **16/20 MET (80.0% Met, 3 Partial, 0 Owner-Only, 1 Pending; 15/15 Core Problem Statement Requirements Met)**
 
 ---
 
@@ -34,15 +34,15 @@
 | **16** | **Amendment A.6 (Uniform netem qdisc on live sweep)** | Pre-registered in `docs/phase-d-experiment-protocol.md` and modeled in `lab/run_research_sweep.py`. | Design and simulation code verified; live execution with `tc netem delay 0ms 0ms` pending live approval gate. | **PARTIAL** |
 | **17** | **Live S5 Validation (Exact Binomial Acceptance on Live Host)** | `lab/self_test_scenarios.py` with pure-Python Clopper-Pearson 99% Exact Binomial CI ($n=200$). | Fully verified in unit tests and dry-run bundle export; live network socket batch execution pending live gate. | **PARTIAL** |
 | **18** | **Repository Ownership Transfer & Collaborator Access** | Ownership transfer and collaborator configuration in GitHub repository settings. | Confirmed transferred to organisation `aiori-hackathon` on 14 November 2026; repository URL: `https://github.com/aiori-hackathon/A3-PS028-TC224.git`; verified via GitHub API repository metadata (`gh api repos/aiori-hackathon/A3-PS028-TC224` confirmed `owner: aiori-hackathon`). No agent execution of permissions or settings was performed. | **MET** |
-| **19** | **Offline test suite reproducibility & CI** | Reproducible offline unit, synthetic, and regression test suites; GitHub Actions continuous integration workflow (`.github/workflows/ci.yml`). | Historical progression: Phase C/D gate: 725 lab + 93 synthetic = 818 tests; Phase C/D baseline: 731 lab + 93 synthetic = 824 tests; Phase E demo readiness: 825 lab + 93 synthetic = 918 tests; Task 5C deduplicated discovery: 788 lab + 93 synthetic = 881 tests; P0 sealed baseline: 804 lab + 93 synthetic + 31 frontend = 928 unit tests; P1 validation snapshot: 805 lab + 93 synthetic + 31 frontend = 929 tests; Post-P2 baseline: 828 lab + 93 synthetic + 31 frontend = 952 tests; **Final Release Validation on `fix/phase-e-bundle-timeline-mapping`**: **962 unique automated tests** (838 lab + 93 synthetic + 31 frontend; 100% PASS, 0 failures, 0 errors, 0 skips; separate 16 static smoke checks & 14-stage / 242-assertion genuine-Chromium browser acceptance suite; GitHub Actions CI configured). | **MET** |
+| **19** | **Offline test suite reproducibility & CI** | Reproducible offline unit, synthetic, and regression test suites; GitHub Actions continuous integration workflow (`.github/workflows/ci.yml`). | Offline local suite fully validated: 962 unique automated tests (838 lab + 93 synthetic + 31 frontend; 100% PASS, 0 failures, 0 errors, 0 skips; separate 16 static smoke checks & 14-stage / 242-assertion genuine-Chromium browser acceptance suite). GitHub Actions CI workflow implemented and locally checked. Remote GitHub Actions execution: PENDING until executed and verified on GitHub servers. | **PARTIAL** |
 | **20** | **Phase A.6 Partner Replication Package (Multi-Host Evidence)** | Second-host validation package (`docs/phase-cd/partner_replication_manifest.json`, `docs/phase-cd/partner_replication_runbook.md`). | Complete replication manifest and SOP authored for canonical core campaign (S0–S6, 2 browsers, 20 reps, 280 planned trials); multi-host authentic evidence collection awaiting external partner execution as final separate milestone. | **PENDING** |
 
 ### 1.1 Compliance Status Breakdown
 
 | Status Category | Count | Percentage | Scope Details |
 |:---|:---:|:---:|:---|
-| **MET** | 17 | 85.0% | Fully fulfilled and verified with cryptographic evidence (#1–#15, #18, #19; 15/15 core PS requirements). |
-| **PARTIAL** | 2 | 10.0% | #16 (Uniform netem live sweep; live research excluded by owner decision), #17 (Live S5 binomial batch; simulation verified). |
+| **MET** | 16 | 80.0% | Fully fulfilled and verified with cryptographic evidence (#1–#15, #18; 15/15 core PS requirements). |
+| **PARTIAL** | 3 | 15.0% | #16 (Uniform netem live sweep; live research excluded by owner decision), #17 (Live S5 binomial batch; simulation verified), #19 (Offline test suite validated; remote CI execution pending). |
 | **OWNER-ONLY** | 0 | 0.0% | None remaining; Requirement #18 verified transferred to `aiori-hackathon` organisation on 14 November 2026. |
 | **PENDING** | 1 | 5.0% | #20 (Phase A.6 partner replication multi-host evidence; scheduled as final separate milestone). |
 | **Total Tracked** | **20** | **100.0%** | Comprehensive problem statement and amendment tracking. |
@@ -69,8 +69,8 @@
 ## 2. Conclusion
 
 Of the twenty tracked requirements across the problem statement and amendments:
-- **17 are MET (85.0%)**, including all 15 core binding problem statement requirements (#1–#15) plus repository ownership transfer (#18) and offline test suite reproducibility & CI (#19).
-- **2 are PARTIAL (10.0%)**: Requirement #16 (uniform netem live sweep; live research excluded from current plan by owner decision) and Requirement #17 (exact binomial live verification validated in simulation; live network socket batch excluded by owner decision).
+- **16 are MET (80.0%)**, including all 15 core binding problem statement requirements (#1–#15) plus repository ownership transfer (#18).
+- **3 are PARTIAL (15.0%)**: Requirement #16 (uniform netem live sweep; live research excluded from current plan by owner decision), Requirement #17 (exact binomial live verification validated in simulation; live network socket batch excluded by owner decision), and Requirement #19 (offline test suite 100% locally verified; remote CI workflow execution pending on GitHub servers).
 - **0 are OWNER-ONLY (0.0%)**: Requirement #18 verified transferred to `aiori-hackathon` on 14 November 2026 via GitHub repository metadata.
 - **1 is PENDING (5.0%)**: Requirement #20 (Phase A.6 partner replication package authored; multi-host execution scheduled as final separate milestone).
 

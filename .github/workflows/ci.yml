@@ -20,6 +20,7 @@ jobs:
   python-tests:
     name: Python Backend & Integration Tests
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -50,6 +51,7 @@ jobs:
   frontend-validation:
     name: Frontend WebTester Validation
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -92,6 +94,7 @@ jobs:
   artifacts-validation:
     name: Submission Artifacts & PDF Validation
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     needs: [python-tests, frontend-validation]
     steps:
       - name: Checkout repository

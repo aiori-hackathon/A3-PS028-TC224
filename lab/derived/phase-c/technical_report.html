@@ -269,7 +269,7 @@ li {
             <tr><td class="label">Authoritative Integration Branch</td><td><code>fix/phase-e-bundle-timeline-mapping</code></td></tr>
             <tr><td class="label">Evaluated Browsers</td><td>Google Chrome 156.0.8078.73 & Mozilla Firefox 159.0</td></tr>
             <tr><td class="label">Total Matrix Slots & Trials</td><td>280 Planned Slots, 280 Valid Live Trials, 2 Historical Exclusions</td></tr>
-            <tr><td class="label">Problem Statement Compliance</td><td>17 MET, 2 PARTIAL, 1 PENDING (15/15 Core PS Requirements Met)</td></tr>
+            <tr><td class="label">Problem Statement Compliance</td><td>16 MET, 3 PARTIAL, 1 PENDING (15/15 Core PS Requirements Met)</td></tr>
         </table>
     </div>
     
@@ -945,16 +945,16 @@ MOZ_LOG_FILE=&quot;{trial_dir}/browser_telemetry.log&quot; \
 <ol>
 <li>
 <p><strong>Primary Connection Completion Time (<code>t_connect_ms</code>)</strong>:
-$$t_{\text{connect}} = \left( t_{\text{final_ack, primary}} - t_{\text{initial_syn, primary}} \right) \times 1000$$
+$$t_{\text{connect}} = \left( t_{\text{final\_ack, primary}} - t_{\text{initial\_syn, primary}} \right) \times 1000$$
 Measures the strict 3-way handshake duration of the primary HTTP connection stream (RFC 9293 §3.5). In fallback scenarios, this measures only the winning secondary connection (IPv4) once initiated (~20 ms) and excludes the preceding failed or delayed primary attempt.</p>
 </li>
 <li>
 <p><strong>Fallback Total Setup Time (<code>t_setup_total_ms</code>)</strong>:
-$$t_{\text{setup_total}} = \left( t_{\text{final_ack, primary}} - \min_{f \in {\text{IPv4}, \text{IPv6}}} \left( t_{\text{first_syn, } f} \right) \right) \times 1000$$
+$$t_{\text{setup\_total}} = \left( t_{\text{final\_ack, primary}} - \min_{f \in \{\text{IPv4}, \text{IPv6}\}} \left( t_{\text{first\_syn, } f} \right) \right) \times 1000$$
 Measures the total trial-level elapsed time from the first target-host TCP SYN observed in <strong>either</strong> address family to the primary connection's final ACK.</p>
 <ul>
-<li><strong>Direct IPv6 Connections (S0, S3, S6)</strong>: $t_{\text{setup_total_ms}} \approx t_{\text{connect_ms}}$ because the initial IPv6 attempt succeeds directly without fallback.</li>
-<li><strong>Fallback Scenarios (S1, S2, S4, S5)</strong>: $t_{\text{setup_total_ms}}$ incorporates the initial failed attempt and Connection Attempt Delay (CAD), representing the trial-level transport connection setup interval before the selected primary connection completes.</li>
+<li><strong>Direct IPv6 Connections (S0, S3, S6)</strong>: $t_{\text{setup\_total\_ms}} \approx t_{\text{connect\_ms}}$ because the initial IPv6 attempt succeeds directly without fallback.</li>
+<li><strong>Fallback Scenarios (S1, S2, S4, S5)</strong>: $t_{\text{setup\_total\_ms}}$ incorporates the initial failed attempt and Connection Attempt Delay (CAD), representing the trial-level transport connection setup interval before the selected primary connection completes.</li>
 </ul>
 </li>
 </ol>
