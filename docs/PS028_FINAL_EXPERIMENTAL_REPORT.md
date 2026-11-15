@@ -228,7 +228,7 @@ MOZ_LOG_FILE="{trial_dir}/browser_telemetry.log" \
 
 ## 7. Detailed Scenario Definitions S0–S6 and Intended Impairments
 
-The canonical scenario configuration is maintained in [`lab/scenarios.yaml`](../lab/scenarios.yaml).
+The canonical scenario configuration is maintained in [`lab/scenarios.yaml`](https://github.com/aiori-hackathon/A3-PS028-TC224/blob/afceefb759627f1a1d6bc1a2ba4c1970d0f89656/lab/scenarios.yaml).
 
 | ID | Canonical Name | Target Family | Mechanism | Configured Impairment |
 | :--- | :--- | :--- | :--- | :--- |
@@ -244,11 +244,11 @@ The canonical scenario configuration is maintained in [`lab/scenarios.yaml`](../
 
 ## 8. Experimental Methodology
 
-The campaign runner ([`lab/run_campaign.py`](../lab/run_campaign.py)) coordinates strictly sequential trial scheduling:
+The campaign runner ([`lab/run_campaign.py`](https://github.com/aiori-hackathon/A3-PS028-TC224/blob/afceefb759627f1a1d6bc1a2ba4c1970d0f89656/lab/run_campaign.py)) coordinates strictly sequential trial scheduling:
 
 1. **Sequential Matrix Traversal:** The matrix loops across 20 repetitions, iterating through scenarios (S0–S6) and alternating between Google Chrome and Mozilla Firefox. Concurrent trials are strictly prevented by a system-wide lock file (`/tmp/.ps028_lab.lock`).
 2. **Unique Trial Identifiers:** Each attempt generates a unique trial ID (`trial-<timestamp>-<hash>`) mapping to a dedicated directory under `trials/<trial_id>/`. Evidence is never overwritten.
-3. **Fail-Stop Verification:** Prior to applying any scenario impairment, the preflight baseline check verifies that the testbed is healthy. Immediately after trial execution, impairments are restored to baseline and [`impair.self_test_baseline()`](../lab/impair.py) executes. If any cleanup step fails or baseline verification deviates, the campaign immediately halts (`FAIL-STOP`) to prevent contaminated measurements.
+3. **Fail-Stop Verification:** Prior to applying any scenario impairment, the preflight baseline check verifies that the testbed is healthy. Immediately after trial execution, impairments are restored to baseline and [`impair.self_test_baseline()`](https://github.com/aiori-hackathon/A3-PS028-TC224/blob/afceefb759627f1a1d6bc1a2ba4c1970d0f89656/lab/impair.py) executes. If any cleanup step fails or baseline verification deviates, the campaign immediately halts (`FAIL-STOP`) to prevent contaminated measurements.
 4. **Atomic Manifest Persistence:** Progress is written to `campaign_manifest.json` atomically via temporary file rename under directory lock (`.campaign.lock`).
 
 ---
@@ -278,7 +278,7 @@ Planned Matrix Slots: 280
 
 ## 10. Results by Scenario and Browser
 
-Statistical metrics were computed across all 280 valid live trials using the PS-028 statistical analysis engine ([`lab/analyze.py`](../lab/analyze.py)). All confidence intervals (CI) represent 95% intervals computed according to standard statistical methodologies:
+Statistical metrics were computed across all 280 valid live trials using the PS-028 statistical analysis engine ([`lab/analyze.py`](https://github.com/aiori-hackathon/A3-PS028-TC224/blob/afceefb759627f1a1d6bc1a2ba4c1970d0f89656/lab/analyze.py)). All confidence intervals (CI) represent 95% intervals computed according to standard statistical methodologies:
 
 - **Median Confidence Intervals (Percentile Bootstrap):** Computed via deterministic percentile bootstrap resampling with $B = 1{,}000$ resamples and pseudo-random seed = 42 for all continuous metrics (Connection Setup Time, CAD, DNS Latency, and Browser Duration).
 - **Mean Confidence Intervals (Student-t Distribution):** Computed parametrically as $\bar{x} \pm t_{0.975, n-1} \cdot \frac{s}{\sqrt{n}}$ using the exact critical value $t_{0.975, 19} = 2.0930$ from the Student-t distribution for cohort size $n = 20$.
@@ -432,7 +432,7 @@ The measurement harness enforces complete laboratory isolation:
    - `ps028_impair` nftables tables in `ps028-rt` were deleted.
    - tc netem qdiscs on all four server-facing links were restored to the baseline 10ms delay.
    - `dns_config.json` was restored to 0ms delays.
-2. **Post-Trial Self-Test:** [`impair.self_test_baseline()`](../lab/impair.py) executed after every attempt, verifying that no active scenarios remained in `.impair_state.json`, DNS configuration was clean, no backup files existed, and the DNS daemon was healthy.
+2. **Post-Trial Self-Test:** [`impair.self_test_baseline()`](https://github.com/aiori-hackathon/A3-PS028-TC224/blob/afceefb759627f1a1d6bc1a2ba4c1970d0f89656/lab/impair.py) executed after every attempt, verifying that no active scenarios remained in `.impair_state.json`, DNS configuration was clean, no backup files existed, and the DNS daemon was healthy.
 3. **Process and Concurrency Safety:** Ephemeral browser profiles and stale background processes were terminated using target-PID signaling. Campaign execution remained protected by manifest-level (`.campaign.lock`) and lab-level (`/tmp/.ps028_lab.lock`) concurrency locks.
 
 ---
@@ -487,7 +487,7 @@ t = 0.579s: Server returns "HTTP/1.1 404 Not Found" over IPv4 (Frame 168)
 
 - **Chrome Analysis:** The main document navigation (`GET /`) was initiated and completed entirely over IPv6. After the main page rendered, Chrome issued an ancillary request for `/favicon.ico`. For this ancillary request, Chrome's internal socket pool initiated a connection over IPv4. The 3-way handshake succeeded, which previously triggered the packet-based fallback heuristic because both families had connected.
 - **Firefox Analysis:** The main document navigation completed entirely over IPv6. Approximately 210ms after receiving the HTTP 200 response on IPv6, Firefox initiated a speculative background preconnect socket over IPv4. The IPv4 TCP handshake succeeded, but **zero HTTP requests** were transmitted over it.
-- **Root Cause & Technical Correction:** Rather than relying on an unrelated first HTTP response or unverified connection flags, the packet dissection engine ([`lab/run_trial.py`](../lab/run_trial.py)) extracts TCP stream identifiers (`tcp.stream`) alongside HTTP request method (`http.request.method`) and URI (`http.request.uri`). The classifier correlates the main `GET /` document navigation request with its corresponding TCP stream and address family. When the main navigation flow completes over IPv6 with HTTP 200, ancillary requests (such as post-navigation `/favicon.ico` over IPv4) or speculative preconnect sockets are explicitly recognized and do not displace the primary IPv6 classification.
+- **Root Cause & Technical Correction:** Rather than relying on an unrelated first HTTP response or unverified connection flags, the packet dissection engine ([`lab/run_trial.py`](https://github.com/aiori-hackathon/A3-PS028-TC224/blob/afceefb759627f1a1d6bc1a2ba4c1970d0f89656/lab/run_trial.py)) extracts TCP stream identifiers (`tcp.stream`) alongside HTTP request method (`http.request.method`) and URI (`http.request.uri`). The classifier correlates the main `GET /` document navigation request with its corresponding TCP stream and address family. When the main navigation flow completes over IPv6 with HTTP 200, ancillary requests (such as post-navigation `/favicon.ico` over IPv4) or speculative preconnect sockets are explicitly recognized and do not displace the primary IPv6 classification.
 - **Audit & Evidence Preservation:** The original PCAP captures, SHA-256 hashes, CAD measurements (300.96ms to 407.22ms), and browser logs were preserved without modification. The derived classification fields in `result.json` and `campaign_manifest.json` were corrected to `DIRECT_IPV6`, restoring complete analytical consistency between browser telemetry and network observation across all 280 trials.
 
 ---
@@ -499,7 +499,7 @@ In the campaign results, `response_body_bytes` is invariant by browser:
 - **Mozilla Firefox:** Exactly **72 bytes** in 140/140 trials.
 
 ### Metric Limitation Analysis
-In [`lab/run_trial.py`](../lab/run_trial.py), `response_body_bytes` is computed as:
+In [`lab/run_trial.py`](https://github.com/aiori-hackathon/A3-PS028-TC224/blob/afceefb759627f1a1d6bc1a2ba4c1970d0f89656/lab/run_trial.py), `response_body_bytes` is computed as:
 ```python
 "response_body_bytes": len(browser_result.get("stdout", ""))
 ```
@@ -526,13 +526,13 @@ The two failed attempts are classified as exclusions in statistical analysis:
 - Both attempts failed during initial environment setup and preflight verification before `tcpdump` or browser processes were launched.
 - Neither attempt generated valid packet capture data or HTTP responses.
 - Both attempts violated the fail-stop baseline verification invariant.
-- Per PS-028 analysis rules ([`lab/analyze.py`](../lab/analyze.py)), failed attempts cannot be treated as valid measurement samples. They are preserved in `campaign_manifest.json` as an immutable audit trail.
+- Per PS-028 analysis rules ([`lab/analyze.py`](https://github.com/aiori-hackathon/A3-PS028-TC224/blob/afceefb759627f1a1d6bc1a2ba4c1970d0f89656/lab/analyze.py)), failed attempts cannot be treated as valid measurement samples. They are preserved in `campaign_manifest.json` as an immutable audit trail.
 
 ---
 
 ## 20. Scenario Mismatch Notices from the Campaign Manifest
 
-The campaign manifest permanently records two documented mismatches between early narrative documentation and the canonical implementation in [`lab/scenarios.yaml`](../lab/scenarios.yaml):
+The campaign manifest permanently records two documented mismatches between early narrative documentation and the canonical implementation in [`lab/scenarios.yaml`](https://github.com/aiori-hackathon/A3-PS028-TC224/blob/afceefb759627f1a1d6bc1a2ba4c1970d0f89656/lab/scenarios.yaml):
 
 ### Exact Manifest Notices
 
@@ -623,10 +623,10 @@ The campaign manifest permanently records two documented mismatches between earl
 
 ### Windows Offline Analysis Workflow
 
-The statistical analysis engine ([`lab/analyze.py`](../lab/analyze.py)) has zero external pip dependencies and executes cleanly on Windows using standard Python 3.8+ (Command Prompt, PowerShell, or Git Bash):
+The statistical analysis engine ([`lab/analyze.py`](https://github.com/aiori-hackathon/A3-PS028-TC224/blob/afceefb759627f1a1d6bc1a2ba4c1970d0f89656/lab/analyze.py)) has zero external pip dependencies and executes cleanly on Windows using standard Python 3.8+ (Command Prompt, PowerShell, or Git Bash):
 
 1. **Extract Evidence Bundle:**
-   Download and unzip [`ps028_portable_data_bundle.zip`](../lab/campaigns/ps028-a10-live-20261030-01/ps028_portable_data_bundle.zip) (or the complete evidence archive `ps028_complete_evidence_bundle.tar.gz`).
+   Download and unzip [`ps028_portable_data_bundle.zip`](https://github.com/aiori-hackathon/A3-PS028-TC224/blob/afceefb759627f1a1d6bc1a2ba4c1970d0f89656/lab/campaigns/ps028-a10-live-20261030-01/ps028_portable_data_bundle.zip) (or the complete evidence archive `ps028_complete_evidence_bundle.tar.gz`).
 2. **Execute Statistical Analysis:**
    ```powershell
    # In PowerShell / Command Prompt:

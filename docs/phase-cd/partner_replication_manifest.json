@@ -2,8 +2,21 @@
   "replication_schema_version": "1.0.0",
   "project_id": "A3-PS028-TC224",
   "status": "PENDING_AUTHENTIC_PARTNER_EVIDENCE",
-  "governing_document": "docs/phase-d-experiment-protocol.md Section 6.2",
+  "governing_document": "docs/phase-cd/partner_replication_runbook.md",
   "amendment_compliance": ["A2", "A4", "A6", "A8", "A10", "A11", "A13"],
+  "amendment_scope_reconciliation": {
+    "applicable_core_campaign_amendments": [
+      {"amendment": "A2", "scope": "Sample size rigor (exactly n=20 trials per browser per scenario, 280 planned core trials; pilot/exploratory data barred from claims)"},
+      {"amendment": "A4", "scope": "Controlled DNS responder integrity (wildcard *.he.test., immediate Type 65 NODATA, fail-closed lock reload)"},
+      {"amendment": "A8", "scope": "Browser DNS controls and metric isolation (disabled DoH/TRR, ephemeral profiles, DNS transaction metrics separated from TCP setup)"},
+      {"amendment": "A10", "scope": "Specification of record integrity (draft-ietf-happy-happyeyeballs-v3-04 pinned reference)"},
+      {"amendment": "A13", "scope": "Deterministic ordering and cryptographic provenance sidecars (Schema 1.1.0)"}
+    ],
+    "explicit_amendment_exclusions": [
+      {"amendment": "A6", "scope": "Live uniform netem qdisc delay parameter sweeps are excluded from the partner core campaign (retained only as historical Phase D analytical simulation)"},
+      {"amendment": "A11", "scope": "The 200-probe live exact binomial acceptance batch is excluded from the partner core campaign (Scenario S5 core replication executes 20 live trials with a 50-probe testbed readiness preflight)"}
+    ]
+  },
   "authoritative_baseline_campaign": "ps028-a10-live-20261030-01",
   "target_clients": [
     {

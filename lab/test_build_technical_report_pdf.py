@@ -6,19 +6,24 @@ and end-to-end PDF generation.
 """
 
 import os
+import re
 import shutil
 import tempfile
 import unittest
 from pathlib import Path
 
 from lab.build_technical_report_pdf import (
+    GITHUB_REPO_BLOB_BASE,
     REPO_ROOT,
     SOURCE_MD,
     TARGET_PDF,
+    VERIFIED_COMMIT_SHA,
     build_full_html_document,
     build_technical_report_pdf,
     convert_markdown_to_html,
     find_browser_executable,
+    get_verified_commit_sha,
+    resolve_portable_hyperlinks,
     validate_pdf_artifact,
 )
 
@@ -108,6 +113,68 @@ class TestBuildTechnicalReportPDF(unittest.TestCase):
         self.assertTrue(valid, f"Generated PDF validation failed: {msg}")
         self.assertGreaterEqual(pages, 18, "Report must be at least 18 pages")
         self.assertGreaterEqual(size, 400_000, "Report must be at least 400KB")
+
+    def test_resolve_portable_hyperlinks_valid_repo_file(self):
+        source_md = REPO_ROOT / "docs" / "test.md"
+        html = '<p>See <a href="../lab/scenarios.yaml">scenarios</a> config.</p>'
+        res = resolve_portable_hyperlinks(html, source_md, REPO_ROOT, commit_sha=VERIFIED_COMMIT_SHA)
+        expected_url = f"{GITHUB_REPO_BLOB_BASE}/{VERIFIED_COMMIT_SHA}/lab/scenarios.yaml"
+        self.assertIn(f'href="{expected_url}"', res)
+        self.assertNotIn("file://", res)
+        self.assertIn("scenarios</a>", res)
+
+    def test_resolve_portable_hyperlinks_unmappable_path_stripped(self):
+        source_md = REPO_ROOT / "docs" / "test.md"
+        html = '<p>Missing <a href="../non_existent_dir/missing_file.py">source text</a> here.</p>'
+        res = resolve_portable_hyperlinks(html, source_md, REPO_ROOT, commit_sha=VERIFIED_COMMIT_SHA)
+        self.assertNotIn("<a ", res)
+        self.assertNotIn("</a>", res)
+        self.assertIn("source text", res)
+
+    def test_resolve_portable_hyperlinks_preserves_external_and_anchors(self):
+        source_md = REPO_ROOT / "docs" / "test.md"
+        html = (
+            '<p><a href="#executive-summary">TOC</a> and '
+            '<a href="https://example.com/spec">Spec</a>.</p>'
+        )
+        res = resolve_portable_hyperlinks(html, source_md, REPO_ROOT, commit_sha=VERIFIED_COMMIT_SHA)
+        self.assertIn('href="#executive-summary"', res)
+        self.assertIn('href="https://example.com/spec"', res)
+
+    def test_authoritative_report_and_pdf_have_zero_file_uris(self):
+        # 1. Authoritative markdown source must contain zero relative file links
+        md_text = SOURCE_MD.read_text(encoding="utf-8")
+        rel_links = [
+            m.group(2)
+            for m in re.finditer(r"\[([^\]]+)\]\(([^)]+)\)", md_text)
+            if not m.group(2).startswith("http") and not m.group(2).startswith("#")
+        ]
+        self.assertEqual(
+            rel_links,
+            [],
+            f"SOURCE_MD should have 0 relative file links, found: {rel_links}",
+        )
+
+        # 2. Authoritative HTML must have zero file:// links
+        _, _, body_html = convert_markdown_to_html(SOURCE_MD)
+        self.assertNotIn('href="file://', body_html)
+
+        # 3. Target PDF must exist and contain zero file:// URIs
+        if TARGET_PDF.is_file():
+            data = TARGET_PDF.read_bytes().decode("latin1", errors="replace")
+            uris = re.findall(r"/URI\s*\((.*?)\)", data)
+            file_uris = [u for u in uris if u.startswith("file:")]
+            self.assertEqual(
+                file_uris,
+                [],
+                f"TARGET_PDF must contain 0 file:// URIs, found: {file_uris}",
+            )
+            github_uris = [u for u in uris if "github.com" in u]
+            self.assertEqual(
+                len(github_uris),
+                11,
+                f"TARGET_PDF expected 11 GitHub URIs, found {len(github_uris)}: {github_uris}",
+            )
 
 
 if __name__ == "__main__":

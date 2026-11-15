@@ -7,8 +7,11 @@
 |Campaign|`ps028-a10-live-20261030-01`|
 |Evidence and code baseline|Branch `a/lab-foundation` · commit [`002c4453d35d6760760c6a14d2e98618b024f1f2`](https://github.com/aiori-hackathon/A3-PS028-TC224/commit/002c4453d35d6760760c6a14d2e98618b024f1f2)|
 |Phase C/D analysis revision|Branch `regional/ps028-phase-cd` · commit [`b920ebc93f2e6aaae8396b7095b6cd3c8598ade5`](https://github.com/aiori-hackathon/A3-PS028-TC224/commit/b920ebc93f2e6aaae8396b7095b6cd3c8598ade5)|
-|Authoritative integration branch|Branch `fix/phase-e-bundle-timeline-mapping` (PR #10 merged; authoritative release branch)|
+|Authoritative integration branch|Branch `fix/phase-e-bundle-timeline-mapping` · commit [`afceefb759627f1a1d6bc1a2ba4c1970d0f89656`](https://github.com/aiori-hackathon/A3-PS028-TC224/commit/afceefb759627f1a1d6bc1a2ba4c1970d0f89656) (PR #10 merged `work/ps028-p1-remediation` into this branch; active development & integration branch)|
+|Final submission target branch|Branch `main` · commit [`fc4fef7df5b9638dd438e6b4acaadf4d219b3e26`](https://github.com/aiori-hackathon/A3-PS028-TC224/commit/fc4fef7df5b9638dd438e6b4acaadf4d219b3e26) (reserved for final submission via pull request after explicit owner authorization)|
+|Remote CI status|[![PS-028 CI](https://github.com/aiori-hackathon/A3-PS028-TC224/actions/workflows/ci.yml/badge.svg?branch=fix/phase-e-bundle-timeline-mapping)](https://github.com/aiori-hackathon/A3-PS028-TC224/actions/runs/43733419747) · **SUCCESS** (Run [#43733419747](https://github.com/aiori-hackathon/A3-PS028-TC224/actions/runs/43733419747); 3/3 jobs passed: 962/962 automated tests, 705/705 checksums, both submission PDFs generated & uploaded)|
 |Final technical report|[`PS028 Detailed Analysis & Report PDF.pdf`](PS028%20Detailed%20Analysis%20%26%20Report%20PDF.pdf)|
+|Final presentation slide deck|[`PS028_Hackathon_Submission_Presentation.pdf`](PS028_Hackathon_Submission_Presentation.pdf)|
 |Team introduction|https://youtu.be/5LLxlW9f6r4?si=EQjgtt3bIgkQ4Nix|
 |Final Project Demonstration Video|[https://youtu.be/LYngp7dzoRI?si=1mPrapHizazV41zB](https://youtu.be/LYngp7dzoRI?si=1mPrapHizazV41zB)|
 |Campaign evidence|[`lab/campaigns/ps028-a10-live-20261030-01/`](lab/campaigns/ps028-a10-live-20261030-01)|
@@ -29,6 +32,7 @@
 * [Reproduce offline analysis on Windows](#reproduce-offline-analysis-on-windows)
 * [Limitations and threats to validity](#limitations-and-threats-to-validity)
 * [References](#references)
+* [Git branch and submission strategy](#git-branch-and-submission-strategy)
 * [Submission checklist](#submission-checklist)
 
 \---
@@ -163,6 +167,7 @@ S4 Firefox includes one direct-IPv6 main flow with a 600.95 ms SYN-to-SYN/ACK in
 |Primary `GET /` flows found|280 / 280|
 |Primary-flow / browser winner disagreements|0|
 |Recorded local test run|Final release validation snapshot (15 Nov 2026, authoritative branch `fix/phase-e-bundle-timeline-mapping`): 962 unique automated tests (838 lab + 93 integration + 31 frontend; 100% PASS, 0 failures, 0 errors; separate 16 static smoke checks & 14-stage / 242-assertion real-browser Chromium acceptance suite; reproducible GitHub Actions CI workflow). Historical test baseline progression: 524 (Preflight Baseline) → 818 (Batch C5 Gate) → 881 (Task 5C Deduplication Discovery, PARTIALLY RESOLVED forensic qualification) → 929 (P1 Validated Snapshot) → 952 (Post-P2 Baseline) → 962 (Final Release Validation on exact HEAD).|
+|Recorded remote CI run|Remote GitHub Actions CI Run #2 (Run ID [`43733419747`](https://github.com/aiori-hackathon/A3-PS028-TC224/actions/runs/43733419747), commit `afceefb759627f1a1d6bc1a2ba4c1970d0f89656`): 3/3 jobs passed in 3m 7s (`python-tests`, `frontend-validation`, `artifacts-validation`), validating 962 unique automated tests (838 lab + 93 integration + 31 frontend), 705 historical checksums, 16 smoke checks, 14 browser stages (242 assertions), and generating/uploading submission PDFs to artifact `ps028-submission-artifacts` (ID `14169134466`, SHA-256 `a15ac6456c6516245f7989aa0b4e9698eae07b9edb17727f52ab787f27e1d466`).|
 
 The two excluded attempts were a Firefox S0 preflight baseline self-test failure (`Broken pipe`) and a Chrome S6 cleanup failure caused by a helper operation requiring root privileges. Both records remain in the evidence trail and were retried using unique trial IDs. An early statement in README line 201 claiming "the recorded suite reports 400 tests" was identified during independent repository audit (documented in `docs/phase-cd/finding-verification.md` and `docs/phase-cd/repo-audit-register.md`) as a stale unverified placeholder; the verified initial baseline comprised 524 automated tests (431 lab + 93 synthetic). The test suite expanded through Phase C/D Batch C5 (725 unit + 93 synthetic = 818 tests), Phase C/D baseline (731 unit + 93 synthetic = 824 tests), and Phase E demo readiness (825 unit + 93 synthetic = 918 tests). Following test-suite deduplication in Task 5C (renaming the Batch C5 re-export runner to eliminate 48 duplicate executions), full repository discovery identified 881 unique test cases (788 in `lab/` across 21 modules, 93 in `tests/` across 5 tiers; 0 duplicate executions), incorporating 11 regression tests added during Tasks 1–3A and Task 5B (+2 in `test_demo_bundle.py`, +7 in `test_export_campaign_evidence.py`, +1 in `test_analyze.py`, +1 in `test_impair.py`): 866 passed, 4 failed, 11 errors in an unprivileged environment (all 15 failures/errors in `lab/` classified in aggregate into missing root privileges, unconfigured network namespaces, and read-only crashpad directories; historical status: `PARTIALLY RESOLVED — aggregate post-hoc classification; original per-test tracebacks unavailable`; `tests/` passes 93/93), while a focused offline regression suite of 199 tests executed with a 100% pass rate. The suite expanded further with the integration of 31 frontend unit tests in `setup/webtester/test/historical-evidence.test.mjs` and 16 additional offline lab tests, establishing the historical P0 test-execution baseline of 928 unit tests on source commit `5c84c93eff12903a1288770029a903aec48ac1a4` (804 lab + 93 synthetic + 31 frontend, sealed in `lab/derived/phase-c/test_run_record.json`, frozen at acceptance commit `176f688bacb5858fcc0daedb454200918e427f3f`). The authoritative P1 validation snapshot on 14 November 2026 (commit `ee59362ac3f53fad3bc01e65b5d90815697a93d4`) incorporates 1 additional regression test (`test_scientific_presentation_claims_accuracy` in `lab/test_build_submission_report.py`), achieving 929 unique automated tests (805 lab, 93 integration, 31 frontend). Post-P2 remediation expanded the lab suite to 828 tests (952 total unique tests) with the 14-stage / 242-assertion genuine-Chromium browser acceptance suite. The final release closure on `fix/phase-e-bundle-timeline-mapping` incorporates the automated technical report PDF generator and regression suite (`lab/build_technical_report_pdf.py` and `lab/test_build_technical_report_pdf.py`), establishing 962 unique automated tests (838 lab, 93 integration, 31 frontend) passing 100% with 0 failures, 0 errors, and 0 skips, alongside 16 static smoke checks, 14-stage / 242-assertion real-browser Chromium acceptance suite, an 8-page production build, and an automated GitHub Actions CI workflow (`.github/workflows/ci.yml`). Full reconciliation details are documented in `docs/phase-cd/test-inventory-reconciliation.md`.
 
@@ -260,6 +265,28 @@ Live experiment execution is a separate Linux workflow requiring network namespa
 5. The generic setup-time field and browser-duration/body-byte fields are not all directly comparable with the primary-flow PCAP metric.
 6. The auxiliary `rfc8305\_assessment.csv` has been regenerated and verified against the 280 empirical trial results; its S2 and S6 assessments reflect laboratory observations under controlled network impairments and do not imply protocol non-conformance across unobserved releases.
 7. The organizer's `Proposed-structure-hackathon.pdf` template has been inspected and integrated. The report structure adheres strictly to the organizer's 11-section Beamer slide and technical report layout.
+
+## Git branch and submission strategy
+
+The repository maintains an explicit separation between development/integration activities and the final submission branch:
+
+* **Final submission branch (`main`)**: The authoritative submission branch for the hackathon is `main`. Currently, `main` remains untouched at commit [`fc4fef7df5b9638dd438e6b4acaadf4d219b3e26`](https://github.com/aiori-hackathon/A3-PS028-TC224/commit/fc4fef7df5b9638dd438e6b4acaadf4d219b3e26). No direct commits or unreviewed merges are permitted on `main`.
+* **Active development and integration branch (`fix/phase-e-bundle-timeline-mapping`)**: All ongoing maintenance, documentation reconciliation, automated test verification, and CI configuration take place on `fix/phase-e-bundle-timeline-mapping` (current verified HEAD [`afceefb759627f1a1d6bc1a2ba4c1970d0f89656`](https://github.com/aiori-hackathon/A3-PS028-TC224/commit/afceefb759627f1a1d6bc1a2ba4c1970d0f89656)). Historical PR #10 merged `work/ps028-p1-remediation` into this integration branch, not into `main`. The integration branch is currently 51 commits ahead of `main`.
+* **Final pull request and merge gate**: Merging into `main` will occur via pull request only after all planned tasks (including the separate final partner replication milestone, if retained by the owner) are completed and explicit owner authorization is granted.
+
+## Submission checklist
+
+- [x] P0 acceptance baseline preserved (`ps028-p0-accepted-2026-11-14` at `176f688bacb5858fcc0daedb454200918e427f3f`).
+- [x] Historical campaign `ps028-a10-live-20261030-01` cryptographically sealed (705/705 checksums verified).
+- [x] Unique automated test suite passing locally: 962/962 tests (838 lab + 93 integration + 31 frontend; 0 failures, 0 errors).
+- [x] Separate frontend smoke (16/16) and genuine Chromium acceptance suite (14 stages, 242 assertions) passing.
+- [x] Remote continuous integration verified on GitHub Actions runners (Run #2 [`43733419747`](https://github.com/aiori-hackathon/A3-PS028-TC224/actions/runs/43733419747), 3/3 jobs passed).
+- [x] Presentation slide deck generated matching organizer geometry (`PS028_Hackathon_Submission_Presentation.pdf`, 11 pages).
+- [x] Publication-quality technical report generated (`PS028 Detailed Analysis & Report PDF.pdf`, 22 pages).
+- [x] Standalone prototype replay utility operational (`lab/demo_replay.py`).
+- [x] Problem Statement compliance verified: 17/20 MET (85.0%), 2 PARTIAL (10.0%), 1 PENDING (5.0%).
+- [ ] Manual owner actions: Judge/collaborator access confirmation, final portal PDF uploads, and demonstration video URL submission.
+- [ ] Final PR from `fix/phase-e-bundle-timeline-mapping` to `main` (pending final milestone completion & owner authorization).
 
 ## References
 

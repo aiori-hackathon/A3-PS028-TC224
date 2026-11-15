@@ -10,7 +10,7 @@
 - **Historical Derivation Branch**: `regional/ps028-phase-cd`
 - **Protected P0 Acceptance Tag**: `ps028-p0-accepted-2026-11-14` (commit `176f688bacb5858fcc0daedb454200918e427f3f`)
 - **Repository**: `https://github.com/aiori-hackathon/A3-PS028-TC224.git`
-- **Problem Statement Compliance Status**: **16 MET, 3 PARTIAL, 1 PENDING** (16/20 Met; 15/15 Core Problem Statement Requirements Met)
+- **Problem Statement Compliance Status**: **17 MET, 2 PARTIAL, 1 PENDING** (17/20 Met; 15/15 Core Problem Statement Requirements Met; Remote CI Run #2 Verified)
 
 ---
 
@@ -295,9 +295,57 @@ Additional validation was executed successfully:
 - `lab/demo_replay.py`: Safe string formatting for `None` values (`NONE` / `N/A`) preserving underlying metrics and fail-closed non-zero exit codes without data fabrication.
 - **Local Validation Evidence**: Captured in `lab/logs/release_validation_ci_remediation_20261115.log` (838 lab + 93 integration + 31 frontend = 962 automated tests passed, 0 failures, 0 errors, 16 smoke checks passed).
 
-### 7.6 Final Compliance Matrix Summary
+### 7.6 Remote GitHub Actions Run #2 Verification Record (Successful CI Execution)
+
+- **Authoritative Remote CI Run**: Run ID [`43733419747`](https://github.com/aiori-hackathon/A3-PS028-TC224/actions/runs/43733419747)
+- **Run URL**: `https://github.com/aiori-hackathon/A3-PS028-TC224/actions/runs/43733419747`
+- **Workflow**: `PS-028 Continuous Integration` (`.github/workflows/ci.yml`)
+- **Triggering Commit**: `afceefb759627f1a1d6bc1a2ba4c1970d0f89656` on `fix/phase-e-bundle-timeline-mapping`
+- **Run Outcome**: **SUCCESS** across all 3 jobs (Total duration: 3 minutes 7 seconds):
+  - `python-tests`: **PASS** (1m 57s, ID `132870678897`)
+  - `frontend-validation`: **PASS** (1m 23s, ID `132870679207`)
+  - `artifacts-validation`: **PASS** (1m 3s, ID `132871277342`)
+
+#### Verified Remote Test Counts & Integrity Assertions:
+| Validation Item | Remote Verified Count | Result |
+|---|:---:|:---:|
+| Python lab unit & regression tests | 838 / 838 | **PASS** |
+| Python integration tests | 93 / 93 | **PASS** |
+| Frontend unit tests (`historical-evidence.test.mjs`) | 31 / 31 | **PASS** |
+| **Total Unique Automated Tests** | **962 / 962** | **PASS (100%)** |
+| Historical campaign checksums (`historical_integrity_before.sha256`) | 705 / 705 | **PASS** |
+| Frontend distribution smoke checks | 16 / 16 | **PASS** |
+| Genuine Chromium browser acceptance stages | 14 / 14 | **PASS** |
+| Genuine Chromium browser assertions | 242 / 242 | **PASS** |
+| Pinned TShark package verification (`tshark=4.2.2-1.1build3`) | Exact version match via `dpkg-query` | **PASS** |
+
+#### Submission PDF Artifacts Generated & Uploaded:
+- **GitHub Artifact Name**: `ps028-submission-artifacts`
+- **Artifact ID**: `14169134466`
+- **Archive Size**: 681,076 bytes
+- **SHA-256 Digest**: `a15ac6456c6516245f7989aa0b4e9698eae07b9edb17727f52ab787f27e1d466`
+- **Expiry Date**: `2027-02-13T16:04:45Z`
+- **Artifact Contents**:
+  - `PS028_Hackathon_Submission_Presentation.pdf`: 207,985 bytes, exactly 11 pages (100% byte-identical to local build).
+  - `PS028 Detailed Analysis & Report PDF.pdf`: 463,831 bytes, exactly 22 pages.
+  - `lab/derived/phase-c/technical_report.html`: 393,960 bytes.
+  - `lab/derived/phase-c/presentation_deck.html`: 31,642 bytes.
+
+#### Forensic Analysis of the 33-Byte PDF Size Difference:
+- **Tracked Local PDF**: 463,864 bytes (`PS028 Detailed Analysis & Report PDF.pdf`, SHA-256: `d857fd7641c69bc7eb669bce2d53e4c89df89563c0ec6cff495c1bbf73b9aba7`).
+- **CI-Generated PDF**: 463,831 bytes (SHA-256: `daa702caca886909bfc5eceb73e0e99f392cf730a8b97c346d781b99d70ce8c0`).
+- **Exact Delta**: $463,864 - 463,831 = 33\text{ bytes}$.
+- **Root-Cause Verification**: Detailed object inspection reveals that exactly 11 link annotation objects (Objects 85, 90, 91, 92, 106, 111, 112, 115, 116, 121, 122) contain `/URI (file://...)` annotations linking to absolute workspace file paths. The local runner path prefix `/home/promotheshchatterjee/projects/A3-PS028-TC224` (50 characters) is exactly 3 characters longer than the GitHub Actions runner path prefix `/home/runner/work/A3-PS028-TC224/A3-PS028-TC224` (47 characters). Over 11 link objects, $11 \times 3 = 33\text{ bytes}$.
+- **Content Stream Verification**: Decompression with `zlib` confirms that all 52/52 decompressed content streams in the PDF are **100% byte-identical** between local and CI builds. Both documents have 22 pages, identical text, headings, tables, equations, styling, and visual layout.
+
+#### Scientific Evidence Boundaries in CI Documentation:
+- The Python CI log line `S5 PASSED: SYN packet count=50 ... dropped packets=24 ... observed loss=48.0%` originates from synthetic unit test fixture `test_verify_s5_syn_loss_variation_success` in `lab/test_self_test_scenarios.py`, where `measure_syn_loss()` is mocked with predetermined values.
+- This test verifies software harness unit logic and tolerance checks, NOT a live network socket measurement.
+- The CI run provides software reproducibility evidence, not new empirical S5 measurement data. Authentic S5 evidence remains the historical campaign `ps028-a10-live-20261030-01`.
+
+### 7.7 Final Compliance Matrix Summary
 
 - **Total Tracked Requirements**: 20
-- **MET**: **16 (80.0%)** — All 15 Core Problem Statement Requirements Met (#1–#15) + Ownership Transfer (#18).
-- **PARTIAL**: **3 (15.0%)** — #16 (Uniform netem live sweep; live research excluded by owner decision), #17 (Live S5 binomial batch; simulation verified), and #19 (Offline test suite validated; remote CI execution pending on GitHub).
-- **PENDING**: **1 (5.0%)** — #20 (Partner replication package authored; scheduled as final separate milestone).
+- **MET**: **17 (85.0%)** — All 15 Core Problem Statement Requirements Met (#1–#15), Ownership Transfer (#18), and Remote CI Verification (#19).
+- **PARTIAL**: **2 (10.0%)** — #16 (Uniform netem live sweep; live research excluded by owner decision) and #17 (Live S5 binomial batch; live research excluded by owner decision; simulation verified).
+- **PENDING**: **1 (5.0%)** — #20 (Independent partner replication package authored; scheduled as final separate milestone).

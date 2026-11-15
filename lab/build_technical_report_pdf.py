@@ -37,6 +37,87 @@ AUTO_RENDER_JS = KATEX_DIR / "auto-render.min.js"
 MIN_REQUIRED_PAGES = 18
 MIN_REQUIRED_BYTES = 400_000
 
+VERIFIED_COMMIT_SHA = "afceefb759627f1a1d6bc1a2ba4c1970d0f89656"
+GITHUB_REPO_BLOB_BASE = "https://github.com/aiori-hackathon/A3-PS028-TC224/blob"
+
+
+def get_verified_commit_sha(repo_root: Optional[Path] = None) -> str:
+    """Retrieves verified git commit SHA or defaults to authoritative record."""
+    root = repo_root or REPO_ROOT
+    try:
+        res = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=5,
+        )
+        sha = res.stdout.strip()
+        if len(sha) == 40 and all(c in "0123456789abcdefABCDEF" for c in sha):
+            return sha.lower()
+    except Exception:
+        pass
+    return VERIFIED_COMMIT_SHA
+
+
+def resolve_portable_hyperlinks(
+    html_text: str,
+    source_md_path: Path,
+    repo_root: Path,
+    commit_sha: Optional[str] = None,
+) -> str:
+    """
+    Converts relative repository file links into stable, portable GitHub URLs
+    anchored to the verified commit SHA. If a relative link cannot be resolved to a
+    genuine repository file or directory, the clickable <a> tag is stripped,
+    preserving the visible text without generating a broken or misleading link.
+    """
+    sha = commit_sha or get_verified_commit_sha(repo_root)
+    source_dir = source_md_path.parent.resolve()
+    repo_root_res = repo_root.resolve()
+
+    def link_replacer(match: re.Match) -> str:
+        attrs_before = match.group(1)
+        href = match.group(2)
+        attrs_after = match.group(3)
+        inner_content = match.group(4)
+
+        # Preserve TOC/section anchors and external protocols
+        if (
+            href.startswith("#")
+            or href.startswith("http://")
+            or href.startswith("https://")
+            or href.startswith("mailto:")
+        ):
+            return match.group(0)
+
+        # Clean query parameters or fragment identifiers
+        clean_target = href.split("?")[0].split("#")[0]
+        # Strip file:// prefix if present
+        if clean_target.startswith("file://"):
+            clean_target = clean_target[7:]
+
+        # Resolve target path relative to source markdown directory
+        target_path = (source_dir / clean_target).resolve()
+        try:
+            rel_to_repo = target_path.relative_to(repo_root_res).as_posix()
+            if target_path.exists():
+                portable_url = f"{GITHUB_REPO_BLOB_BASE}/{sha}/{rel_to_repo}"
+                return f'<a{attrs_before}href="{portable_url}"{attrs_after}>{inner_content}</a>'
+        except ValueError:
+            pass
+
+        # Target does not exist in repository: retain visible text without misleading link
+        return inner_content
+
+    # Match <a ... href="..." ...>content</a>
+    pattern = re.compile(
+        r'<a([^>]*?)\s+href="([^"]+)"([^>]*?)>(.*?)</a>',
+        re.DOTALL | re.IGNORECASE,
+    )
+    return pattern.sub(link_replacer, html_text)
+
 
 def find_browser_executable() -> Optional[str]:
     """Detects available Google Chrome or Chromium binary."""
@@ -106,6 +187,9 @@ def convert_markdown_to_html(source_md_path: Path) -> Tuple[str, str, str]:
     # Step 4: restore math blocks after markdown rendering so LaTeX notation remains exact
     for idx, orig_math in enumerate(math_blocks):
         rendered_body = rendered_body.replace(f"@@MATH_BLOCK_{idx}_PROTECT@@", orig_math)
+
+    # Step 5: resolve portable hyperlinks anchored to verified commit SHA
+    rendered_body = resolve_portable_hyperlinks(rendered_body, source_md_path, REPO_ROOT)
 
     # Process H2 and H3 headings for IDs and TOC
     toc_items: List[Tuple[int, str, str]] = []
