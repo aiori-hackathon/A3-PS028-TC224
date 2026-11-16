@@ -1,10 +1,19 @@
 # PS-028 Non-Interactive Sudoers Configuration Specification
 
-- **Document Version**: 1.0.0
+- **Document Version**: 2.0.0
 - **Governing Milestone**: Milestone 4: Batch C5 (S5 Privilege Isolation & DNS Robustness)
 - **Problem Statement**: AIORI PS-028 Happy Eyeballs Measurement Lab
 - **Target File on Host**: `/etc/sudoers.d/ps028-helper`
 - **Security Policy**: Non-negotiable Rule R11 (Strict Host Safety & Least Privilege)
+
+---
+
+## Deployment Status & Authority Boundary
+
+| Parameter | Specification Status |
+|---|---|
+| **Intended Deployment Configuration** | Target path: `/etc/sudoers.d/ps028-helper`<br>Intended Owner: `root:root`<br>Intended Mode: `0440`<br>Executable Target: `/usr/local/libexec/ps028/privileged_helper.py`<br>Flags: `!setenv`, `secure_path` sanitization, strict action token formatting<br>Validation Tool: `visudo -c -f /etc/sudoers.d/ps028-helper` |
+| **Actual Host Deployment Status** | **NOT INSTALLED / NOT INDEPENDENTLY VERIFIED ON CURRENT HOST**<br>Host installation is explicitly **PROHIBITED** during automated CI, evaluation, and audit tasks (Rule R11). No claim is made that the host currently has this rule installed. Testing is performed via `./lab/deploy_privileged_helper.sh --dry-run` and unprivileged fixtures only. |
 
 ---
 
@@ -49,39 +58,45 @@ Create the file `/etc/sudoers.d/ps028-helper` with permissions `0440` (read-only
 # User alias for PS-028 lab operator (replace with actual operating user if different)
 User_Alias PS028_OPERATOR = promotheshchatterjee
 
-# Explicit allowlist for lab/privileged_helper.py actions
-PS028_OPERATOR ALL=(root) NOPASSWD: /usr/bin/python3 <repo_root>/lab/privileged_helper.py apply-scenario *
-PS028_OPERATOR ALL=(root) NOPASSWD: /usr/bin/python3 <repo_root>/lab/privileged_helper.py restore-baseline *
-PS028_OPERATOR ALL=(root) NOPASSWD: /usr/bin/python3 <repo_root>/lab/privileged_helper.py apply-dns *
-PS028_OPERATOR ALL=(root) NOPASSWD: /usr/bin/python3 <repo_root>/lab/privileged_helper.py restore-dns *
-PS028_OPERATOR ALL=(root) NOPASSWD: /usr/bin/python3 <repo_root>/lab/privileged_helper.py verify-baseline *
-PS028_OPERATOR ALL=(root) NOPASSWD: /usr/bin/python3 <repo_root>/lab/privileged_helper.py start-capture *
-PS028_OPERATOR ALL=(root) NOPASSWD: /usr/bin/python3 <repo_root>/lab/privileged_helper.py stop-capture *
-PS028_OPERATOR ALL=(root) NOPASSWD: /usr/bin/python3 <repo_root>/lab/privileged_helper.py check-auth
-PS028_OPERATOR ALL=(root) NOPASSWD: /usr/bin/python3 <repo_root>/lab/privileged_helper.py setup-s5-counters *
-PS028_OPERATOR ALL=(root) NOPASSWD: /usr/bin/python3 <repo_root>/lab/privileged_helper.py read-s5-counters *
-PS028_OPERATOR ALL=(root) NOPASSWD: /usr/bin/python3 <repo_root>/lab/privileged_helper.py measure-s5 *
-PS028_OPERATOR ALL=(root) NOPASSWD: /usr/bin/python3 <repo_root>/lab/privileged_helper.py launch-snap-browser *
+# Hardened trusted deployment location: /usr/local/libexec/ps028/
+# Eliminates execution of unprivileged, user-writable repository code as root.
+# Python is executed in isolated mode (-I) to prevent PYTHONPATH or CWD poisoning.
+PS028_OPERATOR ALL=(root) NOPASSWD: /usr/bin/python3 -I /usr/local/libexec/ps028/privileged_helper.py apply-scenario *
+PS028_OPERATOR ALL=(root) NOPASSWD: /usr/bin/python3 -I /usr/local/libexec/ps028/privileged_helper.py restore-baseline *
+PS028_OPERATOR ALL=(root) NOPASSWD: /usr/bin/python3 -I /usr/local/libexec/ps028/privileged_helper.py apply-dns *
+PS028_OPERATOR ALL=(root) NOPASSWD: /usr/bin/python3 -I /usr/local/libexec/ps028/privileged_helper.py restore-dns *
+PS028_OPERATOR ALL=(root) NOPASSWD: /usr/bin/python3 -I /usr/local/libexec/ps028/privileged_helper.py verify-baseline *
+PS028_OPERATOR ALL=(root) NOPASSWD: /usr/bin/python3 -I /usr/local/libexec/ps028/privileged_helper.py start-capture *
+PS028_OPERATOR ALL=(root) NOPASSWD: /usr/bin/python3 -I /usr/local/libexec/ps028/privileged_helper.py stop-capture *
+PS028_OPERATOR ALL=(root) NOPASSWD: /usr/bin/python3 -I /usr/local/libexec/ps028/privileged_helper.py check-auth
+PS028_OPERATOR ALL=(root) NOPASSWD: /usr/bin/python3 -I /usr/local/libexec/ps028/privileged_helper.py setup-s5-counters *
+PS028_OPERATOR ALL=(root) NOPASSWD: /usr/bin/python3 -I /usr/local/libexec/ps028/privileged_helper.py read-s5-counters *
+PS028_OPERATOR ALL=(root) NOPASSWD: /usr/bin/python3 -I /usr/local/libexec/ps028/privileged_helper.py measure-s5 *
+PS028_OPERATOR ALL=(root) NOPASSWD: /usr/bin/python3 -I /usr/local/libexec/ps028/privileged_helper.py launch-snap-browser *
+PS028_OPERATOR ALL=(root) NOPASSWD: /usr/bin/python3 -I /usr/local/libexec/ps028/privileged_helper.py start-nginx *
+PS028_OPERATOR ALL=(root) NOPASSWD: /usr/bin/python3 -I /usr/local/libexec/ps028/privileged_helper.py stop-nginx *
 ```
 
 ### Parameterized Template for Multi-User or Alternative Environments
 
-If the repository is checked out by a different user or into an alternative workspace directory, use the following parameterized template:
+If the repository is checked out by a different user or into an alternative workspace directory, deploy via `lab/deploy_privileged_helper.sh` or use the following parameterized template:
 
 ```sudoers
-# Template variables: %USER%, %PYTHON_BIN%, %REPO_ROOT%
-%USER% ALL=(root) NOPASSWD: %PYTHON_BIN% %REPO_ROOT%/lab/privileged_helper.py apply-scenario *
-%USER% ALL=(root) NOPASSWD: %PYTHON_BIN% %REPO_ROOT%/lab/privileged_helper.py restore-baseline *
-%USER% ALL=(root) NOPASSWD: %PYTHON_BIN% %REPO_ROOT%/lab/privileged_helper.py apply-dns *
-%USER% ALL=(root) NOPASSWD: %PYTHON_BIN% %REPO_ROOT%/lab/privileged_helper.py restore-dns *
-%USER% ALL=(root) NOPASSWD: %PYTHON_BIN% %REPO_ROOT%/lab/privileged_helper.py verify-baseline *
-%USER% ALL=(root) NOPASSWD: %PYTHON_BIN% %REPO_ROOT%/lab/privileged_helper.py start-capture *
-%USER% ALL=(root) NOPASSWD: %PYTHON_BIN% %REPO_ROOT%/lab/privileged_helper.py stop-capture *
-%USER% ALL=(root) NOPASSWD: %PYTHON_BIN% %REPO_ROOT%/lab/privileged_helper.py check-auth
-%USER% ALL=(root) NOPASSWD: %PYTHON_BIN% %REPO_ROOT%/lab/privileged_helper.py setup-s5-counters *
-%USER% ALL=(root) NOPASSWD: %PYTHON_BIN% %REPO_ROOT%/lab/privileged_helper.py read-s5-counters *
-%USER% ALL=(root) NOPASSWD: %PYTHON_BIN% %REPO_ROOT%/lab/privileged_helper.py measure-s5 *
-%USER% ALL=(root) NOPASSWD: %PYTHON_BIN% %REPO_ROOT%/lab/privileged_helper.py launch-snap-browser *
+# Template variables: %USER%, %PYTHON_BIN%, %DEPLOY_ROOT% (e.g. /usr/local/libexec/ps028)
+%USER% ALL=(root) NOPASSWD: %PYTHON_BIN% -I %DEPLOY_ROOT%/privileged_helper.py apply-scenario *
+%USER% ALL=(root) NOPASSWD: %PYTHON_BIN% -I %DEPLOY_ROOT%/privileged_helper.py restore-baseline *
+%USER% ALL=(root) NOPASSWD: %PYTHON_BIN% -I %DEPLOY_ROOT%/privileged_helper.py apply-dns *
+%USER% ALL=(root) NOPASSWD: %PYTHON_BIN% -I %DEPLOY_ROOT%/privileged_helper.py restore-dns *
+%USER% ALL=(root) NOPASSWD: %PYTHON_BIN% -I %DEPLOY_ROOT%/privileged_helper.py verify-baseline *
+%USER% ALL=(root) NOPASSWD: %PYTHON_BIN% -I %DEPLOY_ROOT%/privileged_helper.py start-capture *
+%USER% ALL=(root) NOPASSWD: %PYTHON_BIN% -I %DEPLOY_ROOT%/privileged_helper.py stop-capture *
+%USER% ALL=(root) NOPASSWD: %PYTHON_BIN% -I %DEPLOY_ROOT%/privileged_helper.py check-auth
+%USER% ALL=(root) NOPASSWD: %PYTHON_BIN% -I %DEPLOY_ROOT%/privileged_helper.py setup-s5-counters *
+%USER% ALL=(root) NOPASSWD: %PYTHON_BIN% -I %DEPLOY_ROOT%/privileged_helper.py read-s5-counters *
+%USER% ALL=(root) NOPASSWD: %PYTHON_BIN% -I %DEPLOY_ROOT%/privileged_helper.py measure-s5 *
+%USER% ALL=(root) NOPASSWD: %PYTHON_BIN% -I %DEPLOY_ROOT%/privileged_helper.py launch-snap-browser *
+%USER% ALL=(root) NOPASSWD: %PYTHON_BIN% -I %DEPLOY_ROOT%/privileged_helper.py start-nginx *
+%USER% ALL=(root) NOPASSWD: %PYTHON_BIN% -I %DEPLOY_ROOT%/privileged_helper.py stop-nginx *
 ```
 
 ---

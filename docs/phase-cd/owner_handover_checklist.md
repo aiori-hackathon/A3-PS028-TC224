@@ -22,9 +22,9 @@ The technical preparation on feature branches is fully validated and reproducibl
 
 - [x] **P0 Acceptance Baseline**: Protected tag `ps028-p0-accepted-2026-11-14` verified as ancestor of HEAD at `176f688bacb5858fcc0daedb454200918e427f3f`.
 - [x] **Campaign Integrity**: 705 historical campaign files verified bit-for-bit matched against `historical_integrity_before.sha256`.
-- [x] **Automated Test Suite**: 962 unique automated tests passing locally and remotely (838 lab + 93 integration + 31 frontend; 100% PASS, 0 failures, 0 errors, 0 skips).
+- [x] **Automated Test Suite**: 966 unique automated tests validated in remote CI (842 lab + 93 integration + 31 frontend; 100% PASS, 0 failures, 0 errors, 0 skips); local security and provenance hardenings expanded to 872 lab tests (996 total automated tests).
 - [x] **Separate Quality Gates**: 16 frontend smoke checks and 14-stage / 242-assertion genuine Chromium browser acceptance suite passing.
-- [x] **Remote Continuous Integration**: GitHub Actions CI Run #2 (`43733419747`) succeeded across all 3 jobs (`python-tests`, `frontend-validation`, `artifacts-validation`).
+- [x] **Remote Continuous Integration**: GitHub Actions CI Run #3 ([`43741695912`](https://github.com/aiori-hackathon/A3-PS028-TC224/actions/runs/43741695912), commit `275ebf45eaefc64a40dd02d1f9f5dc9dffb95fe3`) succeeded across all 3 jobs (`python-tests`, `frontend-validation`, `artifacts-validation`) in 2m 8s with 966 tests; preceding Run #2 ([`43733419747`](https://github.com/aiori-hackathon/A3-PS028-TC224/actions/runs/43733419747), 962 tests) preserved.
 - [x] **Submission Artifacts**: Presentation PDF (`PS028_Hackathon_Submission_Presentation.pdf`, 11 pages, 207,985 bytes) and Technical Report PDF (`PS028 Detailed Analysis & Report PDF.pdf`, 22 pages, 463,831 bytes in CI / 463,864 bytes local; 100% stream-matching) generated and verified.
 - [x] **Prototype Replay**: Standalone replay utility operational (`lab/demo_replay.py`) with canonical Happy Eyeballs pseudocode.
 - [x] **Phase D Archival Status**: Phase D empirical live sweeps permanently removed from delivery plan by owner decision; analytical simulation models preserved offline in `lab/derived/phase-d/`. Requirements #16 and #17 remain PARTIAL.
@@ -48,7 +48,7 @@ The following actions require human operator execution. Do not claim portal uplo
 5. **Submit Demonstration Video**:
    - Submit the demonstration video URL (documented in `README.md`: `https://youtu.be/LYngp7dzoRI?si=1mPrapHizazV41zB`).
 6. **Preserve Verified CI Evidence**:
-   - Record the verified GitHub Actions Run #2 URL (`https://github.com/aiori-hackathon/A3-PS028-TC224/actions/runs/43733419747`) and artifact link (`ps028-submission-artifacts`, ID `14169134466`).
+   - Record the verified GitHub Actions Run #3 URL (`https://github.com/aiori-hackathon/A3-PS028-TC224/actions/runs/43741695912`) and artifact link (`ps028-submission-artifacts`, ID `14172830625`), along with preceding Run #2 (`43733419747`).
 7. **Submit Canonical Repository URL**:
    - Submit `https://github.com/aiori-hackathon/A3-PS028-TC224` as the canonical repository after the final merge to `main`.
 

@@ -539,7 +539,8 @@ class TestEvidenceSeparationRigor(unittest.TestCase):
             output_jsonl=jsonl_path,
             caller_holds_lock=True,
             lock_file=self.lock_file,
-            in_netns=True
+            in_netns=True,
+            allow_loopback=True
         )
 
         self.assertEqual(summary["status"], "OK")
@@ -588,6 +589,31 @@ class TestEvidenceSeparationRigor(unittest.TestCase):
             # 4. Outcome validation
             self.assertIn(record["connect_outcome"], ["CONNECTED", "TIMEOUT", "REFUSED", "ERROR"])
             self.assertEqual(record["connect_outcome"], record["outcome"])
+
+    def test_production_path_rejects_loopback_endpoints(self):
+        """TC-SEC-C5-01: Confirms production measurement path strictly rejects loopback endpoints without explicit allow_loopback=True."""
+        jsonl_path = self.temp_dir / "loopback_reject.jsonl"
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+            priv_helper.measure_s5_privileged(
+                target_ip="127.0.0.1",
+                output_jsonl=jsonl_path,
+                caller_holds_lock=True,
+                lock_file=self.lock_file,
+                in_netns=True
+                # allow_loopback omitted (defaults to False)
+            )
+        self.assertIn("not an authorized ps-028 endpoint", str(ctx.exception).lower())
+
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx6:
+            priv_helper.measure_s5_privileged(
+                target_ip="::1",
+                output_jsonl=jsonl_path,
+                caller_holds_lock=True,
+                lock_file=self.lock_file,
+                in_netns=True
+                # allow_loopback omitted (defaults to False)
+            )
+        self.assertIn("not an authorized ps-028 endpoint", str(ctx6.exception).lower())
 
     def test_non_conflation_between_socket_outcomes_and_router_counters(self):
         """

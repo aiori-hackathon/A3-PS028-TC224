@@ -683,8 +683,8 @@ def generate_presentation_html(m: Dict[str, Any]) -> str:
         <div class="block-title">Decoupled Dual-Leg Testbed Topology</div>
         <div class="content-text">
           Traditional dual-stack testbeds often share router-to-server links, causing IPv6 netem delays or loss to inadvertently corrupt IPv4 queues. PS-028 implements dedicated virtual interfaces:
-          <br>• <code>ps028-rt-sv4</code>: Dedicated IPv4 transport (10.0.24.0/24)
-          <br>• <code>ps028-rt-sv6</code>: Dedicated IPv6 transport (fd00:28:4::/64)
+          <br>• <code>ps028-rt-sv4</code>: Dedicated IPv4 transport (10.0.2.0/24)
+          <br>• <code>ps028-rt-sv6</code>: Dedicated IPv6 transport (2001:db8:2::/64)
           <br>Zero cross-talk ensures completely independent impairment matrices.
         </div>
       </div>

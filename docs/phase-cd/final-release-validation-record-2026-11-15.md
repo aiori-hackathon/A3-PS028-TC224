@@ -10,7 +10,7 @@
 - **Historical Derivation Branch**: `regional/ps028-phase-cd`
 - **Protected P0 Acceptance Tag**: `ps028-p0-accepted-2026-11-14` (commit `176f688bacb5858fcc0daedb454200918e427f3f`)
 - **Repository**: `https://github.com/aiori-hackathon/A3-PS028-TC224.git`
-- **Problem Statement Compliance Status**: **17 MET, 2 PARTIAL, 1 PENDING** (17/20 Met; 15/15 Core Problem Statement Requirements Met; Remote CI Run #2 Verified)
+- **Problem Statement Compliance Status**: **17 MET, 2 PARTIAL, 1 PENDING** (17/20 Met; 15/15 Core Problem Statement Requirements Met; Remote CI Run #3 Verified)
 
 ---
 
@@ -343,9 +343,45 @@ Additional validation was executed successfully:
 - This test verifies software harness unit logic and tolerance checks, NOT a live network socket measurement.
 - The CI run provides software reproducibility evidence, not new empirical S5 measurement data. Authentic S5 evidence remains the historical campaign `ps028-a10-live-20261030-01`.
 
-### 7.7 Final Compliance Matrix Summary
+### 7.7 Remote GitHub Actions Run #3 Verification Record (Current Verified CI Baseline)
+
+- **Authoritative Remote CI Run**: Run ID [`43741695912`](https://github.com/aiori-hackathon/A3-PS028-TC224/actions/runs/43741695912)
+- **Run URL**: `https://github.com/aiori-hackathon/A3-PS028-TC224/actions/runs/43741695912`
+- **Workflow**: `PS-028 Continuous Integration` (`.github/workflows/ci.yml`)
+- **Triggering Commit**: `275ebf45eaefc64a40dd02d1f9f5dc9dffb95fe3` on `fix/phase-e-bundle-timeline-mapping`
+- **Run Outcome**: **SUCCESS** across all 3 jobs (Total duration: 2 minutes 8 seconds):
+  - `python-tests`: **PASS** (1m 11s, ID `132896001550`)
+  - `frontend-validation`: **PASS** (1m 18s, ID `132896001799`)
+  - `artifacts-validation`: **PASS** (1m 3s, ID `132896434440`)
+
+#### Verified Remote Test Counts & Integrity Assertions:
+| Validation Item | Remote Verified Count | Result |
+|---|:---:|:---:|
+| Python lab unit & regression tests | 842 / 842 | **PASS** |
+| Python integration tests | 93 / 93 | **PASS** |
+| Frontend unit tests (`historical-evidence.test.mjs`) | 31 / 31 | **PASS** |
+| **Total Unique Automated Tests** | **966 / 966** | **PASS (100%)** |
+| Historical campaign checksums (`historical_integrity_before.sha256`) | 705 / 705 | **PASS** |
+| Frontend distribution smoke checks | 16 / 16 | **PASS** |
+| Genuine Chromium browser acceptance stages | 14 / 14 | **PASS** |
+| Genuine Chromium browser assertions | 242 / 242 | **PASS** |
+| Pinned TShark package verification (`tshark=4.2.2-1.1build3`) | Exact version match via `dpkg-query` | **PASS** |
+
+#### Submission PDF Artifacts Generated & Uploaded:
+- **GitHub Artifact Name**: `ps028-submission-artifacts`
+- **Artifact ID**: `14172830625`
+- **Archive Size**: 681,255 bytes
+- **SHA-256 Digest**: `ee16f8048be0511fd576ac327cc0367d84563e82869d9f140e75356b6ae9c333`
+- **Expiry Date**: `2027-02-13T20:47:00Z`
+- **Artifact Contents**:
+  - `PS028_Hackathon_Submission_Presentation.pdf`: 207,985 bytes, exactly 11 pages.
+  - `PS028 Detailed Analysis & Report PDF.pdf`: 463,831 bytes, exactly 22 pages.
+  - `lab/derived/phase-c/technical_report.html`: 393,960 bytes.
+  - `lab/derived/phase-c/presentation_deck.html`: 31,642 bytes.
+
+### 7.8 Final Compliance Matrix Summary
 
 - **Total Tracked Requirements**: 20
 - **MET**: **17 (85.0%)** — All 15 Core Problem Statement Requirements Met (#1–#15), Ownership Transfer (#18), and Remote CI Verification (#19).
-- **PARTIAL**: **2 (10.0%)** — #16 (Uniform netem live sweep; live research excluded by owner decision) and #17 (Live S5 binomial batch; live research excluded by owner decision; simulation verified).
+- **PARTIAL**: **2 (10.0%)** — #16 (Uniform netem live sweep; REMOVED FROM CURRENT DELIVERY PLAN BY OWNER DECISION; analytical simulation models verified) and #17 (Live S5 binomial batch; REMOVED FROM CURRENT DELIVERY PLAN BY OWNER DECISION; simulation verified).
 - **PENDING**: **1 (5.0%)** — #20 (Independent partner replication package authored; scheduled as final separate milestone).

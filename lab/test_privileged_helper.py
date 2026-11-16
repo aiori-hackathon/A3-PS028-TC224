@@ -38,6 +38,7 @@ import os
 from pathlib import Path
 import pwd
 import shutil
+import stat
 import signal
 import struct
 import subprocess
@@ -1424,7 +1425,8 @@ class TestCaptureLifecycleAndSafety(unittest.TestCase):
                 output_pcap=self.pcap_file,
                 log_file=self.log_file,
                 netns="ps028-cl",
-                owner_user="capture_test_user"
+                owner_user="capture_test_user",
+                is_test_fixture=True
             )
         cmd_called = mock_popen.call_args[0][0]
         self.assertIn("-Z", cmd_called)
@@ -1433,6 +1435,10 @@ class TestCaptureLifecycleAndSafety(unittest.TestCase):
         self.assertIn("8192", cmd_called)
         self.assertIn("ps028-cl-rt", cmd_called)
         self.assertIn(priv_helper.DEFAULT_BPF_FILTER, cmd_called)
+        self.assertIn("-w", cmd_called)
+        self.assertIn("-", cmd_called)
+        # Standard output passed to child is an open descriptor, not DEVNULL
+        self.assertIsNotNone(mock_popen.call_args[1].get("stdout"))
         # Detached capture command must NOT contain sudo
         self.assertNotIn("sudo", cmd_called)
         self.assertTrue(mock_popen.call_args[1].get("start_new_session"))
@@ -1463,7 +1469,8 @@ class TestCaptureLifecycleAndSafety(unittest.TestCase):
                 interface="any",
                 bpf_filter="port 80",
                 buffer_size_kb=4096,
-                owner_user="capture_test_user"
+                owner_user="capture_test_user",
+                is_test_fixture=True
             )
         cmd_called = mock_popen.call_args[0][0]
         self.assertIn("-B", cmd_called)
@@ -1531,7 +1538,8 @@ class TestCaptureLifecycleAndSafety(unittest.TestCase):
                 output_pcap=self.pcap_file,
                 log_file=self.log_file,
                 netns="ps028-cl",
-                owner_user="capture_test_user"
+                owner_user="capture_test_user",
+                is_test_fixture=True
             )
 
         # Must be a dict and must NOT contain _proc or any Popen object
@@ -1585,7 +1593,8 @@ class TestCaptureLifecycleAndSafety(unittest.TestCase):
                 output_pcap=self.pcap_file,
                 log_file=self.log_file,
                 netns="ps028-cl",
-                owner_user="capture_test_user"
+                owner_user="capture_test_user",
+                is_test_fixture=True
             )
             pid_file = self.pcap_file.with_suffix(".pid")
             self.assertTrue(pid_file.is_file())
@@ -1611,7 +1620,8 @@ class TestCaptureLifecycleAndSafety(unittest.TestCase):
                         pid=deserialized_handle["parent_pid"],
                         pcap_path=Path(deserialized_handle["pcap_path"]),
                         timeout=1.0,
-                        verify_pcap=True
+                        verify_pcap=True,
+                        is_test_fixture=True
                     )
 
             self.assertEqual(stop_res["status"], "OK")
@@ -1644,7 +1654,8 @@ class TestCaptureLifecycleAndSafety(unittest.TestCase):
                     output_pcap=self.pcap_file,
                     log_file=self.log_file,
                     netns="ps028-cl",
-                    readiness_timeout=0.1
+                    readiness_timeout=0.1,
+                    is_test_fixture=True
                 )
             self.assertIn("timed out waiting for readiness", str(ctx.exception))
             # Verify termination and reaping
@@ -1674,7 +1685,8 @@ class TestCaptureLifecycleAndSafety(unittest.TestCase):
                 output_pcap=self.pcap_file,
                 log_file=self.log_file,
                 netns="ps028-cl",
-                readiness_timeout=0.2
+                readiness_timeout=0.2,
+                is_test_fixture=True
             )
         self.assertIn("terminated prematurely with code 1", str(ctx.exception))
         pid_file = self.pcap_file.with_suffix(".pid")
@@ -1705,7 +1717,8 @@ class TestCaptureLifecycleAndSafety(unittest.TestCase):
                     priv_helper.start_capture_privileged(
                         output_pcap=self.pcap_file,
                         log_file=self.log_file,
-                        netns="ps028-cl"
+                        netns="ps028-cl",
+                        is_test_fixture=True
                     )
                 self.assertIn("Capture startup failed", str(ctx.exception))
                 mock_proc.wait.assert_called()
@@ -2546,7 +2559,8 @@ class TestPrivilegedHelperS5Commands(unittest.TestCase):
                     output_jsonl=jsonl_path,
                     caller_holds_lock=False,
                     lock_file=temp_dir / "test.lock",
-                    in_netns=True
+                    in_netns=True,
+                    allow_loopback=True
                 )
                 self.assertEqual(res["status"], "OK")
                 self.assertEqual(res["probes_sent"], 10)
@@ -2560,6 +2574,1151 @@ class TestPrivilegedHelperS5Commands(unittest.TestCase):
                 self.assertIn("duration_ms", records[0])
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+class TestPrivilegedHelperSecurityHardenings(unittest.TestCase):
+    """
+    Task P1 Security Regression Test Suite:
+    Validates strict privilege boundaries, filesystem path confinement,
+    network input validation, namespace verification, and sys.path sanitization.
+    """
+
+    def setUp(self):
+        self.temp_dir = Path(tempfile.mkdtemp(prefix="ps028_sec_test_"))
+        self.test_file = self.temp_dir / "safe_output.txt"
+        self.test_file.write_text("safe content\n", encoding="utf-8")
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    # --------------------------------------------------------------------------
+    # 1. Filesystem Path Confinement Tests
+    # --------------------------------------------------------------------------
+
+    def test_path_confinement_rejects_absolute_path_outside_approved_roots(self):
+        """TC-SEC-PATH-01: Rejects absolute paths outside approved directories."""
+        for forbidden in ["/etc/shadow", "/etc/sudoers", "/var/log/syslog", "/root/.bashrc"]:
+            with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+                priv_helper.validate_secure_path(forbidden, param_name="test_param")
+            self.assertIn("outside approved directories", str(ctx.exception))
+
+    def test_path_confinement_rejects_directory_traversal(self):
+        """TC-SEC-PATH-02: Rejects ../ path traversal escaping allowed roots."""
+        traversal = self.temp_dir / ".." / ".." / "etc" / "shadow"
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+            priv_helper.validate_secure_path(traversal, param_name="traversal_param")
+        self.assertIn("outside approved directories", str(ctx.exception))
+
+    def test_path_confinement_rejects_final_component_symlink(self):
+        """TC-SEC-PATH-03: Rejects target path when final component is a symlink."""
+        symlink_target = self.temp_dir / "symlink_file.pcap"
+        symlink_target.symlink_to(self.test_file)
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+            priv_helper.validate_secure_path(symlink_target, param_name="pcap_file", allow_symlinks=False)
+        self.assertIn("symlinks are not permitted", str(ctx.exception))
+
+    def test_path_confinement_rejects_parent_directory_symlink_escape(self):
+        """TC-SEC-PATH-04: Rejects path where parent directory is a symlink escaping approved roots."""
+        evil_parent = self.temp_dir / "evil_dir"
+        evil_parent.symlink_to(Path("/etc"))
+        evil_file = evil_parent / "passwd"
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+            priv_helper.validate_secure_path(evil_file, param_name="conf_file", allow_symlinks=False)
+        self.assertTrue(
+            "outside approved directories" in str(ctx.exception) or
+            "symlink escaping approved roots" in str(ctx.exception)
+        )
+
+    def test_chown_refuses_symlink(self):
+        """TC-SEC-CHOWN-01: _chown_file refuses to operate on symlinks (TOCTOU protection)."""
+        symlink_p = self.temp_dir / "symlink_to_chown"
+        symlink_p.symlink_to(self.test_file)
+        with patch("os.geteuid", return_value=0):
+            with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+                priv_helper._chown_file(symlink_p, "promotheshchatterjee")
+            self.assertIn("refusing to chown symlink target", str(ctx.exception))
+
+    def test_chown_refuses_root_uid_or_gid_0(self):
+        """TC-SEC-CHOWN-02: _chown_file refuses to chown to root UID 0 or GID 0."""
+        with patch("os.geteuid", return_value=0):
+            with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+                priv_helper._chown_file(self.test_file, "root")
+            self.assertIn("refusing to chown to root UID 0", str(ctx.exception))
+
+            with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+                priv_helper._chown_file(self.test_file, "promotheshchatterjee", group=0)
+            self.assertIn("refusing to chown to privileged group", str(ctx.exception))
+
+    def test_unapproved_dns_config_file_rejected(self):
+        """TC-SEC-DNS-01: apply_dns_delays rejects unapproved config_file path."""
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+            priv_helper.apply_dns_delays_privileged(
+                a_delay_ms=0,
+                aaaa_delay_ms=0,
+                config_file=Path("/etc/resolv.conf")
+            )
+        self.assertIn("outside approved directories", str(ctx.exception))
+
+    def test_unapproved_dns_backup_destination_rejected(self):
+        """TC-SEC-DNS-02: apply_dns_delays rejects unapproved backup destinations and extensions."""
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+            priv_helper.apply_dns_delays_privileged(
+                a_delay_ms=0,
+                aaaa_delay_ms=0,
+                backup_file_a3=Path("/etc/cron.d/evil.bak")
+            )
+        self.assertIn("outside approved directories", str(ctx.exception))
+
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+            priv_helper.apply_dns_delays_privileged(
+                a_delay_ms=0,
+                aaaa_delay_ms=0,
+                backup_file_a3=Path("/etc/cron.d/evil")
+            )
+        self.assertIn("invalid extension", str(ctx.exception))
+
+    # --------------------------------------------------------------------------
+    # 2. Network Input & S5 Validation Tests
+    # --------------------------------------------------------------------------
+
+    def test_s5_malformed_ipv4_and_ipv6_addresses_rejected(self):
+        """TC-SEC-NET-01: validate_ip_endpoint rejects syntactically malformed IPs."""
+        for malformed in ["999.999.999.999", "2001:db8:::1", "not_an_ip", "", "  ", "::ffff:999.999.999.999"]:
+            with self.assertRaises(priv_helper.PrivilegedHelperError):
+                priv_helper.validate_ip_endpoint(
+                    malformed,
+                    param_name="test_ip",
+                    allowed_ips=priv_helper.ALLOWED_PS028_TARGET_IPS
+                )
+
+    def test_s5_family_mismatch_rejected(self):
+        """TC-SEC-NET-02: validate_s5_params rejects mixed IPv4 client and IPv6 target."""
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+            priv_helper.validate_s5_params(
+                port=80,
+                client_ip="10.0.1.2",
+                target_ip="2001:db8:2::10"
+            )
+        self.assertIn("Address family mismatch", str(ctx.exception))
+
+    def test_s5_nftables_injection_strings_rejected(self):
+        """TC-SEC-NET-03: validate_ip_endpoint rejects nftables injection strings and shell metachars."""
+        injections = [
+            "2001:db8:2::10; drop",
+            "10.0.2.10\nadd rule inet ps028_impair forward drop",
+            "2001:db8:2::10' OR '1'='1",
+            "10.0.2.10 && cat /etc/shadow",
+            "2001:db8:2::10 $(id)",
+            "10.0.2.10 `whoami`",
+            "2001:db8:2::10 { drop; }",
+        ]
+        for inj in injections:
+            with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+                priv_helper.validate_ip_endpoint(
+                    inj,
+                    param_name="injected_ip",
+                    allowed_ips=priv_helper.ALLOWED_PS028_TARGET_IPS
+                )
+            self.assertTrue(
+                "forbidden injection syntax" in str(ctx.exception) or
+                "Invalid injected_ip" in str(ctx.exception)
+            )
+
+    def test_s5_arbitrary_target_destination_rejected(self):
+        """TC-SEC-NET-04: validate_ip_endpoint rejects valid IPs outside approved PS-028 endpoints."""
+        for arbitrary in ["8.8.8.8", "1.1.1.1", "192.168.1.1", "2606:4700::1111", "2001:4860:4860::8888"]:
+            with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+                priv_helper.validate_ip_endpoint(
+                    arbitrary,
+                    param_name="target_ip",
+                    allowed_ips=priv_helper.ALLOWED_PS028_TARGET_IPS
+                )
+            self.assertIn("not an authorized PS-028 endpoint", str(ctx.exception))
+
+    def test_s5_unallowlisted_interface_or_network_namespace_rejected(self):
+        """TC-SEC-NET-05: validate_s5_params rejects unallowlisted interfaces and namespaces."""
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+            priv_helper.validate_s5_params(port=80, oifname="eth0")
+        self.assertIn("Invalid oifname 'eth0'", str(ctx.exception))
+
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+            priv_helper.validate_s5_params(port=80, netns="host")
+        self.assertIn("Invalid netns 'host'", str(ctx.exception))
+
+    def test_s5_interface_family_inconsistency_rejected(self):
+        """TC-SEC-NET-06: validate_s5_params rejects interface inconsistent with IP family."""
+        # IPv6 traffic directed to IPv4 interface
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+            priv_helper.validate_s5_params(
+                port=80,
+                client_ip="2001:db8:1::2",
+                target_ip="2001:db8:2::10",
+                oifname="ps028-rt-sv4"
+            )
+        self.assertIn("invalid for IPv6 traffic", str(ctx.exception))
+
+        # IPv4 traffic directed to IPv6 interface
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+            priv_helper.validate_s5_params(
+                port=80,
+                client_ip="10.0.1.2",
+                target_ip="10.0.2.10",
+                oifname="ps028-rt-sv6"
+            )
+        self.assertIn("invalid for IPv4 traffic", str(ctx.exception))
+
+    # --------------------------------------------------------------------------
+    # 3. Namespace Bypass Prevention Tests
+    # --------------------------------------------------------------------------
+
+    def test_s5_internal_worker_mode_external_invocation_rejected_on_host_namespace(self):
+        """TC-SEC-NS-01: Worker probe execution fails closed when executed on host network namespace."""
+        # If in_netns=True is passed on host without entering ps028-cl, inode verification fails
+        with patch("lab.privileged_helper.verify_current_netns", return_value=False):
+            with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+                priv_helper.measure_s5_privileged(
+                    target_ip="2001:db8:2::10",
+                    in_netns=True
+                )
+            self.assertIn("Network namespace verification failed", str(ctx.exception))
+
+    def test_s5_public_cli_rejects_in_netns_flag(self):
+        """TC-SEC-NS-02: Public measure-s5 subparser does not accept --in-netns flag."""
+        parser = priv_helper.build_parser()
+        with self.assertRaises(SystemExit):
+            parser.parse_args(["measure-s5", "--in-netns", "--target-ip", "2001:db8:2::10"])
+
+    # --------------------------------------------------------------------------
+    # 4. Sys.path Sanitization & Privilege Separation Tests
+    # --------------------------------------------------------------------------
+
+    def test_sanitization_strips_cwd_and_world_writable_sys_path_when_root(self):
+        """TC-SEC-PRIV-01: sanitize_privileged_sys_path strips empty string, CWD, and world-writable paths."""
+        world_writable_dir = self.temp_dir / "world_writable"
+        world_writable_dir.mkdir()
+        world_writable_dir.chmod(0o777)
+
+        original_sys_path = list(sys.path)
+        try:
+            sys.path.insert(0, "")
+            sys.path.insert(1, ".")
+            sys.path.insert(2, str(world_writable_dir))
+
+            with patch("os.geteuid", return_value=0), patch.dict(os.environ, {}, clear=True):
+                priv_helper.sanitize_privileged_sys_path()
+
+            self.assertNotIn("", sys.path)
+            self.assertNotIn(".", sys.path)
+            self.assertNotIn(str(world_writable_dir), sys.path)
+        finally:
+            sys.path[:] = original_sys_path
+
+    def test_capture_owner_rejects_root_or_unauthorized_group(self):
+        """TC-SEC-PRIV-02: _resolve_and_validate_capture_owner rejects root user or GID 0."""
+        # Root user rejection
+        with patch("lab.identity.resolve_invoking_identity") as mock_id:
+            mock_id.return_value = unittest.mock.MagicMock(uid=0, gid=0, username="root")
+            with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+                priv_helper._resolve_and_validate_capture_owner()
+            self.assertIn("capture owner must be an unprivileged user, not root", str(ctx.exception))
+
+        # Root GID 0 rejection
+        with patch("lab.identity.resolve_invoking_identity") as mock_id:
+            mock_id.return_value = unittest.mock.MagicMock(uid=1000, gid=1000, username="testuser")
+            with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+                priv_helper._resolve_and_validate_capture_owner(owner_group=0)
+            self.assertIn("is unauthorized", str(ctx.exception))
+
+    def test_snap_browser_rejects_root_uid_or_gid_0(self):
+        """TC-SEC-PRIV-03: launch_snap_browser_main exits with error if target UID or GID is 0."""
+        mock_args = argparse.Namespace(
+            reuid=0,
+            regid=1000,
+            mounts_file="/proc/mounts",
+            cmd=["/usr/bin/google-chrome"]
+        )
+        with self.assertRaises(SystemExit) as ctx:
+            priv_helper.launch_snap_browser_main(mock_args)
+        self.assertEqual(ctx.exception.code, 74)
+
+    def test_cli_rejects_unknown_subcommand_or_option(self):
+        """TC-SEC-CLI-01: build_parser rejects unknown subcommands or malicious options."""
+        parser = priv_helper.build_parser()
+        with self.assertRaises(SystemExit):
+            parser.parse_args(["nonexistent-subcommand"])
+
+        with self.assertRaises(SystemExit):
+            parser.parse_args(["apply-scenario", "--malicious-option", "exploit"])
+
+    # --------------------------------------------------------------------------
+    # 5. Advanced Security Hardening Regression Tests
+    # --------------------------------------------------------------------------
+
+    def test_is_trusted_sys_path_dir_rejections(self):
+        """TC-SEC-SYS-01: is_trusted_sys_path_dir rejects empty, relative, world/group-writable and non-root paths."""
+        self.assertFalse(priv_helper.is_trusted_sys_path_dir(""))
+        self.assertFalse(priv_helper.is_trusted_sys_path_dir("."))
+        self.assertFalse(priv_helper.is_trusted_sys_path_dir(self.temp_dir / "nonexistent_dir"))
+
+        # World-writable dir
+        ww_dir = self.temp_dir / "world_writable_dir"
+        ww_dir.mkdir()
+        ww_dir.chmod(0o777)
+        self.assertFalse(priv_helper.is_trusted_sys_path_dir(ww_dir))
+
+        # Root simulation checks
+        normal_dir = self.temp_dir / "normal_dir"
+        normal_dir.mkdir()
+        with patch("os.geteuid", return_value=0):
+            # Non-root owned directory rejected when running as root
+            with patch("os.stat") as mock_stat:
+                m_st = unittest.mock.MagicMock()
+                m_st.st_uid = 1000  # non-root
+                m_st.st_mode = 0o755
+                mock_stat.return_value = m_st
+                self.assertFalse(priv_helper.is_trusted_sys_path_dir(normal_dir, allow_repo=False))
+
+    def test_validate_ip_endpoint_topology_and_loopback_isolation(self):
+        """TC-SEC-NET-01: validate_ip_endpoint enforces authentic PS-028 topology and rejects loopback in prod."""
+        # Authentic topology endpoints pass
+        self.assertEqual(str(priv_helper.validate_ip_endpoint("10.0.1.2", "client_ip", priv_helper.ALLOWED_PS028_CLIENT_IPS)), "10.0.1.2")
+        self.assertEqual(str(priv_helper.validate_ip_endpoint("2001:db8:1::2", "client_ip", priv_helper.ALLOWED_PS028_CLIENT_IPS)), "2001:db8:1::2")
+        self.assertEqual(str(priv_helper.validate_ip_endpoint("10.0.2.10", "target_ip", priv_helper.ALLOWED_PS028_TARGET_IPS)), "10.0.2.10")
+        self.assertEqual(str(priv_helper.validate_ip_endpoint("2001:db8:2::10", "target_ip", priv_helper.ALLOWED_PS028_TARGET_IPS)), "2001:db8:2::10")
+
+        # Loopback rejected in production mode
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+            priv_helper.validate_ip_endpoint("127.0.0.1", "target_ip", priv_helper.ALLOWED_PS028_TARGET_IPS, allow_loopback=False)
+        self.assertIn("not an authorized PS-028 endpoint", str(ctx.exception))
+
+        with self.assertRaises(priv_helper.PrivilegedHelperError):
+            priv_helper.validate_ip_endpoint("::1", "target_ip", priv_helper.ALLOWED_PS028_TARGET_IPS, allow_loopback=False)
+
+        # Loopback accepted when allow_loopback=True
+        self.assertEqual(str(priv_helper.validate_ip_endpoint("127.0.0.1", "target_ip", priv_helper.ALLOWED_PS028_TARGET_IPS, allow_loopback=True)), "127.0.0.1")
+        self.assertEqual(str(priv_helper.validate_ip_endpoint("::1", "target_ip", priv_helper.ALLOWED_PS028_TARGET_IPS, allow_loopback=True)), "::1")
+
+        # Typo / arbitrary endpoints strictly rejected
+        with self.assertRaises(priv_helper.PrivilegedHelperError):
+            priv_helper.validate_ip_endpoint("fd00:1::2", "client_ip", priv_helper.ALLOWED_PS028_CLIENT_IPS)
+        with self.assertRaises(priv_helper.PrivilegedHelperError):
+            priv_helper.validate_ip_endpoint("192.168.1.1", "target_ip", priv_helper.ALLOWED_PS028_TARGET_IPS)
+
+    def test_validate_operation_path_extensions_and_traversal(self):
+        """TC-SEC-FS-01: validate_operation_path enforces role-specific extensions and root confinement."""
+        # Valid extensions
+        pcap_p = priv_helper.validate_operation_path(self.temp_dir / "capture.pcap", priv_helper.FileOperationType.PCAP_FILE)
+        self.assertEqual(pcap_p.suffix, ".pcap")
+
+        pid_p = priv_helper.validate_operation_path(self.temp_dir / "test.pid", priv_helper.FileOperationType.PID_FILE)
+        self.assertEqual(pid_p.suffix, ".pid")
+
+        # Invalid extension for PID file
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+            priv_helper.validate_operation_path(self.temp_dir / "exploit.sh", priv_helper.FileOperationType.PID_FILE)
+        self.assertIn("invalid extension for pid_file", str(ctx.exception))
+
+        # Traversal outside approved roots
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+            priv_helper.validate_operation_path("/etc/nginx/nginx.conf", priv_helper.FileOperationType.CONFIG_FILE)
+        self.assertIn("outside approved directories", str(ctx.exception))
+
+    def test_safe_write_pid_file_rejects_symlink_and_hardlink_attacks(self):
+        """TC-SEC-FS-02: safe_write_pid_file rejects symlinks and hardlinks with race resistance."""
+        pid_file = self.temp_dir / "test_safe.pid"
+        priv_helper.safe_write_pid_file(pid_file, "1234:5678\n")
+        self.assertEqual(pid_file.read_text(encoding="utf-8"), "1234:5678\n")
+
+        # Symlink attack test: create symlink pointing to another file
+        sensitive_file = self.temp_dir / "victim.txt"
+        sensitive_file.write_text("precious data\n", encoding="utf-8")
+        symlink_pid = self.temp_dir / "symlink_attack.pid"
+        os.symlink(str(sensitive_file), str(symlink_pid))
+
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+            priv_helper.safe_write_pid_file(symlink_pid, "evil_pid\n")
+        self.assertIn("symlinks are not permitted", str(ctx.exception))
+        # Ensure victim file was untouched
+        self.assertEqual(sensitive_file.read_text(encoding="utf-8"), "precious data\n")
+
+        # Hardlink attack test: link with nlink > 1
+        hardlink_target = self.temp_dir / "hl_target.pid"
+        hardlink_target.write_text("initial\n", encoding="utf-8")
+        hardlink_second = self.temp_dir / "hl_second.pid"
+        os.link(str(hardlink_target), str(hardlink_second))
+        self.assertEqual(os.stat(str(hardlink_target)).st_nlink, 2)
+
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+            priv_helper.safe_write_pid_file(hardlink_target, "overwrite\n")
+        self.assertIn("multiple hard links", str(ctx.exception))
+        # Ensure hardlink files were completely untouched and not truncated
+        self.assertEqual(hardlink_target.read_text(encoding="utf-8"), "initial\n")
+        self.assertEqual(hardlink_second.read_text(encoding="utf-8"), "initial\n")
+
+    def test_safe_atomic_write_text_and_netns_verification(self):
+        """TC-SEC-FS-03: safe_atomic_write_text writes atomically; verify_current_netns verifies dev/ino."""
+        state_file = self.temp_dir / "state.json"
+        priv_helper.safe_atomic_write_text(state_file, '{"state": "OK"}\n', priv_helper.FileOperationType.STATE_FILE)
+        self.assertEqual(json.loads(state_file.read_text(encoding="utf-8")), {"state": "OK"})
+
+        # verify_current_netns returns False on nonexistent netns
+        self.assertFalse(priv_helper.verify_current_netns("nonexistent-netns-9999"))
+        self.assertIsNone(priv_helper.get_netns_inode("nonexistent-netns-9999"))
+
+    def test_start_capture_privileged_rejects_hardlinked_and_symlinked_log_file(self):
+        """TC-SEC-FS-04: start_capture_privileged rejects hardlinked and symlinked log files without truncating."""
+        # 1. Hardlink rejection test
+        hl_log_target = self.temp_dir / "victim_log.txt"
+        hl_log_target.write_text("original log data\n", encoding="utf-8")
+        hl_log_second = self.temp_dir / "victim_log_link.txt"
+        os.link(str(hl_log_target), str(hl_log_second))
+        self.assertEqual(os.stat(str(hl_log_target)).st_nlink, 2)
+
+        pcap_file = self.temp_dir / "test_cap.pcap"
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+            priv_helper.start_capture_privileged(
+                output_pcap=pcap_file,
+                log_file=hl_log_target,
+                netns="ps028-cl"
+            )
+        self.assertIn("hardlink", str(ctx.exception).lower())
+        # Crucial: prove victim log file was NOT truncated prior to validation failure
+        self.assertEqual(hl_log_target.read_text(encoding="utf-8"), "original log data\n")
+        self.assertEqual(hl_log_second.read_text(encoding="utf-8"), "original log data\n")
+
+        # 2. Symlink rejection test
+        sensitive_log = self.temp_dir / "sensitive_file.txt"
+        sensitive_log.write_text("secret diagnostic content\n", encoding="utf-8")
+        symlink_log = self.temp_dir / "symlink_log.txt"
+        os.symlink(str(sensitive_log), str(symlink_log))
+
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+            priv_helper.start_capture_privileged(
+                output_pcap=pcap_file,
+                log_file=symlink_log,
+                netns="ps028-cl"
+            )
+        # Crucial: prove sensitive file destination was NOT touched
+        self.assertEqual(sensitive_log.read_text(encoding="utf-8"), "secret diagnostic content\n")
+
+    def test_safe_atomic_write_text_rejects_hardlink_and_symlink_destinations(self):
+        """TC-SEC-FS-05: safe_atomic_write_text pre-validates target and rejects hardlink/symlink without modifying."""
+        # 1. Hardlink rejection
+        hl_file = self.temp_dir / "hl_state.json"
+        hl_file.write_text('{"preserved": true}\n', encoding="utf-8")
+        hl_second = self.temp_dir / "hl_state_link.json"
+        os.link(str(hl_file), str(hl_second))
+        self.assertEqual(os.stat(str(hl_file)).st_nlink, 2)
+
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+            priv_helper.safe_atomic_write_text(
+                hl_file,
+                '{"malicious": "overwrite"}\n',
+                priv_helper.FileOperationType.STATE_FILE
+            )
+        self.assertIn("multiple hard links", str(ctx.exception))
+        self.assertEqual(hl_file.read_text(encoding="utf-8"), '{"preserved": true}\n')
+        self.assertEqual(hl_second.read_text(encoding="utf-8"), '{"preserved": true}\n')
+
+        # 2. Symlink destination rejection
+        target_file = self.temp_dir / "important_data.json"
+        target_file.write_text('{"crucial": 123}\n', encoding="utf-8")
+        sym_state = self.temp_dir / "sym_target.json"
+        os.symlink(str(target_file), str(sym_state))
+
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+            priv_helper.safe_atomic_write_text(
+                sym_state,
+                '{"pwn": 456}\n',
+                priv_helper.FileOperationType.STATE_FILE
+            )
+        self.assertEqual(target_file.read_text(encoding="utf-8"), '{"crucial": 123}\n')
+
+    def test_verify_privileged_import_closure_integrity(self):
+        """TC-SEC-FS-06: verify_privileged_import_closure enforces strict module permissions and symlink rejection."""
+        # Default closure must pass
+        priv_helper.verify_privileged_import_closure(allow_repo=True)
+
+        # Create temporary mock module in temp directory
+        mock_mod = self.temp_dir / "mock_module.py"
+        mock_mod.write_text("def run(): pass\n", encoding="utf-8")
+
+        import types
+        import sys
+        mod_name = "ps028_mock_test_module"
+        mod_obj = types.ModuleType(mod_name)
+        mod_obj.__file__ = str(mock_mod)
+        sys.modules[mod_name] = mod_obj
+
+        try:
+            # 1. World-writable module rejection
+            mock_mod.chmod(0o666)
+            with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+                priv_helper.verify_privileged_import_closure([mod_name], allow_repo=True)
+            self.assertIn("world-writable", str(ctx.exception))
+
+            # 2. Symlinked module rejection
+            mock_mod.chmod(0o644)
+            sym_mod = self.temp_dir / "sym_mock_module.py"
+            os.symlink(str(mock_mod), str(sym_mod))
+            mod_obj.__file__ = str(sym_mod)
+            with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+                priv_helper.verify_privileged_import_closure([mod_name], allow_repo=True)
+            self.assertIn("symlink", str(ctx.exception))
+        finally:
+            sys.modules.pop(mod_name, None)
+
+    def test_validate_operation_path_role_confinement_boundaries(self):
+        """TC-SEC-FS-07: validate_operation_path enforces role-specific allowed roots."""
+        # PCAP_FILE in /run must be rejected
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+            priv_helper.validate_operation_path("/run/forbidden.pcap", priv_helper.FileOperationType.PCAP_FILE)
+        self.assertIn("outside approved directories", str(ctx.exception))
+
+        # PID_FILE in /run must be accepted
+        pid_p = priv_helper.validate_operation_path("/run/allowed.pid", priv_helper.FileOperationType.PID_FILE)
+        self.assertEqual(str(pid_p), "/run/allowed.pid")
+
+        # CONFIG_FILE in /run must be rejected
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+            priv_helper.validate_operation_path("/run/nginx.conf", priv_helper.FileOperationType.CONFIG_FILE)
+        self.assertIn("outside approved directories", str(ctx.exception))
+
+        # DATA_FILE in /run must be rejected
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+            priv_helper.validate_operation_path("/run/data.jsonl", priv_helper.FileOperationType.DATA_FILE)
+        self.assertIn("outside approved directories", str(ctx.exception))
+
+    def test_validate_secure_path_intermediate_parent_symlink(self):
+        """TC-SEC-FS-08: validate_secure_path rejects intermediate parent directories that are symlinks."""
+        real_parent = self.temp_dir / "real_intermediate"
+        real_parent.mkdir(parents=True, exist_ok=True)
+        sym_parent = self.temp_dir / "sym_intermediate"
+        os.symlink(str(real_parent), str(sym_parent))
+
+        target = sym_parent / "target.txt"
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+            priv_helper.validate_secure_path(target, param_name="intermediate_test", allow_symlinks=False)
+        self.assertIn("parent directory", str(ctx.exception).lower())
+        self.assertIn("symlink", str(ctx.exception).lower())
+
+    def test_isolated_privileged_import_trust_chain(self):
+        """TC-SEC-ISO-01: python3 -I and sanitize_privileged_sys_path prevent shadow module and .pth injection."""
+        with tempfile.TemporaryDirectory() as untrusted_dir:
+            u_path = Path(untrusted_dir)
+            # 1. Plant shadow modules that would raise if loaded
+            (u_path / "yaml.py").write_text("raise RuntimeError('EXPLOIT_SHADOW_YAML')\n", encoding="utf-8")
+            (u_path / "dns.py").write_text("raise RuntimeError('EXPLOIT_SHADOW_DNS')\n", encoding="utf-8")
+            (u_path / "evil.pth").write_text("import sys; sys.path.insert(0, '/exploit')\n", encoding="utf-8")
+
+            # 2. Execute isolated python -I from inside the untrusted directory with malicious PYTHONPATH
+            test_script = self.temp_dir / "verify_isolated.py"
+            test_script.write_text(
+                "import sys, yaml, dns\n"
+                "assert '' not in sys.path\n"
+                "assert '.' not in sys.path\n"
+                "assert 'EXPLOIT_SHADOW_YAML' not in getattr(yaml, '__file__', '')\n"
+                "assert 'EXPLOIT_SHADOW_DNS' not in getattr(dns, '__file__', '')\n"
+                "print('ISOLATED_OK')\n",
+                encoding="utf-8"
+            )
+
+            env = os.environ.copy()
+            env["PYTHONPATH"] = str(u_path)
+            env["PYTHONHOME"] = str(u_path)
+
+            res = subprocess.run(
+                ["python3", "-I", str(test_script)],
+                cwd=str(u_path),
+                env=env,
+                capture_output=True,
+                text=True
+            )
+            self.assertEqual(res.returncode, 0, f"Isolated execution failed: {res.stderr}")
+            self.assertIn("ISOLATED_OK", res.stdout)
+
+        # 3. Test sanitize_privileged_sys_path purging under simulated root EUID 0
+        with patch("os.geteuid", return_value=0), patch.dict(os.environ, {}, clear=True):
+            orig_path = list(sys.path)
+            try:
+                sys.path[:] = ["", ".", "/tmp", "/usr/lib/python3.12", "/usr/lib/python3/dist-packages"]
+                priv_helper.sanitize_privileged_sys_path()
+                self.assertNotIn("", sys.path)
+                self.assertNotIn(".", sys.path)
+                # /tmp is world-writable, so it must be purged
+                self.assertNotIn("/tmp", sys.path)
+                # Trusted root-owned directories remain
+                self.assertIn("/usr/lib/python3.12", sys.path)
+            finally:
+                sys.path[:] = orig_path
+
+    def test_safe_write_pid_file_fifo_and_special_files_rejection(self):
+        """TC-SEC-FS-09: safe_write_pid_file rejects FIFOs, directories, and non-regular files without hanging."""
+        # 1. FIFO named pipe test: must fail closed immediately without hanging
+        fifo_pid = self.temp_dir / "pipe.pid"
+        os.mkfifo(str(fifo_pid))
+        self.assertTrue(os.path.exists(str(fifo_pid)))
+
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+            priv_helper.safe_write_pid_file(fifo_pid, "1234\n")
+        self.assertIn("not a regular file", str(ctx.exception).lower())
+
+        # 2. Directory as PID file target: must fail closed immediately
+        dir_pid = self.temp_dir / "subdir.pid"
+        dir_pid.mkdir()
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+            priv_helper.safe_write_pid_file(dir_pid, "1234\n")
+        self.assertIn("not a regular file", str(ctx.exception).lower())
+
+    def test_safe_write_pid_file_atomic_replacement_preserves_hardlink_victim(self):
+        """TC-SEC-FS-10: safe_write_pid_file atomic replacement refuses hardlink overwrite and preserves victim byte-for-byte."""
+        victim = self.temp_dir / "victim_data.txt"
+        victim_content = "CRITICAL_SECRET_CONTENT_12345\n"
+        victim.write_text(victim_content, encoding="utf-8")
+        orig_stat = victim.stat()
+
+        hl_pid = self.temp_dir / "target_link.pid"
+        os.link(str(victim), str(hl_pid))
+        self.assertEqual(victim.stat().st_nlink, 2)
+        self.assertEqual(hl_pid.stat().st_ino, orig_stat.st_ino)
+
+        # Attempt safe_write_pid_file targeting hardlink
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+            priv_helper.safe_write_pid_file(hl_pid, "ATTACKER_PAYLOAD\n")
+        self.assertIn("hard link", str(ctx.exception).lower())
+
+        # Crucial: verify victim content, inode, size, and link count are completely preserved
+        curr_stat = victim.stat()
+        self.assertEqual(victim.read_text(encoding="utf-8"), victim_content)
+        self.assertEqual(curr_stat.st_ino, orig_stat.st_ino)
+        self.assertEqual(curr_stat.st_size, len(victim_content.encode("utf-8")))
+        self.assertEqual(curr_stat.st_nlink, 2)
+
+    def test_safe_write_pid_file_atomic_update_and_cleanup(self):
+        """TC-SEC-FS-11: safe_write_pid_file replaces existing valid PID file atomically with correct mode and cleans up on error."""
+        pid_file = self.temp_dir / "worker.pid"
+        priv_helper.safe_write_pid_file(pid_file, "1111:2222\n")
+        self.assertEqual(pid_file.read_text(encoding="utf-8"), "1111:2222\n")
+        orig_ino = pid_file.stat().st_ino
+
+        # Atomic replacement with new content
+        priv_helper.safe_write_pid_file(pid_file, "3333:4444\n")
+        self.assertEqual(pid_file.read_text(encoding="utf-8"), "3333:4444\n")
+        new_stat = pid_file.stat()
+        self.assertEqual(stat.S_IMODE(new_stat.st_mode), 0o644)
+        self.assertEqual(new_stat.st_nlink, 1)
+
+        # Ensure no temporary staging files (.tmp_pid_*) remain in directory
+        tmp_leftovers = list(self.temp_dir.glob(".tmp_pid_*"))
+        self.assertEqual(len(tmp_leftovers), 0, f"Leftover staging files found: {tmp_leftovers}")
+
+    def test_start_capture_privileged_fifo_log_rejection(self):
+        """TC-SEC-FS-12: start_capture_privileged rejects FIFO log files without hanging or truncating."""
+        fifo_log = self.temp_dir / "capture.log"
+        os.mkfifo(str(fifo_log))
+        pcap_file = self.temp_dir / "capture.pcap"
+
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+            priv_helper.start_capture_privileged(
+                output_pcap=pcap_file,
+                log_file=fifo_log,
+                netns="ps028-cl"
+            )
+        self.assertIn("not a regular file", str(ctx.exception).lower())
+
+    def test_safe_atomic_write_text_special_file_and_hardlink_preservation(self):
+        """TC-SEC-FS-13: safe_atomic_write_text rejects FIFOs and preserves hardlinked victims byte-for-byte."""
+        fifo_state = self.temp_dir / "status.json"
+        os.mkfifo(str(fifo_state))
+
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+            priv_helper.safe_atomic_write_text(fifo_state, '{"state": "BAD"}\n')
+        self.assertIn("not a regular file", str(ctx.exception).lower())
+
+        # Hardlinked destination preservation
+        victim = self.temp_dir / "victim_state.json"
+        v_content = '{"state": "ORIGINAL_SAFE"}\n'
+        victim.write_text(v_content, encoding="utf-8")
+        hl_state = self.temp_dir / "state_link.json"
+        os.link(str(victim), str(hl_state))
+
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+            priv_helper.safe_atomic_write_text(hl_state, '{"state": "OVERWRITE"}\n')
+        self.assertIn("hard link", str(ctx.exception).lower())
+        self.assertEqual(victim.read_text(encoding="utf-8"), v_content)
+
+    def test_safe_renameat_parameter_strict_validation(self):
+        """TC-SEC-FS-14: _safe_renameat enforces strict argument types, non-negative FDs, and rejects NUL / path traversal."""
+        # Negative FD rejection
+        with self.assertRaises(ValueError) as ctx:
+            priv_helper._safe_renameat(-1, "a", 3, "b")
+        self.assertIn("non-negative", str(ctx.exception).lower())
+
+        # Embedded NUL rejection
+        with self.assertRaises(ValueError) as ctx:
+            priv_helper._safe_renameat(3, "a\0b", 3, "c")
+        self.assertIn("nul", str(ctx.exception).lower())
+
+        # Path separator rejection
+        with self.assertRaises(ValueError) as ctx:
+            priv_helper._safe_renameat(3, "../evil", 3, "c")
+        self.assertIn("path separators", str(ctx.exception).lower())
+
+        # Empty name rejection
+        with self.assertRaises(ValueError) as ctx:
+            priv_helper._safe_renameat(3, "", 3, "c")
+        self.assertIn("empty", str(ctx.exception).lower())
+
+    def test_all_file_operation_types_confinement_matrix(self):
+        """TC-SEC-FS-15: Verifies that unauthorized roots are rejected across every FileOperationType."""
+        # PCAP_FILE rejected in /run
+        with self.assertRaises(priv_helper.PrivilegedHelperError):
+            priv_helper.validate_operation_path("/run/unauthorized.pcap", priv_helper.FileOperationType.PCAP_FILE)
+
+        # LOG_FILE rejected in /run
+        with self.assertRaises(priv_helper.PrivilegedHelperError):
+            priv_helper.validate_operation_path("/run/unauthorized.log", priv_helper.FileOperationType.LOG_FILE)
+
+        # CONFIG_FILE rejected in results/
+        with self.assertRaises(priv_helper.PrivilegedHelperError):
+            priv_helper.validate_operation_path(priv_helper.REPO_ROOT / "results" / "test.conf", priv_helper.FileOperationType.CONFIG_FILE)
+
+        # BACKUP_FILE rejected in /run
+        with self.assertRaises(priv_helper.PrivilegedHelperError):
+            priv_helper.validate_operation_path("/run/test.bak", priv_helper.FileOperationType.BACKUP_FILE)
+
+        # DATA_FILE rejected in /run
+        with self.assertRaises(priv_helper.PrivilegedHelperError):
+            priv_helper.validate_operation_path("/run/test.jsonl", priv_helper.FileOperationType.DATA_FILE)
+
+    def test_start_capture_privileged_rejects_existing_regular_pcap_to_protect_victim(self):
+        """TC-SEC-CAP-01: start_capture_privileged rejects existing regular PCAP without truncating or modifying."""
+        victim_pcap = self.temp_dir / "victim.pcap"
+        victim_pcap.write_bytes(b"EXISTING_PCAP_DATA_DO_NOT_TRUNCATE")
+        log_file = self.temp_dir / "capture.log"
+
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+            priv_helper.start_capture_privileged(
+                output_pcap=victim_pcap,
+                log_file=log_file,
+                netns="ps028-cl"
+            )
+        self.assertIn("already exists", str(ctx.exception).lower())
+        self.assertEqual(victim_pcap.read_bytes(), b"EXISTING_PCAP_DATA_DO_NOT_TRUNCATE")
+
+    def test_start_capture_privileged_rejects_hardlinked_pcap(self):
+        """TC-SEC-CAP-02: start_capture_privileged rejects hardlinked PCAP file without truncating."""
+        hl_target = self.temp_dir / "hl_pcap.pcap"
+        hl_target.write_bytes(b"ORIGINAL_HL_DATA")
+        hl_second = self.temp_dir / "hl_pcap_second.pcap"
+        os.link(str(hl_target), str(hl_second))
+        self.assertEqual(os.stat(str(hl_target)).st_nlink, 2)
+
+        log_file = self.temp_dir / "capture.log"
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+            priv_helper.start_capture_privileged(
+                output_pcap=hl_target,
+                log_file=log_file,
+                netns="ps028-cl"
+            )
+        self.assertIn("hardlink", str(ctx.exception).lower())
+        self.assertEqual(hl_target.read_bytes(), b"ORIGINAL_HL_DATA")
+        self.assertEqual(hl_second.read_bytes(), b"ORIGINAL_HL_DATA")
+
+    def test_start_capture_privileged_rejects_symlinked_pcap(self):
+        """TC-SEC-CAP-03: start_capture_privileged rejects symlinked PCAP output and preserves target."""
+        sensitive_file = self.temp_dir / "sensitive.txt"
+        sensitive_file.write_bytes(b"SECRET_DATA")
+        sym_pcap = self.temp_dir / "sym_target.pcap"
+        os.symlink(str(sensitive_file), str(sym_pcap))
+
+        log_file = self.temp_dir / "capture.log"
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+            priv_helper.start_capture_privileged(
+                output_pcap=sym_pcap,
+                log_file=log_file,
+                netns="ps028-cl"
+            )
+        self.assertIn("symlink", str(ctx.exception).lower())
+        self.assertEqual(sensitive_file.read_bytes(), b"SECRET_DATA")
+
+    def test_start_capture_privileged_rejects_fifo_pcap(self):
+        """TC-SEC-CAP-04: start_capture_privileged rejects FIFO PCAP file without hanging."""
+        fifo_pcap = self.temp_dir / "stream.pcap"
+        os.mkfifo(str(fifo_pcap))
+        log_file = self.temp_dir / "capture.log"
+
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+            priv_helper.start_capture_privileged(
+                output_pcap=fifo_pcap,
+                log_file=log_file,
+                netns="ps028-cl"
+            )
+        self.assertIn("not a regular file", str(ctx.exception).lower())
+
+    def test_verify_trusted_parent_directory_rejections(self):
+        """TC-SEC-DIR-01: verify_trusted_parent_directory rejects world-writable and untrusted directories."""
+        # 1. World-writable directory rejection
+        ww_dir = self.temp_dir / "world_writable_test"
+        ww_dir.mkdir()
+        ww_dir.chmod(0o777)
+        fd = os.open(str(ww_dir), os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+                priv_helper.verify_trusted_parent_directory(fd, ww_dir)
+            self.assertIn("world-writable", str(ctx.exception).lower())
+        finally:
+            os.close(fd)
+
+        # 2. Non-directory rejection
+        regular_file = self.temp_dir / "not_a_dir.txt"
+        regular_file.write_text("file")
+        fd2 = os.open(str(regular_file), os.O_RDONLY)
+        try:
+            with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+                priv_helper.verify_trusted_parent_directory(fd2, regular_file)
+            self.assertIn("not a directory", str(ctx.exception).lower())
+        finally:
+            os.close(fd2)
+
+    def test_safe_atomic_write_text_rejects_config_file_as_readonly(self):
+        """TC-SEC-CFG-01: safe_atomic_write_text rejects CONFIG_FILE operation type as strictly read-only."""
+        cfg_path = self.temp_dir / "test.json"
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+            priv_helper.safe_atomic_write_text(
+                cfg_path,
+                '{"write": "prohibited"}',
+                op_type=priv_helper.FileOperationType.CONFIG_FILE
+            )
+        self.assertIn("read-only", str(ctx.exception).lower())
+
+    def test_all_eight_file_operation_types_comprehensive_matrix(self):
+        """TC-SEC-FS-16: Comprehensive validation of all 8 FileOperationType enums."""
+        # Check all 8 enum members exist
+        expected_types = {
+            "PID_FILE", "PCAP_FILE", "LOG_FILE", "STATE_FILE",
+            "CONFIG_FILE", "BACKUP_FILE", "LOCK_FILE", "DATA_FILE"
+        }
+        self.assertEqual({e.name for e in priv_helper.FileOperationType}, expected_types)
+
+        # Valid extension tests for each
+        self.assertEqual(priv_helper.validate_operation_path(self.temp_dir / "p.pid", priv_helper.FileOperationType.PID_FILE).suffix, ".pid")
+        self.assertEqual(priv_helper.validate_operation_path(self.temp_dir / "c.pcap", priv_helper.FileOperationType.PCAP_FILE).suffix, ".pcap")
+        self.assertEqual(priv_helper.validate_operation_path(self.temp_dir / "l.log", priv_helper.FileOperationType.LOG_FILE).suffix, ".log")
+        self.assertEqual(priv_helper.validate_operation_path(self.temp_dir / "s.json", priv_helper.FileOperationType.STATE_FILE).suffix, ".json")
+        self.assertEqual(priv_helper.validate_operation_path(self.temp_dir / "cfg.json", priv_helper.FileOperationType.CONFIG_FILE).suffix, ".json")
+        self.assertEqual(priv_helper.validate_operation_path(self.temp_dir / "b.bak", priv_helper.FileOperationType.BACKUP_FILE).suffix, ".bak")
+        self.assertEqual(priv_helper.validate_operation_path(self.temp_dir / "k.lock", priv_helper.FileOperationType.LOCK_FILE).suffix, ".lock")
+        self.assertEqual(priv_helper.validate_operation_path(self.temp_dir / "d.jsonl", priv_helper.FileOperationType.DATA_FILE).suffix, ".jsonl")
+
+    def test_verify_trusted_parent_directory_root_execution_requires_root_ownership(self):
+        """TC-SEC-DIR-02: Root execution strictly requires root ownership (UID 0); user-owned directories are rejected."""
+        user_dir = self.temp_dir / "user_owned_dir"
+        user_dir.mkdir(exist_ok=True)
+        fd = os.open(str(user_dir), os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            with patch("os.geteuid", return_value=0):
+                # When running as root without test fixture opt-in, user-owned dir MUST be rejected
+                with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+                    priv_helper.verify_trusted_parent_directory(fd, user_dir, is_test_fixture=False)
+                self.assertIn("must be owned by root", str(ctx.exception))
+        finally:
+            os.close(fd)
+
+    def test_verify_trusted_parent_directory_target_user_owned_dir_rejected_for_root_writes(self):
+        """TC-SEC-DIR-03: Under root execution, target-user owned directory is rejected for root writes."""
+        t_dir = self.temp_dir / "target_user_dir"
+        t_dir.mkdir(exist_ok=True)
+        fd = os.open(str(t_dir), os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            with patch("os.geteuid", return_value=0):
+                with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+                    priv_helper.verify_trusted_parent_directory(fd, t_dir, expected_uid=2000, is_test_fixture=False)
+                self.assertIn("must be owned by root", str(ctx.exception))
+                self.assertIn("Target-user or invoking-user owned directories are rejected", str(ctx.exception))
+        finally:
+            os.close(fd)
+
+    def test_verify_trusted_parent_directory_unprivileged_allows_user_owned_dir(self):
+        """TC-SEC-DIR-04: Non-privileged harness allows user-owned private directories."""
+        priv_dir = self.temp_dir / "priv_user_dir"
+        priv_dir.mkdir(exist_ok=True)
+        fd = os.open(str(priv_dir), os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            # Running as non-root (current user)
+            priv_helper.verify_trusted_parent_directory(fd, priv_dir, is_test_fixture=False)
+        finally:
+            os.close(fd)
+
+    def test_verify_trusted_parent_directory_rejects_world_writable_sticky_bit(self):
+        """TC-SEC-DIR-05: verify_trusted_parent_directory rejects world-writable directories even when sticky bit is set."""
+        sticky_ww = self.temp_dir / "sticky_ww_dir"
+        sticky_ww.mkdir(exist_ok=True)
+        sticky_ww.chmod(0o1777)
+        fd = os.open(str(sticky_ww), os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+                priv_helper.verify_trusted_parent_directory(fd, sticky_ww, is_test_fixture=False)
+            self.assertIn("world-writable", str(ctx.exception).lower())
+        finally:
+            os.close(fd)
+
+    def test_verify_trusted_parent_directory_rejects_group_writable_untrusted(self):
+        """TC-SEC-DIR-06: verify_trusted_parent_directory rejects group-writable directories for untrusted GID."""
+        gw_dir = self.temp_dir / "group_writable_dir"
+        gw_dir.mkdir(exist_ok=True)
+        gw_dir.chmod(0o775)
+        fd = os.open(str(gw_dir), os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            # 1. Under root privileged write policy (mocked root owner, untrusted group)
+            mock_stat_res = MagicMock()
+            mock_stat_res.st_mode = stat.S_IFDIR | 0o775
+            mock_stat_res.st_uid = 0  # root owner
+            mock_stat_res.st_gid = 999  # untrusted group
+            with patch("os.geteuid", return_value=0):
+                with patch("os.fstat", return_value=mock_stat_res):
+                    with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+                        priv_helper.verify_trusted_parent_directory(fd, gw_dir, is_test_fixture=False)
+                    self.assertIn("group-writable", str(ctx.exception).lower())
+
+            # 2. Under unprivileged policy with untrusted GID
+            mock_stat_unpriv = MagicMock()
+            mock_stat_unpriv.st_mode = stat.S_IFDIR | 0o775
+            mock_stat_unpriv.st_uid = os.getuid()
+            mock_stat_unpriv.st_gid = 99999
+            with patch("os.fstat", return_value=mock_stat_unpriv):
+                with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx2:
+                    priv_helper.verify_trusted_parent_directory(fd, gw_dir, is_test_fixture=False)
+                self.assertIn("group-writable", str(ctx2.exception).lower())
+        finally:
+            os.close(fd)
+
+    def test_verify_trusted_parent_directory_rejects_symlink_parent(self):
+        """TC-SEC-DIR-07: safe_write_pid_file and safe_atomic_write_text reject symlinked parent directories."""
+        real_p = self.temp_dir / "real_parent"
+        real_p.mkdir(exist_ok=True)
+        sym_p = self.temp_dir / "symlink_parent"
+        os.symlink(str(real_p), str(sym_p))
+
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+            priv_helper.safe_write_pid_file(sym_p / "victim.pid", "1234\n")
+        self.assertTrue(
+            "symlink" in str(ctx.exception).lower() or "cannot safely open" in str(ctx.exception).lower()
+        )
+
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx2:
+            priv_helper.safe_atomic_write_text(sym_p / "victim.json", "{}")
+        self.assertTrue(
+            "symlink" in str(ctx2.exception).lower() or "cannot safely open" in str(ctx2.exception).lower()
+        )
+
+    def test_production_cli_rejects_test_only_options(self):
+        """TC-SEC-CLI-01: Verifies production CLI parser strictly rejects test-only options."""
+        parser = priv_helper.build_parser()
+        # Ensure --is-test-fixture is rejected
+        with self.assertRaises(SystemExit):
+            parser.parse_args(["start-capture", "--output-pcap", "/run/test.pcap", "--log-file", "/run/test.log", "--is-test-fixture"])
+
+        # Ensure --allow-loopback is rejected on measure-s5
+        with self.assertRaises(SystemExit):
+            parser.parse_args(["measure-s5", "--target-ip", "127.0.0.1", "--allow-loopback"])
+
+        # Ensure --allow-loopback is rejected on measure-s5-worker
+        with self.assertRaises(SystemExit):
+            parser.parse_args(["measure-s5-worker", "--target-ip", "127.0.0.1", "--allow-loopback"])
+
+    def test_offline_tcpdump_stdout_pcap_byte_identity(self):
+        """TC-SEC-CAP-05: Verifies that tcpdump -w - produces a byte-for-byte valid PCAP file to stdout descriptor."""
+        src_pcap = priv_helper.REPO_ROOT / "lab" / "campaigns" / "ps028-a10-live-20261030-01" / "trials" / "trial-20261029222832-caa5ba16" / "capture.pcap"
+        self.assertTrue(src_pcap.is_file(), f"Sample PCAP not found: {src_pcap}")
+
+        dst_pcap = self.temp_dir / "stdout_reproduced.pcap"
+        with open(dst_pcap, "wb") as out_fp:
+            proc = subprocess.Popen(
+                ["tcpdump", "-r", str(src_pcap), "-w", "-"],
+                stdout=out_fp,
+                stderr=subprocess.PIPE
+            )
+            _, stderr_err = proc.communicate()
+            self.assertEqual(proc.returncode, 0, f"tcpdump failed: {stderr_err}")
+
+        # Validate PCAP magic header
+        with open(dst_pcap, "rb") as f:
+            magic, v_maj, v_min, _, _, snaplen, linktype = struct.unpack("<IHHIIII", f.read(24))
+            self.assertEqual(magic, 0xa1b2c3d4)
+            self.assertEqual(v_maj, 2)
+            self.assertEqual(v_min, 4)
+
+        # Validate byte size matches source exactly
+        self.assertEqual(dst_pcap.stat().st_size, src_pcap.stat().st_size)
+
+    def test_validate_operation_path_rejects_user_repo_for_privileged_config_under_root(self):
+        """TC-SEC-ROOT-01: validate_operation_path strictly rejects repo config files under root execution."""
+        with patch("os.geteuid", return_value=0):
+            with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+                priv_helper.validate_operation_path(
+                    priv_helper.REPO_ROOT / "lab" / "scenarios.yaml",
+                    priv_helper.FileOperationType.CONFIG_FILE,
+                    param_name="scenarios_path",
+                    is_test_fixture=False
+                )
+            self.assertIn("user-owned repository path", str(ctx.exception))
+            self.assertIn("cannot serve as privileged", str(ctx.exception))
+
+    def test_validate_operation_path_rejects_user_repo_for_privileged_writes_under_root(self):
+        """TC-SEC-ROOT-02: validate_operation_path strictly rejects repo write destinations under root execution."""
+        with patch("os.geteuid", return_value=0):
+            # PID write to lab/
+            with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+                priv_helper.validate_operation_path(
+                    priv_helper.REPO_ROOT / "lab" / "test.pid",
+                    priv_helper.FileOperationType.PID_FILE,
+                    param_name="pid_file",
+                    is_test_fixture=False
+                )
+            self.assertIn("user-owned repository path", str(ctx.exception))
+
+            # PCAP write to results/
+            with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx2:
+                priv_helper.validate_operation_path(
+                    priv_helper.REPO_ROOT / "results" / "test.pcap",
+                    priv_helper.FileOperationType.PCAP_FILE,
+                    param_name="output_pcap",
+                    is_test_fixture=False
+                )
+            self.assertIn("user-owned repository path", str(ctx2.exception))
+
+    def test_validate_operation_path_allows_repo_when_unprivileged_or_test_fixture(self):
+        """TC-SEC-ROOT-03: validate_operation_path allows repo paths when unprivileged or with test fixture opt-in."""
+        # Unprivileged
+        res = priv_helper.validate_operation_path(
+            priv_helper.REPO_ROOT / "lab" / "scenarios.yaml",
+            priv_helper.FileOperationType.CONFIG_FILE,
+            is_test_fixture=False
+        )
+        self.assertEqual(res.name, "scenarios.yaml")
+
+        # Test fixture opt-in under mock root
+        with patch("os.geteuid", return_value=0):
+            res_tf = priv_helper.validate_operation_path(
+                priv_helper.REPO_ROOT / "lab" / "scenarios.yaml",
+                priv_helper.FileOperationType.CONFIG_FILE,
+                is_test_fixture=True
+            )
+            self.assertEqual(res_tf.name, "scenarios.yaml")
+
+    def test_verify_trusted_parent_directory_rejects_group_writable_even_for_root_gid_0(self):
+        """TC-SEC-DIR-08: Root execution unconditionally rejects group-writable directories, even for GID 0."""
+        gw_dir = self.temp_dir / "trusted_group_dir"
+        gw_dir.mkdir(exist_ok=True)
+        gw_dir.chmod(0o775)
+        fd = os.open(str(gw_dir), os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            mock_stat_res = MagicMock()
+            mock_stat_res.st_mode = stat.S_IFDIR | 0o775
+            mock_stat_res.st_uid = 0  # root owner
+            mock_stat_res.st_gid = 0  # GID 0
+            with patch("os.geteuid", return_value=0):
+                with patch("os.fstat", return_value=mock_stat_res):
+                    with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+                        priv_helper.verify_trusted_parent_directory(fd, gw_dir, is_test_fixture=False)
+                    self.assertIn("group-writable", str(ctx.exception).lower())
+        finally:
+            os.close(fd)
+
+    def test_validate_operation_path_rejects_data_file_under_root_execution(self):
+        """TC-SEC-ROOT-04: validate_operation_path strictly rejects DATA_FILE privileged writes under root execution."""
+        with patch("os.geteuid", return_value=0):
+            with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+                priv_helper.validate_operation_path(
+                    "/run/ps028/output.jsonl",
+                    priv_helper.FileOperationType.DATA_FILE,
+                    param_name="output_jsonl",
+                    is_test_fixture=False
+                )
+            self.assertIn("prohibited", str(ctx.exception).lower())
+
+    def test_validate_operation_path_privileged_requires_dedicated_ps028_dirs(self):
+        """TC-SEC-ROOT-05: Privileged operations require dedicated PS-028 directories and reject broad /run and /var/run."""
+        with patch("os.geteuid", return_value=0):
+            # Arbitrary /run is rejected for PCAP
+            with self.assertRaises(priv_helper.PrivilegedHelperError):
+                priv_helper.validate_operation_path("/run/test.pcap", priv_helper.FileOperationType.PCAP_FILE, is_test_fixture=False)
+            # Dedicated /run/ps028 is accepted
+            res_pcap = priv_helper.validate_operation_path("/run/ps028/test.pcap", priv_helper.FileOperationType.PCAP_FILE, is_test_fixture=False)
+            self.assertEqual(str(res_pcap), "/run/ps028/test.pcap")
+
+            # Arbitrary /run is rejected for LOG
+            with self.assertRaises(priv_helper.PrivilegedHelperError):
+                priv_helper.validate_operation_path("/run/test.log", priv_helper.FileOperationType.LOG_FILE, is_test_fixture=False)
+            # Dedicated /var/log/ps028 is accepted
+            res_log = priv_helper.validate_operation_path("/var/log/ps028/test.log", priv_helper.FileOperationType.LOG_FILE, is_test_fixture=False)
+            self.assertEqual(str(res_log), "/var/log/ps028/test.log")
+
+            # PID_FILE: broad /run and /var/run rejected, dedicated /run/ps028 and /var/run/ps028 accepted
+            with self.assertRaises(priv_helper.PrivilegedHelperError):
+                priv_helper.validate_operation_path("/run/test.pid", priv_helper.FileOperationType.PID_FILE, is_test_fixture=False)
+            with self.assertRaises(priv_helper.PrivilegedHelperError):
+                priv_helper.validate_operation_path("/var/run/test.pid", priv_helper.FileOperationType.PID_FILE, is_test_fixture=False)
+            res_pid1 = priv_helper.validate_operation_path("/run/ps028/test.pid", priv_helper.FileOperationType.PID_FILE, is_test_fixture=False)
+            self.assertEqual(str(res_pid1), "/run/ps028/test.pid")
+            res_pid2 = priv_helper.validate_operation_path("/var/run/ps028/test.pid", priv_helper.FileOperationType.PID_FILE, is_test_fixture=False)
+            self.assertIn(str(res_pid2), ("/run/ps028/test.pid", "/var/run/ps028/test.pid"))
+
+            # LOCK_FILE: broad /run and /var/run rejected, dedicated /run/ps028 and /var/run/ps028 accepted
+            with self.assertRaises(priv_helper.PrivilegedHelperError):
+                priv_helper.validate_operation_path("/run/test.lock", priv_helper.FileOperationType.LOCK_FILE, is_test_fixture=False)
+            with self.assertRaises(priv_helper.PrivilegedHelperError):
+                priv_helper.validate_operation_path("/var/run/test.lock", priv_helper.FileOperationType.LOCK_FILE, is_test_fixture=False)
+            res_lock1 = priv_helper.validate_operation_path("/run/ps028/test.lock", priv_helper.FileOperationType.LOCK_FILE, is_test_fixture=False)
+            self.assertEqual(str(res_lock1), "/run/ps028/test.lock")
+            res_lock2 = priv_helper.validate_operation_path("/var/run/ps028/test.lock", priv_helper.FileOperationType.LOCK_FILE, is_test_fixture=False)
+            self.assertIn(str(res_lock2), ("/run/ps028/test.lock", "/var/run/ps028/test.lock"))
+
+            # STATE_FILE: broad /run and /var/run rejected, dedicated /run/ps028, /var/run/ps028, /var/lib/ps028 accepted
+            with self.assertRaises(priv_helper.PrivilegedHelperError):
+                priv_helper.validate_operation_path("/run/test.json", priv_helper.FileOperationType.STATE_FILE, is_test_fixture=False)
+            with self.assertRaises(priv_helper.PrivilegedHelperError):
+                priv_helper.validate_operation_path("/var/run/test.json", priv_helper.FileOperationType.STATE_FILE, is_test_fixture=False)
+            res_state1 = priv_helper.validate_operation_path("/run/ps028/test.json", priv_helper.FileOperationType.STATE_FILE, is_test_fixture=False)
+            self.assertEqual(str(res_state1), "/run/ps028/test.json")
+            res_state2 = priv_helper.validate_operation_path("/var/run/ps028/test.json", priv_helper.FileOperationType.STATE_FILE, is_test_fixture=False)
+            self.assertIn(str(res_state2), ("/run/ps028/test.json", "/var/run/ps028/test.json"))
+            res_state3 = priv_helper.validate_operation_path("/var/lib/ps028/test.json", priv_helper.FileOperationType.STATE_FILE, is_test_fixture=False)
+            self.assertEqual(str(res_state3), "/var/lib/ps028/test.json")
+
+    def test_privileged_mapping_rejects_all_broad_run_and_var_run_roots(self):
+        """TC-SEC-ROOT-06: PRIVILEGED_OPERATION_ALLOWED_ROOTS contains zero broad /run or /var/run roots across all operations."""
+        # 1. Assert PRIVILEGED_OPERATION_ALLOWED_ROOTS does not contain broad /run or /var/run for ANY operation
+        broad_roots = {Path("/run"), Path("/var/run")}
+        for op_type, roots in priv_helper.PRIVILEGED_OPERATION_ALLOWED_ROOTS.items():
+            for broad in broad_roots:
+                self.assertNotIn(
+                    broad,
+                    roots,
+                    f"Broad root '{broad}' unexpectedly found in PRIVILEGED_OPERATION_ALLOWED_ROOTS for {op_type}"
+                )
+
+        # 2. Assert validate_operation_path under root rejects unrelated paths in /run and /var/run for every operation
+        ext_map = {
+            priv_helper.FileOperationType.PID_FILE: ".pid",
+            priv_helper.FileOperationType.LOCK_FILE: ".lock",
+            priv_helper.FileOperationType.STATE_FILE: ".json",
+            priv_helper.FileOperationType.PCAP_FILE: ".pcap",
+            priv_helper.FileOperationType.LOG_FILE: ".log",
+            priv_helper.FileOperationType.CONFIG_FILE: ".yaml",
+            priv_helper.FileOperationType.BACKUP_FILE: ".bak",
+            priv_helper.FileOperationType.DATA_FILE: ".jsonl",
+        }
+        with patch("os.geteuid", return_value=0):
+            for op_type, ext in ext_map.items():
+                for broad_dir in ("/run", "/var/run", "/run/systemd", "/var/run/udev"):
+                    test_path = f"{broad_dir}/unrelated_probe{ext}"
+                    with self.assertRaises(
+                        priv_helper.PrivilegedHelperError,
+                        msg=f"Root execution failed to reject unrelated path '{test_path}' for {op_type}"
+                    ):
+                        priv_helper.validate_operation_path(test_path, op_type, is_test_fixture=False)
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3 -I
 """
 PS-028 Happy Eyeballs Measurement Lab: Privileged Operations Helper
 Work Package A10: Live Campaign Orchestration & Non-Interactive Privilege Separation
@@ -15,29 +15,235 @@ import argparse
 import concurrent.futures
 import contextlib
 import ctypes
+import enum
 import errno
 import fcntl
+import importlib.util
+import ipaddress
 import json
 import os
 from pathlib import Path
 import re
+import secrets
 import shutil
 import signal
 import socket
+import stat
 import subprocess
 import sys
+import tempfile
 import time
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+
+class PrivilegedHelperError(Exception):
+    """Raised when a privileged helper operation fails."""
+    pass
+
+try:
+    _libc = ctypes.CDLL(None, use_errno=True)
+    _renameat_fn = getattr(_libc, "renameat", None)
+    if _renameat_fn:
+        _renameat_fn.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p]
+        _renameat_fn.restype = ctypes.c_int
+except Exception:
+    _renameat_fn = None
+
+def _safe_renameat(
+    old_dir_fd: int,
+    old_name: str,
+    new_dir_fd: int,
+    new_name: str,
+    fallback_old_path: Optional[Path] = None,
+    fallback_new_path: Optional[Path] = None
+) -> None:
+    """
+    Performs atomic directory-descriptor-relative rename via libc renameat.
+    Prevents path traversal and parent directory substitution TOCTOU races.
+    Validates single-component filenames, non-negative FDs, and rejects embedded NULs.
+    """
+    if not isinstance(old_name, str) or not isinstance(new_name, str):
+        raise TypeError("old_name and new_name must be strings")
+    if not old_name or not new_name:
+        raise ValueError("old_name and new_name cannot be empty")
+    if "\0" in old_name or "\0" in new_name:
+        raise ValueError("Embedded NUL in filename")
+    if "/" in old_name or "\\" in old_name or "/" in new_name or "\\" in new_name:
+        raise ValueError("Path separators are not permitted in directory-relative filenames")
+    if old_name in (".", "..") or new_name in (".", ".."):
+        raise ValueError("Dot and dot-dot are not permitted as rename targets")
+    if old_dir_fd < 0 or new_dir_fd < 0:
+        raise ValueError("Directory file descriptors must be non-negative integers")
+
+    if _renameat_fn is not None:
+        res = _renameat_fn(
+            ctypes.c_int(old_dir_fd),
+            old_name.encode("utf-8"),
+            ctypes.c_int(new_dir_fd),
+            new_name.encode("utf-8")
+        )
+        if res != 0:
+            err = ctypes.get_errno()
+            raise OSError(err, os.strerror(err))
+    else:
+        if fallback_old_path is not None and fallback_new_path is not None:
+            os.replace(fallback_old_path, fallback_new_path)
+        else:
+            raise OSError(errno.ENOSYS, "libc renameat is not available and no fallback path was provided")
+
+PRIVILEGED_IMPORT_CLOSURE = [
+    "lab.concurrency",
+    "lab.identity",
+    "lab.impair",
+    "lab.run_trial",
+]
+
+def verify_privileged_import_closure(modules: Optional[List[str]] = None, allow_repo: bool = False) -> None:
+    """
+    Verifies the integrity of first-party modules within the privileged execution closure:
+    1. Module file exists, is a regular file, and is NOT a symlink.
+    2. Module file is NOT world-writable (mode & 0o002 == 0).
+    3. Module file is NOT group-writable when running as root without allow_repo (mode & 0o020 == 0).
+    4. If running as root (EUID 0) without allow_repo, module must be owned by root (UID 0).
+    5. Parent directories up to / must not be world-writable.
+    6. Corresponding .pyc bytecode files in __pycache__ (if present) are regular files,
+       not symlinks, not world-writable, not group-writable, and root-owned if EUID 0.
+    """
+    if modules is None:
+        modules = PRIVILEGED_IMPORT_CLOSURE
+
+    for mod_name in modules:
+        mod_path = None
+        if mod_name in sys.modules:
+            mod = sys.modules[mod_name]
+            if getattr(mod, "__file__", None):
+                mod_path = Path(mod.__file__)
+            elif getattr(mod, "__spec__", None) and getattr(mod.__spec__, "origin", None):
+                mod_path = Path(mod.__spec__.origin)
+
+        if mod_path is None:
+            try:
+                spec = importlib.util.find_spec(mod_name)
+                if spec is not None and spec.origin is not None:
+                    mod_path = Path(spec.origin)
+            except Exception as exc:
+                raise PrivilegedHelperError(f"Security error: cannot inspect module spec for '{mod_name}': {exc}") from exc
+
+        if mod_path is None:
+            continue
+        if not mod_path.exists():
+            raise PrivilegedHelperError(f"Security error: module file '{mod_path}' for '{mod_name}' does not exist")
+
+        if mod_path.is_symlink() or os.path.islink(str(mod_path)):
+            raise PrivilegedHelperError(f"Security error: module file '{mod_path}' for '{mod_name}' is a symlink")
+
+        st = os.lstat(str(mod_path))
+        if not stat.S_ISREG(st.st_mode):
+            raise PrivilegedHelperError(f"Security error: module file '{mod_path}' for '{mod_name}' is not a regular file")
+
+        if (st.st_mode & 0o002) != 0:
+            raise PrivilegedHelperError(f"Security error: module file '{mod_path}' is world-writable (mode {oct(st.st_mode)})")
+
+        if os.geteuid() == 0 and not allow_repo and (st.st_mode & 0o020) != 0:
+            raise PrivilegedHelperError(f"Security error: module file '{mod_path}' is group-writable (mode {oct(st.st_mode)})")
+
+        if os.geteuid() == 0:
+            is_repo_path = allow_repo and (mod_path == REPO_ROOT.resolve() or REPO_ROOT.resolve() in mod_path.parents)
+            if not is_repo_path and st.st_uid != 0:
+                raise PrivilegedHelperError(f"Security error: module file '{mod_path}' is not owned by root (UID {st.st_uid})")
+
+        parent = mod_path.parent
+        while parent != parent.parent:
+            pst = parent.stat()
+            if (pst.st_mode & 0o002) != 0:
+                raise PrivilegedHelperError(f"Security error: directory '{parent}' in module path is world-writable")
+            parent = parent.parent
+
+        pycache_dir = mod_path.parent / "__pycache__"
+        if pycache_dir.is_dir():
+            for pyc in pycache_dir.glob(f"{mod_path.stem}.*.pyc"):
+                if pyc.is_symlink() or os.path.islink(str(pyc)):
+                    raise PrivilegedHelperError(f"Security error: bytecode file '{pyc}' is a symlink")
+                pyc_st = os.lstat(str(pyc))
+                if not stat.S_ISREG(pyc_st.st_mode):
+                    raise PrivilegedHelperError(f"Security error: bytecode file '{pyc}' is not a regular file")
+                if (pyc_st.st_mode & 0o002) != 0:
+                    raise PrivilegedHelperError(f"Security error: bytecode file '{pyc}' is world-writable")
+                if os.geteuid() == 0 and not allow_repo and (pyc_st.st_mode & 0o020) != 0:
+                    raise PrivilegedHelperError(f"Security error: bytecode file '{pyc}' is group-writable")
+                if os.geteuid() == 0 and not allow_repo and pyc_st.st_uid != 0:
+                    raise PrivilegedHelperError(f"Security error: bytecode file '{pyc}' is not owned by root (UID {pyc_st.st_uid})")
+
+def is_trusted_sys_path_dir(path: Union[str, Path], allow_repo: bool = False) -> bool:
+    """
+    Validates whether a directory is trusted for sys.path inclusion.
+    When running as root (EUID 0), directory and all ancestors up to / must be:
+    - Root-owned (UID 0) (or current user if allow_repo is True for test harnesses)
+    - Not writable by group or others (mode & 0o022 == 0)
+    Rejects empty, non-existent, non-directory, or world/group-writable paths.
+    """
+    if not path or str(path) in ("", "."):
+        return False
+    try:
+        p = Path(path).resolve()
+        if not p.is_dir():
+            return False
+        st = p.stat()
+        if (st.st_mode & 0o002) != 0:
+            return False  # World-writable is always rejected
+
+        if os.geteuid() == 0:
+            is_repo_path = allow_repo and (p == REPO_ROOT.resolve() or REPO_ROOT.resolve() in p.parents)
+            if not is_repo_path and st.st_uid != 0:
+                return False
+            if (st.st_mode & 0o020) != 0 and not is_repo_path:
+                return False  # Group-writable rejected for root execution
+
+            # Verify parents up to root
+            curr = p.parent
+            while curr != curr.parent:
+                pst = curr.stat()
+                if (pst.st_mode & 0o002) != 0 or ((pst.st_mode & 0o020) != 0 and not is_repo_path):
+                    return False
+                if not is_repo_path and pst.st_uid != 0:
+                    return False
+                curr = curr.parent
+        return True
+    except (OSError, ValueError):
+        return False
+
+def sanitize_privileged_sys_path() -> None:
+    """
+    Sanitizes sys.path when running as root (EUID 0) to prevent arbitrary code execution
+    via untrusted, user-writable directories or current working directory.
+    Purges untrusted directories and ensures deployed helper path is available.
+    """
+    if os.geteuid() == 0:
+        safe_paths = []
+        is_test = bool(os.environ.get("PS028_TEST_SUITE"))
+        for p in list(sys.path):
+            if is_trusted_sys_path_dir(p, allow_repo=is_test):
+                safe_paths.append(str(Path(p).resolve()))
+        deployed_dir = Path("/usr/local/libexec/ps028")
+        if deployed_dir.is_dir() and is_trusted_sys_path_dir(deployed_dir):
+            dep_str = str(deployed_dir.resolve())
+            if dep_str not in safe_paths:
+                safe_paths.insert(0, dep_str)
+        sys.path[:] = safe_paths
+    else:
+        if str(REPO_ROOT) not in sys.path:
+            sys.path.insert(0, str(REPO_ROOT))
+
+sanitize_privileged_sys_path()
 
 import lab.concurrency as concurrency
 import lab.identity as identity
 import lab.impair as impair
 import lab.run_trial as run_trial
+
+verify_privileged_import_closure(allow_repo=bool(os.environ.get("PS028_TEST_SUITE")))
 
 DEFAULT_SCENARIOS_PATH = SCRIPT_DIR / "scenarios.yaml"
 STATE_FILE = SCRIPT_DIR / ".impair_state.json"
@@ -58,10 +264,764 @@ DEFAULT_BPF_FILTER = (
 ALLOWED_SCENARIOS = ["S0", "S1", "S2", "S3", "S4", "S5", "S6"]
 ALLOWED_NETNS = {CLIENT_NETNS, ROUTER_NETNS, SERVER_NETNS}
 
+DEFAULT_ALLOWED_ROOTS = [
+    REPO_ROOT,
+    Path("/tmp"),
+    Path("/var/tmp"),
+    Path(tempfile.gettempdir()),
+    Path("/run"),
+    Path("/var/run"),
+    Path("/usr/local/libexec/ps028"),
+]
 
-class PrivilegedHelperError(Exception):
-    """Raised when a privileged helper operation fails."""
-    pass
+ALLOWED_PS028_CLIENT_IPS = {"10.0.1.2", "2001:db8:1::2"}
+ALLOWED_PS028_TARGET_IPS = {"10.0.2.10", "2001:db8:2::10"}
+ALLOWED_TEST_LOOPBACK_IPS = {"127.0.0.1", "::1"}
+ALLOWED_S5_IFACES = {"ps028-rt-sv6", "ps028-rt-sv4", "ps028-cl-rt", "ps028-rt-cl", "lo"}
+ALLOWED_S5_NETNS = {"ps028-cl"}
+
+class FileOperationType(str, enum.Enum):
+    PID_FILE = "pid_file"
+    PCAP_FILE = "pcap_file"
+    LOG_FILE = "log_file"
+    STATE_FILE = "state_file"
+    CONFIG_FILE = "config_file"
+    BACKUP_FILE = "backup_file"
+    LOCK_FILE = "lock_file"
+    DATA_FILE = "data_file"
+
+OPERATION_ALLOWED_EXTENSIONS = {
+    FileOperationType.PID_FILE: {".pid"},
+    FileOperationType.PCAP_FILE: {".pcap", ".pcapng"},
+    FileOperationType.LOG_FILE: {".log", ".txt"},
+    FileOperationType.STATE_FILE: {".json", ".yaml", ".yml"},
+    FileOperationType.CONFIG_FILE: {".json", ".conf", ".yaml", ".yml"},
+    FileOperationType.BACKUP_FILE: {".bak", ".impair_bak", ".json"},
+    FileOperationType.LOCK_FILE: {".lock"},
+    FileOperationType.DATA_FILE: {".json", ".jsonl", ".csv", ".txt"},
+}
+
+OPERATION_ALLOWED_ROOTS: Dict[FileOperationType, List[Path]] = {
+    FileOperationType.PID_FILE: [
+        Path("/run"),
+        Path("/var/run"),
+        REPO_ROOT / "lab",
+        REPO_ROOT / "results",
+        REPO_ROOT / "captures",
+        Path(tempfile.gettempdir()),
+    ],
+    FileOperationType.PCAP_FILE: [
+        REPO_ROOT / "results",
+        REPO_ROOT / "captures",
+        REPO_ROOT / "lab",
+        Path(tempfile.gettempdir()),
+    ],
+    FileOperationType.LOG_FILE: [
+        REPO_ROOT / "results",
+        REPO_ROOT / "logs",
+        REPO_ROOT / "lab",
+        Path(tempfile.gettempdir()),
+    ],
+    FileOperationType.STATE_FILE: [
+        REPO_ROOT / "lab",
+        REPO_ROOT / "results",
+        Path("/run"),
+        Path("/var/run"),
+        Path(tempfile.gettempdir()),
+    ],
+    FileOperationType.CONFIG_FILE: [
+        REPO_ROOT / "lab",
+        Path("/usr/local/libexec/ps028"),
+        Path("/etc/netns/ps028-cl"),
+        Path(tempfile.gettempdir()),
+    ],
+    FileOperationType.BACKUP_FILE: [
+        REPO_ROOT / "lab",
+        Path(tempfile.gettempdir()),
+    ],
+    FileOperationType.LOCK_FILE: [
+        REPO_ROOT / "lab",
+        Path("/run"),
+        Path("/var/run"),
+        Path(tempfile.gettempdir()),
+    ],
+    FileOperationType.DATA_FILE: [
+        REPO_ROOT / "results",
+        REPO_ROOT / "lab",
+        REPO_ROOT / "derived",
+        Path(tempfile.gettempdir()),
+    ],
+}
+
+PRIVILEGED_OPERATION_ALLOWED_ROOTS: Dict[FileOperationType, List[Path]] = {
+    FileOperationType.PID_FILE: [
+        Path("/run/ps028"),
+        Path("/var/run/ps028"),
+    ],
+    FileOperationType.PCAP_FILE: [
+        Path("/run/ps028"),
+        Path("/var/run/ps028"),
+    ],
+    FileOperationType.LOG_FILE: [
+        Path("/var/log/ps028"),
+        Path("/run/ps028"),
+        Path("/var/run/ps028"),
+    ],
+    FileOperationType.STATE_FILE: [
+        Path("/run/ps028"),
+        Path("/var/run/ps028"),
+        Path("/var/lib/ps028"),
+    ],
+    FileOperationType.CONFIG_FILE: [
+        Path("/usr/local/libexec/ps028"),
+        Path("/etc/netns/ps028-cl"),
+    ],
+    FileOperationType.BACKUP_FILE: [
+        Path("/etc/netns/ps028-cl"),
+        Path("/run/ps028"),
+        Path("/var/run/ps028"),
+    ],
+    FileOperationType.LOCK_FILE: [
+        Path("/run/ps028"),
+        Path("/var/run/ps028"),
+    ],
+    FileOperationType.DATA_FILE: [],  # Privileged writes prohibited; non-privileged streaming only
+}
+
+
+def validate_secure_path(
+    path: Union[str, Path],
+    param_name: str = "path",
+    allowed_roots: Optional[List[Path]] = None,
+    must_exist: bool = False,
+    allow_symlinks: bool = False,
+    must_be_file: bool = False
+) -> Path:
+    """
+    Enforces strict filesystem path confinement:
+    1. Rejects null bytes and invalid characters.
+    2. Resolves path against explicit allowlisted roots.
+    3. Rejects path traversal and symlink escapes.
+    4. Validates existence and file type where required.
+    5. Fails closed with PrivilegedHelperError.
+    """
+    if path is None:
+        raise PrivilegedHelperError(f"Missing required path for parameter '{param_name}'")
+
+    path_str = str(path)
+    if "\0" in path_str:
+        raise PrivilegedHelperError(f"Security error: path for '{param_name}' contains null bytes")
+
+    roots = allowed_roots or DEFAULT_ALLOWED_ROOTS
+    p = Path(path)
+    norm_p = Path(os.path.abspath(path_str))
+
+    # 1. Enforce confinement on normalized lexical path
+    p_in_roots = any(
+        norm_p == r or r in norm_p.parents or
+        norm_p == r.resolve() or r.resolve() in norm_p.parents
+        for r in roots
+    )
+    if not p_in_roots:
+        raise PrivilegedHelperError(
+            f"Security error: path '{path_str}' for parameter '{param_name}' resolves to '{norm_p}', "
+            f"which is outside approved directories ({[str(r) for r in roots]}). Directory traversal rejected."
+        )
+
+    # 2. Check for direct symlink before resolution
+    if not allow_symlinks:
+        try:
+            if p.is_symlink() or (p.exists() and os.path.islink(str(p))):
+                raise PrivilegedHelperError(
+                    f"Security error: symlinks are not permitted for '{param_name}': {path_str}"
+                )
+        except OSError as exc:
+            if isinstance(exc, PrivilegedHelperError):
+                raise
+            pass
+
+    # 3. Resolve the path
+    try:
+        resolved = p.resolve(strict=must_exist)
+    except (OSError, RuntimeError) as e:
+        if must_exist:
+            raise PrivilegedHelperError(f"Path '{path_str}' for '{param_name}' does not exist: {e}") from e
+        try:
+            parent_resolved = p.parent.resolve()
+            resolved = parent_resolved / p.name
+        except Exception as pe:
+            raise PrivilegedHelperError(f"Failed to resolve path '{path_str}' for '{param_name}': {pe}") from pe
+
+    # 4. Check symlinks on intermediate parent components
+    if not allow_symlinks:
+        try:
+            check_p = p.parent
+            root_resolved_set = {r.resolve() for r in roots}
+            root_path_set = {Path(r) for r in roots}
+            while check_p != check_p.parent:
+                if check_p in root_path_set or check_p.resolve() in root_resolved_set:
+                    break
+                if check_p.is_symlink() or os.path.islink(str(check_p)):
+                    raise PrivilegedHelperError(
+                        f"Security error: parent directory '{check_p}' is a symlink escaping approved roots"
+                    )
+                check_p = check_p.parent
+        except OSError as exc:
+            if isinstance(exc, PrivilegedHelperError):
+                raise
+            pass
+
+    # 5. Enforce confinement within allowed_roots on resolved target
+    is_confined = any(
+        resolved == r.resolve() or r.resolve() in resolved.parents
+        for r in roots
+    )
+
+    if not is_confined:
+        raise PrivilegedHelperError(
+            f"Security error: path '{path_str}' for parameter '{param_name}' resolves to '{resolved}', "
+            f"which is outside approved directories ({[str(r) for r in roots]}). Directory traversal rejected."
+        )
+
+    if must_be_file and resolved.exists() and not resolved.is_file():
+        raise PrivilegedHelperError(f"Path '{path_str}' for '{param_name}' must be a regular file")
+
+    return resolved
+
+
+def validate_operation_path(
+    path: Union[str, Path],
+    op_type: FileOperationType,
+    param_name: str = "path",
+    allowed_roots: Optional[List[Path]] = None,
+    must_exist: bool = False,
+    allow_symlinks: bool = False,
+    is_test_fixture: bool = False
+) -> Path:
+    """
+    Validates a filesystem path according to its operational role:
+    1. Enforces allowed extension set for op_type.
+    2. Root Execution Isolation: When running with root privileges (os.geteuid() == 0 and not is_test_fixture),
+       user-owned repository paths (especially REPO_ROOT and REPO_ROOT / "lab") are strictly prohibited
+       from serving as privileged configuration sources or write destinations.
+    3. Enforces root confinement and symlink restrictions via validate_secure_path.
+    """
+    p = Path(path)
+    allowed_exts = OPERATION_ALLOWED_EXTENSIONS.get(op_type)
+    if allowed_exts:
+        full_suffix = "".join(p.suffixes).lower()
+        single_suffix = p.suffix.lower()
+        if full_suffix not in allowed_exts and single_suffix not in allowed_exts:
+            raise PrivilegedHelperError(
+                f"Security error: path '{path}' for '{param_name}' has invalid extension for {op_type.value}. "
+                f"Allowed extensions: {sorted(allowed_exts)}"
+            )
+
+    euid = os.geteuid()
+    if euid == 0 and not is_test_fixture:
+        if op_type == FileOperationType.DATA_FILE:
+            raise PrivilegedHelperError(
+                f"Security error: privileged write operations for {op_type.value} are strictly prohibited under root execution."
+            )
+        # Strict Root Execution Confinement:
+        # Disallow any path within user-owned repository checkout (REPO_ROOT)
+        try:
+            norm_p = Path(os.path.abspath(str(path)))
+            repo_resolved = REPO_ROOT.resolve()
+            if norm_p == repo_resolved or repo_resolved in norm_p.parents:
+                raise PrivilegedHelperError(
+                    f"Security error: user-owned repository path '{path}' for parameter '{param_name}' "
+                    f"cannot serve as privileged {op_type.value} source or destination under root execution."
+                )
+        except OSError:
+            pass
+
+        if allowed_roots is None:
+            allowed_roots = PRIVILEGED_OPERATION_ALLOWED_ROOTS.get(op_type, [])
+    else:
+        if allowed_roots is None:
+            allowed_roots = OPERATION_ALLOWED_ROOTS.get(op_type, DEFAULT_ALLOWED_ROOTS)
+
+    return validate_secure_path(
+        path=path,
+        param_name=param_name,
+        allowed_roots=allowed_roots,
+        must_exist=must_exist,
+        allow_symlinks=allow_symlinks
+    )
+
+
+def verify_trusted_parent_directory(
+    dir_fd: int,
+    dir_path: Union[str, Path],
+    param_name: str = "directory",
+    expected_uid: Optional[int] = None,
+    expected_gid: Optional[int] = None,
+    is_test_fixture: bool = False
+) -> None:
+    """
+    Enforces strict directory trust boundaries for privileged and unprivileged filesystem operations:
+    1. Verifies the opened descriptor is actually a directory (stat.S_ISDIR).
+    2. Rejects world-writable directories unconditionally (even with sticky bit S_ISVTX):
+       generic shared directories like bare /tmp or /var/tmp cannot be used directly
+       as privileged write roots. A dedicated private application-owned directory is required.
+    3. Root Privileged Write Policy (when os.geteuid() == 0 and not is_test_fixture):
+       - Parent directory MUST be owned strictly by root (UID 0).
+       - Directories owned by untrusted invoking user or target user are strictly REJECTED for root writes.
+       - Parent must NOT be group-writable (group-writable directories are prohibited for root writes).
+       - Safe descriptor-relative traversal verifies all ancestor path components:
+         must be directories, owned by root (UID 0), not world-writable, and not group-writable.
+    4. Non-privileged Harness and Test Policy (when os.geteuid() != 0 or is_test_fixture):
+       - Parent must be owned by the current process EUID (or invoking UID or root).
+       - Parent must not be world-writable.
+       - Intermediate ancestors must not be world-writable unless a sticky-bit root owned by root (/tmp).
+    """
+    st = os.fstat(dir_fd)
+    if not stat.S_ISDIR(st.st_mode):
+        raise PrivilegedHelperError(f"Security error: '{dir_path}' for '{param_name}' is not a directory")
+
+    # Reject world-writable directories unconditionally for target directory
+    if st.st_mode & stat.S_IWOTH:
+        raise PrivilegedHelperError(
+            f"Security error: parent directory '{dir_path}' is world-writable (mode {oct(st.st_mode)}). "
+            f"Shared world-writable directories (including bare /tmp or /var/tmp) are prohibited for privileged writes; "
+            f"a dedicated private application-owned directory is required."
+        )
+
+    euid = os.geteuid()
+    if euid == 0 and not is_test_fixture:
+        # STRICT ROOT PRIVILEGED WRITE POLICY
+        # Output directory must be owned strictly by root (UID 0).
+        if st.st_uid != 0:
+            raise PrivilegedHelperError(
+                f"Security error: privileged directory '{dir_path}' for '{param_name}' must be owned by root (UID 0), "
+                f"but is owned by UID {st.st_uid}. Target-user or invoking-user owned directories are rejected for root writes."
+            )
+        if st.st_mode & stat.S_IWGRP:
+            raise PrivilegedHelperError(
+                f"Security error: privileged directory '{dir_path}' for '{param_name}' is group-writable (mode {oct(st.st_mode)}). "
+                f"Group-writable directories are prohibited for root-privileged operations."
+            )
+        # Ancestor validation for root writes
+        canonical_p = Path(dir_path).resolve()
+        for ancestor in canonical_p.parents:
+            if ancestor == Path("/"):
+                break
+            try:
+                anc_fd = os.open(str(ancestor), os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0))
+            except OSError as err:
+                raise PrivilegedHelperError(f"Security error: ancestor directory '{ancestor}' cannot be safely verified: {err}")
+            try:
+                st_anc = os.fstat(anc_fd)
+                if not stat.S_ISDIR(st_anc.st_mode):
+                    raise PrivilegedHelperError(f"Security error: ancestor '{ancestor}' is not a directory")
+                if st_anc.st_uid != 0:
+                    raise PrivilegedHelperError(
+                        f"Security error: privileged ancestor directory '{ancestor}' must be owned by root (UID 0), but is owned by UID {st_anc.st_uid}"
+                    )
+                if st_anc.st_mode & stat.S_IWOTH:
+                    raise PrivilegedHelperError(
+                        f"Security error: privileged ancestor directory '{ancestor}' is world-writable"
+                    )
+                if st_anc.st_mode & stat.S_IWGRP:
+                    raise PrivilegedHelperError(
+                        f"Security error: privileged ancestor directory '{ancestor}' is group-writable (mode {oct(st_anc.st_mode)}). "
+                        f"Group-writable directories are prohibited for root-privileged operations."
+                    )
+            finally:
+                os.close(anc_fd)
+    else:
+        # NON-PRIVILEGED HARNESS OR TEST FIXTURE POLICY
+        allowed_uids = {0, euid}
+        if is_test_fixture:
+            allowed_uids.add(os.getuid())
+            if expected_uid is not None:
+                allowed_uids.add(expected_uid)
+        if st.st_uid not in allowed_uids:
+            raise PrivilegedHelperError(
+                f"Security error: parent directory '{dir_path}' is owned by untrusted UID {st.st_uid} (allowed: {allowed_uids})"
+            )
+        if st.st_mode & stat.S_IWGRP:
+            allowed_gids = {0, os.getgid()}
+            if is_test_fixture and expected_gid is not None:
+                allowed_gids.add(expected_gid)
+            if st.st_gid not in allowed_gids:
+                raise PrivilegedHelperError(
+                    f"Security error: parent directory '{dir_path}' is group-writable by untrusted GID {st.st_gid}"
+                )
+        # Ancestor validation for unprivileged / test fixtures
+        canonical_p = Path(dir_path).resolve()
+        for ancestor in canonical_p.parents:
+            if ancestor == Path("/"):
+                break
+            try:
+                anc_fd = os.open(str(ancestor), os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0))
+            except OSError as err:
+                raise PrivilegedHelperError(f"Security error: ancestor directory '{ancestor}' cannot be safely verified: {err}")
+            try:
+                st_anc = os.fstat(anc_fd)
+                if not stat.S_ISDIR(st_anc.st_mode):
+                    raise PrivilegedHelperError(f"Security error: ancestor '{ancestor}' is not a directory")
+                if st_anc.st_mode & stat.S_IWOTH:
+                    if not (st_anc.st_mode & stat.S_ISVTX and st_anc.st_uid == 0):
+                        raise PrivilegedHelperError(
+                            f"Security error: ancestor directory '{ancestor}' is world-writable without sticky-bit root ownership"
+                        )
+            finally:
+                os.close(anc_fd)
+
+
+def safe_write_pid_file(
+    pid_path: Union[str, Path],
+    content: str,
+    owner_user: Optional[str] = None,
+    owner_group: Optional[str] = None,
+    is_test_fixture: bool = False
+) -> Path:
+    """
+    Safely writes a PID file in a symlink- and hardlink-race resistant manner:
+    - Anchored by parent directory file descriptor.
+    - Validates target filename is a single lexical component (no directory traversal).
+    - Checks destination entry via fstatat: rejects existing symlinks, FIFOs/special files,
+      and files with st_nlink > 1 (hardlink attack protection).
+    - Creates a unique temporary file in the authorized directory using O_CREAT | O_EXCL | O_NOFOLLOW.
+    - Validates newly created descriptor with fstat: asserts regular file and st_nlink == 1.
+    - Writes content through descriptor using a loop to handle partial writes.
+    - Flushes content via os.fsync(tmp_fd).
+    - Sets ownership safely via os.fchown(tmp_fd, ...) when running as root.
+    - Atomically replaces destination via libc renameat through the retained parent directory descriptor.
+    - Flushes parent directory via os.fsync(parent_fd).
+    - Cleans up temporary file descriptor and file on any failure path.
+    """
+    target = validate_operation_path(pid_path, FileOperationType.PID_FILE, param_name="pid_file", allow_symlinks=False, is_test_fixture=is_test_fixture)
+    target_name = target.name
+    if "/" in target_name or "\\" in target_name or target_name in (".", "..") or "\0" in target_name:
+        raise PrivilegedHelperError(f"Security error: invalid single-component PID filename '{target_name}'")
+
+    parent_dir = target.parent
+    parent_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        parent_fd = os.open(str(parent_dir), os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0))
+    except OSError as err:
+        raise PrivilegedHelperError(f"Security error: cannot safely open PID parent directory '{parent_dir}': {err}")
+    tmp_name = None
+    tmp_fd = -1
+    try:
+        exp_uid = None
+        exp_gid = None
+        if owner_user:
+            try:
+                import pwd
+                pw = pwd.getpwnam(str(owner_user))
+                exp_uid = pw.pw_uid
+                exp_gid = owner_group if isinstance(owner_group, int) else pw.pw_gid
+            except Exception:
+                pass
+        verify_trusted_parent_directory(parent_fd, parent_dir, param_name="pid_file", expected_uid=exp_uid, expected_gid=exp_gid, is_test_fixture=is_test_fixture)
+
+        try:
+            dst_st = os.stat(target_name, dir_fd=parent_fd, follow_symlinks=False)
+            if stat.S_ISLNK(dst_st.st_mode):
+                raise PrivilegedHelperError(f"Security error: PID file '{target}' is a symlink")
+            if not stat.S_ISREG(dst_st.st_mode):
+                raise PrivilegedHelperError(f"Security error: PID file '{target}' is not a regular file")
+            if dst_st.st_nlink > 1:
+                raise PrivilegedHelperError(
+                    f"Security error: PID file '{target}' has multiple hard links (st_nlink={dst_st.st_nlink})"
+                )
+        except FileNotFoundError:
+            pass
+
+        tmp_name = f".tmp_pid_{target_name}_{secrets.token_hex(8)}"
+        crea_flags = (
+            os.O_WRONLY
+            | os.O_CREAT
+            | os.O_EXCL
+            | os.O_NOFOLLOW
+            | getattr(os, "O_NONBLOCK", 0)
+            | getattr(os, "O_CLOEXEC", 0)
+        )
+        tmp_fd = os.open(tmp_name, crea_flags, 0o644, dir_fd=parent_fd)
+
+        tmp_st = os.fstat(tmp_fd)
+        if not stat.S_ISREG(tmp_st.st_mode):
+            raise PrivilegedHelperError(f"Security error: temporary PID file '{tmp_name}' is not a regular file")
+        if tmp_st.st_nlink != 1:
+            raise PrivilegedHelperError(
+                f"Security error: temporary PID file '{tmp_name}' has invalid link count: {tmp_st.st_nlink}"
+            )
+
+        data = content.encode("utf-8")
+        written = 0
+        while written < len(data):
+            n = os.write(tmp_fd, data[written:])
+            if n == 0:
+                raise PrivilegedHelperError("Failed to write to PID file: 0 bytes written")
+            written += n
+
+        os.fsync(tmp_fd)
+
+        if os.geteuid() == 0 and (owner_user or owner_group):
+            try:
+                import pwd
+                uid = pwd.getpwnam(str(owner_user)).pw_uid if owner_user else -1
+                gid = owner_group if isinstance(owner_group, int) else (pwd.getpwnam(str(owner_user)).pw_gid if owner_user else -1)
+                if uid > 0 and gid > 0:
+                    try:
+                        os.fchown(tmp_fd, uid, gid)
+                    except PermissionError:
+                        os.chown(str(parent_dir / tmp_name), uid, gid)
+            except Exception:
+                pass
+
+        os.close(tmp_fd)
+        tmp_fd = -1
+
+        _safe_renameat(
+            parent_fd,
+            tmp_name,
+            parent_fd,
+            target_name,
+            fallback_old_path=parent_dir / tmp_name,
+            fallback_new_path=target
+        )
+        tmp_name = None
+
+        try:
+            os.fsync(parent_fd)
+        except OSError:
+            pass
+
+        return target
+    finally:
+        if tmp_fd >= 0:
+            try:
+                os.close(tmp_fd)
+            except OSError:
+                pass
+        if tmp_name is not None:
+            try:
+                os.unlink(tmp_name, dir_fd=parent_fd)
+            except OSError:
+                pass
+        os.close(parent_fd)
+
+
+def safe_atomic_write_text(
+    path: Union[str, Path],
+    content: str,
+    op_type: FileOperationType = FileOperationType.STATE_FILE,
+    param_name: str = "path",
+    owner_user: Optional[str] = None,
+    owner_group: Optional[str] = None,
+    is_test_fixture: bool = False
+) -> Path:
+    """
+    Safely writes text to path using directory-descriptor-anchored atomic replacement,
+    avoiding TOCTOU parent directory substitution, symlinks, and hardlink attacks.
+    If the target destination file already exists, verifies it is not a symlink,
+    not a special file, and does not have st_nlink > 1 before atomic replacement.
+    CONFIG_FILE is strictly read-only and cannot be targeted by write operations.
+    """
+    if op_type == FileOperationType.CONFIG_FILE:
+        raise PrivilegedHelperError("Security error: CONFIG_FILE is strictly read-only; write operations are prohibited")
+
+    target = validate_operation_path(path, op_type, param_name=param_name, allow_symlinks=False, is_test_fixture=is_test_fixture)
+    target_name = target.name
+    if "/" in target_name or "\\" in target_name or target_name in (".", "..") or "\0" in target_name:
+        raise PrivilegedHelperError(f"Security error: invalid single-component filename '{target_name}'")
+
+    parent_dir = target.parent
+    parent_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        parent_fd = os.open(str(parent_dir), os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0))
+    except OSError as err:
+        raise PrivilegedHelperError(f"Security error: cannot safely open parent directory '{parent_dir}': {err}")
+    tmp_name = None
+    tmp_fd = -1
+    try:
+        exp_uid = None
+        exp_gid = None
+        if owner_user:
+            try:
+                import pwd
+                pw = pwd.getpwnam(str(owner_user))
+                exp_uid = pw.pw_uid
+                exp_gid = owner_group if isinstance(owner_group, int) else pw.pw_gid
+            except Exception:
+                pass
+        verify_trusted_parent_directory(parent_fd, parent_dir, param_name=param_name, expected_uid=exp_uid, expected_gid=exp_gid, is_test_fixture=is_test_fixture)
+
+        try:
+            dst_st = os.stat(target_name, dir_fd=parent_fd, follow_symlinks=False)
+            if stat.S_ISLNK(dst_st.st_mode):
+                raise PrivilegedHelperError(f"Security error: destination '{target}' is a symlink")
+            if not stat.S_ISREG(dst_st.st_mode):
+                raise PrivilegedHelperError(f"Security error: destination '{target}' is not a regular file")
+            if dst_st.st_nlink > 1:
+                raise PrivilegedHelperError(f"Security error: destination '{target}' has multiple hard links (st_nlink={dst_st.st_nlink})")
+        except FileNotFoundError:
+            pass
+
+        tmp_name = f".tmp_{target_name}_{secrets.token_hex(8)}"
+        crea_flags = (
+            os.O_WRONLY
+            | os.O_CREAT
+            | os.O_EXCL
+            | os.O_NOFOLLOW
+            | getattr(os, "O_NONBLOCK", 0)
+            | getattr(os, "O_CLOEXEC", 0)
+        )
+        tmp_fd = os.open(tmp_name, crea_flags, 0o644, dir_fd=parent_fd)
+
+        st = os.fstat(tmp_fd)
+        if not stat.S_ISREG(st.st_mode):
+            raise PrivilegedHelperError(f"Security error: temporary file '{tmp_name}' is not a regular file")
+        if st.st_nlink != 1:
+            raise PrivilegedHelperError(f"Security error: temporary file has invalid hardlink count: {st.st_nlink}")
+
+        data = content.encode("utf-8")
+        written = 0
+        while written < len(data):
+            n = os.write(tmp_fd, data[written:])
+            if n == 0:
+                raise PrivilegedHelperError("Failed to write to file: 0 bytes written")
+            written += n
+
+        os.fsync(tmp_fd)
+
+        if os.geteuid() == 0 and (owner_user or owner_group):
+            try:
+                import pwd
+                uid = pwd.getpwnam(str(owner_user)).pw_uid if owner_user else -1
+                gid = owner_group if isinstance(owner_group, int) else (pwd.getpwnam(str(owner_user)).pw_gid if owner_user else -1)
+                if uid > 0 and gid > 0:
+                    try:
+                        os.fchown(tmp_fd, uid, gid)
+                    except PermissionError:
+                        os.chown(str(parent_dir / tmp_name), uid, gid)
+            except Exception:
+                pass
+
+        os.close(tmp_fd)
+        tmp_fd = -1
+
+        _safe_renameat(
+            parent_fd,
+            tmp_name,
+            parent_fd,
+            target_name,
+            fallback_old_path=parent_dir / tmp_name,
+            fallback_new_path=target
+        )
+        tmp_name = None
+
+        try:
+            os.fsync(parent_fd)
+        except OSError:
+            pass
+        return target
+    finally:
+        if tmp_fd >= 0:
+            try:
+                os.close(tmp_fd)
+            except OSError:
+                pass
+        if tmp_name is not None:
+            try:
+                os.unlink(tmp_name, dir_fd=parent_fd)
+            except OSError:
+                pass
+        os.close(parent_fd)
+
+
+def validate_ip_endpoint(
+    ip_val: Union[str, Any],
+    param_name: str,
+    allowed_ips: set,
+    expected_family: Optional[int] = None,
+    allow_loopback: bool = False
+) -> Union[ipaddress.IPv4Address, ipaddress.IPv6Address]:
+    """
+    Strictly validates an IP address:
+    1. Rejects any non-string, whitespace, quotes, semicolon, or injection characters.
+    2. Parses with ipaddress.ip_address.
+    3. Checks expected family (4 or 6) if provided.
+    4. Restricts to known allowlisted PS-028 laboratory endpoints. Loopback is rejected unless allow_loopback=True.
+    """
+    if not isinstance(ip_val, str) or not ip_val.strip():
+        raise PrivilegedHelperError(f"Invalid {param_name}: must be a non-empty string")
+
+    clean_ip = ip_val.strip()
+    for ch in (" ", "\t", "\r", "\n", ";", '"', "'", "`", "$", "\\", "|", "&", "<", ">", "{", "}", "(", ")", "[", "]"):
+        if ch in clean_ip:
+            raise PrivilegedHelperError(f"Security error: {param_name} '{clean_ip}' contains forbidden injection syntax")
+
+    try:
+        ip_obj = ipaddress.ip_address(clean_ip)
+    except ValueError as exc:
+        raise PrivilegedHelperError(f"Invalid {param_name} '{clean_ip}': {exc}") from exc
+
+    if expected_family is not None and ip_obj.version != expected_family:
+        raise PrivilegedHelperError(
+            f"Address family mismatch for {param_name} '{clean_ip}': expected IPv{expected_family}, got IPv{ip_obj.version}"
+        )
+
+    effective_allowed = set(allowed_ips)
+    if allow_loopback:
+        effective_allowed |= ALLOWED_TEST_LOOPBACK_IPS
+
+    canonical = str(ip_obj)
+    if canonical not in effective_allowed and clean_ip not in effective_allowed:
+        raise PrivilegedHelperError(
+            f"Security error: {param_name} '{clean_ip}' is not an authorized PS-028 endpoint (allowed: {sorted(effective_allowed)})"
+        )
+
+    return ip_obj
+
+
+def get_netns_inode(netns_name: str) -> Optional[Tuple[int, int]]:
+    """Retrieves kernel (st_dev, st_ino) of /var/run/netns/<netns_name> or /run/netns/<netns_name>."""
+    for base in ("/run/netns", "/var/run/netns"):
+        p = Path(base) / netns_name
+        try:
+            if p.is_symlink() or os.path.islink(str(p)):
+                continue
+            fd = os.open(str(p), os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0))
+            try:
+                st = os.fstat(fd)
+                if st.st_uid != 0:
+                    continue
+                return (st.st_dev, st.st_ino)
+            finally:
+                os.close(fd)
+        except OSError:
+            pass
+    return None
+
+
+def get_current_netns_dev_ino() -> Optional[Tuple[int, int]]:
+    """Retrieves kernel (st_dev, st_ino) of the current process (/proc/self/ns/net)."""
+    try:
+        st = os.stat("/proc/self/ns/net")
+        return (st.st_dev, st.st_ino)
+    except OSError:
+        return None
+
+
+def verify_current_netns(netns_name: str) -> bool:
+    """
+    Positively verifies via kernel dev/inode that the current process is executing inside
+    the expected target network namespace.
+    Ensures /run/netns/<netns_name> is not a symlink, is owned by root, and matches /proc/self/ns/net.
+    """
+    target = get_netns_inode(netns_name)
+    if target is None:
+        return False
+    current = get_current_netns_dev_ino()
+    return current is not None and current == target
 
 
 class SnapMountError(PrivilegedHelperError, run_trial.TrialExecutionError):
@@ -729,11 +1689,21 @@ def launch_snap_browser_main(args: argparse.Namespace) -> None:
     """
     Main entrypoint for launch-snap-browser subparser.
     Called inside ps028-cl in a private mount namespace:
-    1. Sets up missing mounts (cgroup2, securityfs).
-    2. Sets up isolated Snap mount namespace with lab DNS resolver (10.0.1.1).
-    3. Drops privileges to target UID and GID.
-    4. Replaces process image with the browser executable.
+    1. Validates target unprivileged UID/GID.
+    2. Sets up missing mounts (cgroup2, securityfs).
+    3. Sets up isolated Snap mount namespace with lab DNS resolver (10.0.1.1).
+    4. Drops privileges to target UID and GID.
+    5. Replaces process image with the browser executable.
     """
+    target_uid = getattr(args, "reuid", 0)
+    target_gid = getattr(args, "regid", 0)
+    if target_uid <= 0 or target_gid <= 0:
+        sys.stderr.write(
+            f"Security error: refusing to launch browser as root or invalid identity (UID={target_uid}, GID={target_gid})\n"
+        )
+        sys.stderr.flush()
+        sys.exit(74)
+
     # 1. Mount setup
     try:
         setup_snap_mounts(mounts_file=args.mounts_file)
@@ -897,9 +1867,15 @@ def verify_caller_holds_lock(lock_path: Path) -> None:
         )
 
     try:
-        fd = os.open(str(target), os.O_RDWR)
+        fd = os.open(
+            str(target),
+            os.O_RDWR | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0)
+        )
     except PermissionError:
-        fd = os.open(str(target), os.O_RDONLY)
+        fd = os.open(
+            str(target),
+            os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0)
+        )
 
     try:
         # Non-blocking exclusive lock probe:
@@ -950,7 +1926,8 @@ def apply_scenario_privileged(
     scenarios_path: Path = DEFAULT_SCENARIOS_PATH,
     caller_holds_lock: bool = False,
     lock_file: Optional[Path] = None,
-    lock_timeout: float = 5.0
+    lock_timeout: float = 5.0,
+    is_test_fixture: bool = False
 ) -> Dict[str, Any]:
     """
     Applies scenario S0-S6 network impairments with root privileges:
@@ -966,6 +1943,10 @@ def apply_scenario_privileged(
     if sc_clean not in ALLOWED_SCENARIOS:
         raise PrivilegedHelperError(f"Scenario '{scenario_id}' invalid. Must be one of: {ALLOWED_SCENARIOS}")
 
+    scenarios_path = validate_operation_path(scenarios_path, FileOperationType.CONFIG_FILE, "scenarios_path", allow_symlinks=False, is_test_fixture=is_test_fixture)
+    if lock_file:
+        lock_file = validate_operation_path(lock_file, FileOperationType.LOCK_FILE, "lock_file", allow_symlinks=False, is_test_fixture=is_test_fixture)
+
     with coordinate_lock(caller_holds_lock=caller_holds_lock, lock_path=lock_file, timeout=lock_timeout):
         data = impair.load_scenarios_config(scenarios_path)
         scenario = data["scenarios"][sc_clean]
@@ -975,7 +1956,8 @@ def apply_scenario_privileged(
             scenarios_path=scenarios_path,
             caller_holds_lock=True,
             lock_file=lock_file,
-            lock_timeout=lock_timeout
+            lock_timeout=lock_timeout,
+            is_test_fixture=is_test_fixture
         )
 
         try:
@@ -1031,7 +2013,8 @@ def restore_baseline_privileged(
     scenarios_path: Path = DEFAULT_SCENARIOS_PATH,
     caller_holds_lock: bool = False,
     lock_file: Optional[Path] = None,
-    lock_timeout: float = 5.0
+    lock_timeout: float = 5.0,
+    is_test_fixture: bool = False
 ) -> Dict[str, Any]:
     """
     Restores network baseline with root privileges:
@@ -1041,6 +2024,10 @@ def restore_baseline_privileged(
     4. Restores DNS baseline (0ms A and AAAA) and unlinks backup.
     5. Clears impairment state file.
     """
+    scenarios_path = validate_operation_path(scenarios_path, FileOperationType.CONFIG_FILE, "scenarios_path", allow_symlinks=False, is_test_fixture=is_test_fixture)
+    if lock_file:
+        lock_file = validate_operation_path(lock_file, FileOperationType.LOCK_FILE, "lock_file", allow_symlinks=False, is_test_fixture=is_test_fixture)
+
     with coordinate_lock(caller_holds_lock=caller_holds_lock, lock_path=lock_file, timeout=lock_timeout):
         errors: List[str] = []
 
@@ -1088,7 +2075,8 @@ def apply_dns_delays_privileged(
     backup_file_a4: Optional[Path] = None,
     caller_holds_lock: bool = False,
     lock_file: Optional[Path] = None,
-    lock_timeout: float = 5.0
+    lock_timeout: float = 5.0,
+    is_test_fixture: bool = False
 ) -> Dict[str, Any]:
     """
     Applies DNS delays (rules.A and rules.AAAA) with root privileges.
@@ -1099,6 +2087,15 @@ def apply_dns_delays_privileged(
         raise PrivilegedHelperError(f"Invalid a_delay_ms {a_delay_ms}: must be integer between 0 and 2000")
     if not isinstance(aaaa_delay_ms, int) or isinstance(aaaa_delay_ms, bool) or not (0 <= aaaa_delay_ms <= 2000):
         raise PrivilegedHelperError(f"Invalid aaaa_delay_ms {aaaa_delay_ms}: must be integer between 0 and 2000")
+
+    if config_file:
+        config_file = validate_operation_path(config_file, FileOperationType.CONFIG_FILE, "config_file", allow_symlinks=False, is_test_fixture=is_test_fixture)
+    if backup_file_a3:
+        backup_file_a3 = validate_operation_path(backup_file_a3, FileOperationType.BACKUP_FILE, "backup_file_a3", allow_symlinks=False, is_test_fixture=is_test_fixture)
+    if backup_file_a4:
+        backup_file_a4 = validate_operation_path(backup_file_a4, FileOperationType.BACKUP_FILE, "backup_file_a4", allow_symlinks=False, is_test_fixture=is_test_fixture)
+    if lock_file:
+        lock_file = validate_operation_path(lock_file, FileOperationType.LOCK_FILE, "lock_file", allow_symlinks=False, is_test_fixture=is_test_fixture)
 
     with coordinate_lock(caller_holds_lock=caller_holds_lock, lock_path=lock_file, timeout=lock_timeout):
         try:
@@ -1133,12 +2130,20 @@ def restore_dns_privileged(
     backup_file_a4: Optional[Path] = None,
     caller_holds_lock: bool = False,
     lock_file: Optional[Path] = None,
-    lock_timeout: float = 5.0
+    lock_timeout: float = 5.0,
+    is_test_fixture: bool = False
 ) -> Dict[str, Any]:
     """
     Restores clean DNS baseline (0ms delays and reloads DNS server) with root privileges.
     Never reports success if restoration fails or is unverified.
     """
+    if config_file:
+        config_file = validate_operation_path(config_file, FileOperationType.CONFIG_FILE, "config_file", allow_symlinks=False, is_test_fixture=is_test_fixture)
+    if backup_file_a4:
+        backup_file_a4 = validate_operation_path(backup_file_a4, FileOperationType.BACKUP_FILE, "backup_file_a4", allow_symlinks=False, is_test_fixture=is_test_fixture)
+    if lock_file:
+        lock_file = validate_operation_path(lock_file, FileOperationType.LOCK_FILE, "lock_file", allow_symlinks=False, is_test_fixture=is_test_fixture)
+
     with coordinate_lock(caller_holds_lock=caller_holds_lock, lock_path=lock_file, timeout=lock_timeout):
         try:
             impair.restore_dns_baseline(
@@ -1304,11 +2309,12 @@ def _reap_capture_on_startup_failure(
     parent_proc: Optional[Any],
     tcpdump_pid: Optional[int] = None,
     log_fp: Optional[Any] = None,
-    pid_file: Optional[Path] = None
+    pid_file: Optional[Path] = None,
+    pcap_file: Optional[Path] = None
 ) -> None:
     """
     Terminates and reaps any capture processes launched when startup fails.
-    Prevents orphaned tcpdump processes and unlinks stale PID file.
+    Prevents orphaned tcpdump processes and unlinks stale PID file and partial capture file.
     """
     if log_fp and not getattr(log_fp, "closed", True):
         try:
@@ -1319,6 +2325,12 @@ def _reap_capture_on_startup_failure(
     if pid_file:
         try:
             Path(pid_file).unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    if pcap_file:
+        try:
+            Path(pcap_file).unlink(missing_ok=True)
         except Exception:
             pass
 
@@ -1391,6 +2403,9 @@ def _resolve_and_validate_capture_owner(
             f"Cannot determine unprivileged capture owner: {exc}"
         ) from exc
 
+    if invoking_ident.uid == 0 or invoking_ident.username == "root":
+        raise PrivilegedHelperError("Security error: capture owner must be an unprivileged user, not root")
+
     if owner_user is not None and owner_user != invoking_ident.username:
         raise PrivilegedHelperError(
             f"Supplied owner_user '{owner_user}' does not match invoking identity '{invoking_ident.username}'"
@@ -1411,6 +2426,11 @@ def _resolve_and_validate_capture_owner(
                 f"Supplied owner_group '{owner_group}' cannot be resolved: {exc}"
             ) from exc
 
+        if target_gid == 0 or str(owner_group) in ("0", "root", "wheel", "sudo"):
+            raise PrivilegedHelperError(
+                f"Security error: owner_group '{owner_group}' (GID 0/privileged) is unauthorized"
+            )
+
         try:
             permitted_gids = set(os.getgrouplist(target_user, invoking_ident.gid))
         except (KeyError, OverflowError, OSError) as exc:
@@ -1424,6 +2444,8 @@ def _resolve_and_validate_capture_owner(
             )
     else:
         target_gid = invoking_ident.gid
+        if target_gid == 0:
+            raise PrivilegedHelperError("Security error: primary GID for capture owner cannot be GID 0")
 
     return target_user, target_gid
 
@@ -1440,19 +2462,26 @@ def start_capture_privileged(
     readiness_timeout: float = 3.0,
     caller_holds_lock: bool = False,
     lock_file: Optional[Path] = None,
-    lock_timeout: float = 5.0
+    lock_timeout: float = 5.0,
+    is_test_fixture: bool = False
 ) -> Dict[str, Any]:
     """
     Starts tcpdump inside the target network namespace with root privileges:
     - Sets immediate mode and unbuffered write for fast flush.
     - Sets operating system capture buffer size via -B (buffer_size_kb).
     - Drops capture write privileges to owner_user (via -Z).
+    - Writes PCAP data directly to a pre-opened, validated file descriptor passed as stdout (-w -).
     - Verifies readiness ('listening on') within readiness_timeout.
     - Writes PID file and returns JSON-serializable capture handle.
     - Cleans up and reaps spawned process on any startup failure.
     """
     if netns not in ALLOWED_NETNS:
         raise PrivilegedHelperError(f"Unauthorized netns '{netns}'. Allowed: {sorted(ALLOWED_NETNS)}")
+
+    output_pcap = validate_operation_path(output_pcap, FileOperationType.PCAP_FILE, "output_pcap", allow_symlinks=False, is_test_fixture=is_test_fixture)
+    log_file = validate_operation_path(log_file, FileOperationType.LOG_FILE, "log_file", allow_symlinks=False, is_test_fixture=is_test_fixture)
+    if lock_file:
+        lock_file = validate_operation_path(lock_file, FileOperationType.LOCK_FILE, "lock_file", allow_symlinks=False, is_test_fixture=is_test_fixture)
 
     with coordinate_lock(caller_holds_lock=caller_holds_lock, lock_path=lock_file, timeout=lock_timeout):
         output_pcap = Path(output_pcap).resolve()
@@ -1473,24 +2502,166 @@ def start_capture_privileged(
         target_user, target_gid = _resolve_and_validate_capture_owner(owner_user, owner_group)
         cmd.extend(["-Z", target_user])
 
+        # Pass -w - to write to stdout (pre-opened, validated file descriptor)
         cmd.extend([
-            "-w", str(output_pcap),
+            "-w", "-",
             bpf_filter
         ])
 
-        pid_file = output_pcap.with_suffix(".pid")
-        proc = None
-        log_fp = open(log_file, "w", encoding="utf-8")
+        target_uid = None
+        if target_user:
+            try:
+                import pwd
+                target_uid = pwd.getpwnam(target_user).pw_uid
+            except Exception:
+                pass
+
+        pcap_name = output_pcap.name
+        if "/" in pcap_name or "\\" in pcap_name or pcap_name in (".", "..") or "\0" in pcap_name:
+            raise PrivilegedHelperError(f"Security error: invalid capture filename '{pcap_name}'")
+        pcap_dir = output_pcap.parent
+        pcap_dir.mkdir(parents=True, exist_ok=True)
         try:
-            proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=log_fp,
-                start_new_session=True
-            )
-        except Exception as exc:
-            log_fp.close()
-            raise PrivilegedHelperError(f"Failed to spawn tcpdump: {exc}")
+            pcap_dir_fd = os.open(str(pcap_dir), os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0))
+        except OSError as err:
+            raise PrivilegedHelperError(f"Security error: cannot safely open capture output parent directory '{pcap_dir}': {err}")
+        pcap_created_fd = -1
+        pcap_fp = None
+        log_fp = None
+        try:
+            try:
+                verify_trusted_parent_directory(pcap_dir_fd, pcap_dir, param_name="output_pcap", expected_uid=target_uid, expected_gid=target_gid, is_test_fixture=is_test_fixture)
+                try:
+                    pcap_st = os.stat(pcap_name, dir_fd=pcap_dir_fd, follow_symlinks=False)
+                    if stat.S_ISLNK(pcap_st.st_mode):
+                        raise PrivilegedHelperError(f"Security error: capture output '{output_pcap}' is a symlink")
+                    if not stat.S_ISREG(pcap_st.st_mode):
+                        raise PrivilegedHelperError(f"Security error: capture output '{output_pcap}' is not a regular file")
+                    if pcap_st.st_nlink > 1:
+                        raise PrivilegedHelperError(f"Security error: capture output '{output_pcap}' has multiple hardlinks (st_nlink={pcap_st.st_nlink})")
+                    raise PrivilegedHelperError(f"Security error: capture output '{output_pcap}' already exists (refusing to overwrite existing file to prevent inode truncation attacks)")
+                except FileNotFoundError:
+                    pass
+
+                pcap_crea_flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+                pcap_created_fd = os.open(pcap_name, pcap_crea_flags, 0o644, dir_fd=pcap_dir_fd)
+                pcap_created_st = os.fstat(pcap_created_fd)
+                if not stat.S_ISREG(pcap_created_st.st_mode):
+                    raise PrivilegedHelperError(f"Security error: newly created capture output '{output_pcap}' is not a regular file")
+                if pcap_created_st.st_nlink != 1:
+                    raise PrivilegedHelperError(f"Security error: newly created capture output '{output_pcap}' has unexpected link count {pcap_created_st.st_nlink}")
+
+                if os.geteuid() == 0 and target_uid is not None:
+                    try:
+                        os.fchown(pcap_created_fd, target_uid, target_gid if target_gid is not None else -1)
+                    except OSError:
+                        pass
+
+                pcap_fp = open(pcap_created_fd, "wb", closefd=True)
+                pcap_created_fd = -1
+            finally:
+                if pcap_created_fd >= 0:
+                    try:
+                        os.close(pcap_created_fd)
+                    except OSError:
+                        pass
+                os.close(pcap_dir_fd)
+
+            pid_file = output_pcap.with_suffix(".pid")
+            validate_operation_path(pid_file, FileOperationType.PID_FILE, "pid_file", allow_symlinks=False, is_test_fixture=is_test_fixture)
+            proc = None
+            log_name = log_file.name
+            if "/" in log_name or "\\" in log_name or log_name in (".", "..") or "\0" in log_name:
+                raise PrivilegedHelperError(f"Security error: invalid log filename '{log_name}'")
+            log_dir = log_file.parent
+            log_dir.mkdir(parents=True, exist_ok=True)
+            try:
+                log_dir_fd = os.open(str(log_dir), os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0))
+            except OSError as err:
+                raise PrivilegedHelperError(f"Security error: cannot safely open log file parent directory '{log_dir}': {err}")
+            tmp_log_name = None
+            log_fd = -1
+            try:
+                verify_trusted_parent_directory(log_dir_fd, log_dir, param_name="log_file", expected_uid=target_uid, expected_gid=target_gid, is_test_fixture=is_test_fixture)
+
+                try:
+                    log_st_check = os.stat(log_name, dir_fd=log_dir_fd, follow_symlinks=False)
+                    if stat.S_ISLNK(log_st_check.st_mode):
+                        raise PrivilegedHelperError(f"Security error: log file '{log_file}' is a symlink")
+                    if not stat.S_ISREG(log_st_check.st_mode):
+                        raise PrivilegedHelperError(f"Security error: log file '{log_file}' is not a regular file")
+                    if log_st_check.st_nlink > 1:
+                        raise PrivilegedHelperError(f"Security error: log file '{log_file}' has multiple hardlinks (st_nlink={log_st_check.st_nlink})")
+                except FileNotFoundError:
+                    pass
+
+                tmp_log_name = f".tmp_log_{log_name}_{secrets.token_hex(8)}"
+                excl_flags = (
+                    os.O_RDWR
+                    | os.O_CREAT
+                    | os.O_EXCL
+                    | os.O_NOFOLLOW
+                    | getattr(os, "O_CLOEXEC", 0)
+                )
+                log_fd = os.open(tmp_log_name, excl_flags, 0o644, dir_fd=log_dir_fd)
+                log_st = os.fstat(log_fd)
+                if not stat.S_ISREG(log_st.st_mode):
+                    raise PrivilegedHelperError(f"Security error: staging log file '{tmp_log_name}' is not a regular file")
+                if log_st.st_nlink != 1:
+                    raise PrivilegedHelperError(f"Security error: staging log file '{tmp_log_name}' has unexpected link count {log_st.st_nlink}")
+
+                if os.geteuid() == 0 and target_uid is not None:
+                    try:
+                        os.fchown(log_fd, target_uid, target_gid if target_gid is not None else -1)
+                    except OSError:
+                        pass
+
+                _safe_renameat(
+                    log_dir_fd,
+                    tmp_log_name,
+                    log_dir_fd,
+                    log_name,
+                    fallback_old_path=log_dir / tmp_log_name,
+                    fallback_new_path=log_file
+                )
+                tmp_log_name = None
+
+                log_fp = open(log_fd, "w+", encoding="utf-8", closefd=True)
+                log_fd = -1
+            finally:
+                if tmp_log_name is not None:
+                    try:
+                        os.unlink(tmp_log_name, dir_fd=log_dir_fd)
+                    except OSError:
+                        pass
+                if log_fd >= 0:
+                    try:
+                        os.close(log_fd)
+                    except OSError:
+                        pass
+                os.close(log_dir_fd)
+
+            try:
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=pcap_fp,
+                    stderr=log_fp,
+                    start_new_session=True
+                )
+            except Exception as exc:
+                raise PrivilegedHelperError(f"Failed to spawn tcpdump: {exc}")
+        finally:
+            # Parent immediately closes its copies of the descriptors after child spawn or on any failure
+            if pcap_fp:
+                try:
+                    pcap_fp.close()
+                except OSError:
+                    pass
+            if log_fp:
+                try:
+                    log_fp.close()
+                except OSError:
+                    pass
 
         try:
             # Poll for readiness
@@ -1527,13 +2698,12 @@ def start_capture_privileged(
             # Locate child tcpdump PID if ip spawned it
             tcpdump_pid = run_trial.find_tcpdump_pid(proc.pid)
 
-            # Save PID file for tracking
-            pid_file.write_text(f"{proc.pid}:{tcpdump_pid}\n", encoding="utf-8")
+            # Save PID file safely for tracking
+            safe_write_pid_file(pid_file, f"{proc.pid}:{tcpdump_pid}\n", owner_user=target_user, owner_group=target_gid, is_test_fixture=is_test_fixture)
 
             # Set file ownership if requested or running as root
             if target_user:
                 _chown_file(log_file, target_user, target_gid)
-                _chown_file(pid_file, target_user, target_gid)
 
             # Close open log file handle in parent process
             try:
@@ -1561,7 +2731,8 @@ def start_capture_privileged(
             _reap_capture_on_startup_failure(
                 parent_proc=proc,
                 log_fp=log_fp,
-                pid_file=pid_file
+                pid_file=pid_file,
+                pcap_file=output_pcap
             )
             if isinstance(exc, PrivilegedHelperError):
                 raise
@@ -1588,7 +2759,8 @@ def stop_capture_privileged(
     caller_holds_lock: bool = False,
     lock_file: Optional[Path] = None,
     lock_timeout: float = 5.0,
-    proc_dir: Optional[Path] = None
+    proc_dir: Optional[Path] = None,
+    is_test_fixture: bool = False
 ) -> Dict[str, Any]:
     """
     Gracefully stops the capture process with root privileges:
@@ -1603,6 +2775,11 @@ def stop_capture_privileged(
     """
     if not isinstance(pid, int) or pid <= 0:
         raise PrivilegedHelperError(f"Invalid capture PID: {pid}")
+
+    if pcap_path:
+        pcap_path = validate_operation_path(pcap_path, FileOperationType.PCAP_FILE, "pcap_path", allow_symlinks=False, is_test_fixture=is_test_fixture)
+    if lock_file:
+        lock_file = validate_operation_path(lock_file, FileOperationType.LOCK_FILE, "lock_file", allow_symlinks=False, is_test_fixture=is_test_fixture)
 
     with coordinate_lock(caller_holds_lock=caller_holds_lock, lock_path=lock_file, timeout=lock_timeout):
         pcap_file = Path(pcap_path).resolve() if pcap_path else None
@@ -1765,11 +2942,26 @@ def stop_capture_privileged(
         return {"status": "OK", "stopped": True}
 
 
-def _chown_file(path: Path, user: str, group: Optional[Union[str, int]] = None) -> None:
-    """Safely chowns file to validated user/group if running as root."""
-    if os.geteuid() == 0 and path.exists():
+def _chown_file(path: Union[str, Path], user: str, group: Optional[Union[str, int]] = None) -> None:
+    """Safely chowns file to validated unprivileged user/group if running as root."""
+    if os.geteuid() == 0:
+        p = Path(path)
+        if not p.exists():
+            return
+        if p.is_symlink() or os.path.islink(str(p)):
+            raise PrivilegedHelperError(f"Security error: refusing to chown symlink target '{path}'")
+
+        validate_secure_path(p, "chown_target", allow_symlinks=False)
+
+        if user in ("root", "0"):
+            raise PrivilegedHelperError("Security error: refusing to chown to root UID 0")
+        if group is not None and str(group) in ("0", "root", "wheel", "sudo"):
+            raise PrivilegedHelperError(f"Security error: refusing to chown to privileged group '{group}' (GID 0)")
+
         try:
             ident = identity.resolve_user_by_name(user)
+            if ident.uid == 0:
+                raise PrivilegedHelperError("Security error: refusing to chown to root UID 0")
             uid = ident.uid
             if group is not None:
                 if isinstance(group, int):
@@ -1779,10 +2971,42 @@ def _chown_file(path: Path, user: str, group: Optional[Union[str, int]] = None) 
                 else:
                     import grp
                     gid = grp.getgrnam(str(group)).gr_gid
+                if gid == 0 or str(group) in ("0", "root", "wheel", "sudo"):
+                    raise PrivilegedHelperError(f"Security error: refusing to chown to privileged group '{group}' (GID 0)")
             else:
                 gid = ident.gid
-            os.chown(str(path), uid, gid)
-        except (identity.IdentityResolutionError, KeyError, OSError) as exc:
+                if gid == 0:
+                    raise PrivilegedHelperError("Security error: refusing to chown to root GID 0")
+            try:
+                fd = os.open(
+                    str(p),
+                    os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0)
+                )
+                try:
+                    st = os.fstat(fd)
+                    if not stat.S_ISREG(st.st_mode):
+                        raise PrivilegedHelperError(f"Security error: refusing to chown non-regular file '{path}'")
+                    if st.st_nlink > 1:
+                        raise PrivilegedHelperError(f"Security error: refusing to chown hardlinked file '{path}'")
+                    try:
+                        os.fchown(fd, uid, gid)
+                    except PermissionError:
+                        os.chown(str(p), uid, gid)
+                finally:
+                    os.close(fd)
+            except OSError as exc:
+                if exc.errno in (errno.ELOOP, errno.EMLINK):
+                    raise PrivilegedHelperError(f"Security error: refusing to chown symlink target '{path}'")
+                if isinstance(exc, PrivilegedHelperError):
+                    raise
+                os.chown(str(p), uid, gid)
+        except identity.IdentityResolutionError as exc:
+            if "UID 0" in str(exc) or "root" in str(exc):
+                raise PrivilegedHelperError("Security error: refusing to chown to root UID 0") from exc
+            raise PrivilegedHelperError(f"Failed to change ownership of {path} to {user}: {exc}") from exc
+        except (KeyError, OSError) as exc:
+            if isinstance(exc, PrivilegedHelperError):
+                raise
             raise PrivilegedHelperError(
                 f"Failed to change ownership of {path} to {user}: {exc}"
             ) from exc
@@ -1801,7 +3025,10 @@ def validate_s5_params(
     concurrency: Optional[int] = None,
     drop_pct: Optional[int] = None,
     oifname: Optional[str] = None,
-    netns: Optional[str] = None
+    netns: Optional[str] = None,
+    client_ip: Optional[str] = None,
+    target_ip: Optional[str] = None,
+    allow_loopback: bool = False
 ) -> None:
     if not isinstance(port, int) or isinstance(port, bool) or not (1 <= port <= 65535):
         raise PrivilegedHelperError(f"Invalid port {port}: must be between 1 and 65535")
@@ -1823,6 +3050,26 @@ def validate_s5_params(
     if netns is not None and netns not in ALLOWED_S5_NETNS:
         raise PrivilegedHelperError(f"Invalid netns '{netns}': not in allowlist {sorted(ALLOWED_S5_NETNS)}")
 
+    c_obj = None
+    if client_ip is not None:
+        c_obj = validate_ip_endpoint(client_ip, "client_ip", ALLOWED_PS028_CLIENT_IPS, allow_loopback=allow_loopback)
+
+    t_obj = None
+    if target_ip is not None:
+        t_obj = validate_ip_endpoint(target_ip, "target_ip", ALLOWED_PS028_TARGET_IPS, allow_loopback=allow_loopback)
+
+    if c_obj is not None and t_obj is not None:
+        if c_obj.version != t_obj.version:
+            raise PrivilegedHelperError(
+                f"Address family mismatch: client_ip '{client_ip}' is IPv{c_obj.version} "
+                f"but target_ip '{target_ip}' is IPv{t_obj.version}"
+            )
+        if oifname is not None:
+            if c_obj.version == 6 and oifname == "ps028-rt-sv4":
+                raise PrivilegedHelperError(f"Interface '{oifname}' is invalid for IPv6 traffic")
+            elif c_obj.version == 4 and oifname == "ps028-rt-sv6":
+                raise PrivilegedHelperError(f"Interface '{oifname}' is invalid for IPv4 traffic")
+
 
 def setup_s5_counters_privileged(
     client_ip: str = "2001:db8:1::2",
@@ -1831,17 +3078,31 @@ def setup_s5_counters_privileged(
     oifname: str = "ps028-rt-sv6",
     drop_pct: int = 50,
     caller_holds_lock: bool = False,
-    lock_file: Optional[Path] = None
+    lock_file: Optional[Path] = None,
+    allow_loopback: bool = False,
+    is_test_fixture: bool = False
 ) -> Dict[str, Any]:
     """
     Configures project-scoped nftables counters in table inet ps028_impair inside ps028-rt.
     Idempotent: flushes forward chain and initializes syn_total, syn_dropped, and syn_not_dropped.
     """
-    validate_s5_params(port=port, drop_pct=drop_pct, oifname=oifname)
+    validate_s5_params(
+        port=port,
+        drop_pct=drop_pct,
+        oifname=oifname,
+        client_ip=client_ip,
+        target_ip=target_ip,
+        allow_loopback=allow_loopback
+    )
+    c_obj = validate_ip_endpoint(client_ip, "client_ip", ALLOWED_PS028_CLIENT_IPS, allow_loopback=allow_loopback)
+    t_obj = validate_ip_endpoint(target_ip, "target_ip", ALLOWED_PS028_TARGET_IPS, allow_loopback=allow_loopback)
+    if lock_file:
+        lock_file = validate_operation_path(lock_file, FileOperationType.LOCK_FILE, "lock_file", allow_symlinks=False, is_test_fixture=is_test_fixture)
+
     with coordinate_lock(caller_holds_lock=caller_holds_lock, lock_path=lock_file):
-        ip_family_str = "ip6" if ":" in target_ip or ":" in client_ip else "ip"
+        ip_family_str = "ip6" if c_obj.version == 6 else "ip"
         common_filter = (
-            f'oifname "{oifname}" {ip_family_str} saddr {client_ip} {ip_family_str} daddr {target_ip} '
+            f'oifname "{oifname}" {ip_family_str} saddr {str(c_obj)} {ip_family_str} daddr {str(t_obj)} '
             f'tcp dport {port} tcp flags syn / syn,ack'
         )
         nft_script = (
@@ -1876,12 +3137,15 @@ def setup_s5_counters_privileged(
 
 def read_s5_counters_privileged(
     caller_holds_lock: bool = False,
-    lock_file: Optional[Path] = None
+    lock_file: Optional[Path] = None,
+    is_test_fixture: bool = False
 ) -> Dict[str, Any]:
     """
     Reads S5 kernel packet counters from inet ps028_impair in ps028-rt.
     Queries structured JSON with regular text fallback. Fails closed if any counter is missing.
     """
+    if lock_file:
+        lock_file = validate_operation_path(lock_file, FileOperationType.LOCK_FILE, "lock_file", allow_symlinks=False, is_test_fixture=is_test_fixture)
     with coordinate_lock(caller_holds_lock=caller_holds_lock, lock_path=lock_file):
         # 1. JSON query
         rc, stdout, stderr = impair.execute_netns_cmd(
@@ -2012,7 +3276,10 @@ def measure_s5_privileged(
     owner_group: Optional[str] = None,
     caller_holds_lock: bool = False,
     lock_file: Optional[Path] = None,
-    in_netns: bool = False
+    in_netns: bool = False,
+    _skip_netns_check: bool = False,
+    allow_loopback: bool = False,
+    is_test_fixture: bool = False
 ) -> Dict[str, Any]:
     """
     Executes in-namespace S5 SYN probes and emits line-by-line JSONL records.
@@ -2023,8 +3290,16 @@ def measure_s5_privileged(
         probe_count=probe_count,
         timeout=timeout,
         concurrency=concurrency,
-        netns=netns
+        netns=netns,
+        target_ip=target_ip,
+        allow_loopback=allow_loopback
     )
+    t_obj = validate_ip_endpoint(target_ip, "target_ip", ALLOWED_PS028_TARGET_IPS, allow_loopback=allow_loopback)
+
+    if output_jsonl:
+        output_jsonl = validate_operation_path(output_jsonl, FileOperationType.DATA_FILE, "output_jsonl", allow_symlinks=False, is_test_fixture=is_test_fixture)
+    if lock_file:
+        lock_file = validate_operation_path(lock_file, FileOperationType.LOCK_FILE, "lock_file", allow_symlinks=False, is_test_fixture=is_test_fixture)
 
     if not in_netns:
         with coordinate_lock(caller_holds_lock=caller_holds_lock, lock_path=lock_file):
@@ -2032,9 +3307,8 @@ def measure_s5_privileged(
             cmd = [
                 "ip", "netns", "exec", netns,
                 sys.executable, str(helper_script),
-                "measure-s5",
-                "--in-netns",
-                "--target-ip", target_ip,
+                "measure-s5-worker",
+                "--target-ip", str(t_obj),
                 "--port", str(port),
                 "--probe-count", str(probe_count),
                 "--timeout", str(timeout),
@@ -2061,7 +3335,19 @@ def measure_s5_privileged(
                         pass
             return {"status": "OK", "raw_output": proc.stdout}
 
-    af = socket.AF_INET6 if ":" in target_ip else socket.AF_INET
+    # Worker path: positively verify network namespace containment before executing probes
+    if not _skip_netns_check:
+        is_valid_netns = verify_current_netns(netns)
+        if not is_valid_netns:
+            if os.geteuid() != 0 and allow_loopback and target_ip in ("127.0.0.1", "::1"):
+                pass
+            else:
+                raise PrivilegedHelperError(
+                    f"Network namespace verification failed: current process is not executing "
+                    f"inside network namespace '{netns}'. Host network namespace execution is strictly prohibited."
+                )
+
+    af = socket.AF_INET6 if t_obj.version == 6 else socket.AF_INET
     records = []
     connected_count = 0
     timeout_count = 0
@@ -2071,7 +3357,7 @@ def measure_s5_privileged(
     t_start_all = time.time()
     with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as executor:
         futures = [
-            executor.submit(probe_single_socket, i, target_ip, port, timeout, af)
+            executor.submit(probe_single_socket, i, str(t_obj), port, timeout, af)
             for i in range(probe_count)
         ]
         for fut in concurrent.futures.as_completed(futures):
@@ -2094,13 +3380,17 @@ def measure_s5_privileged(
     records.sort(key=lambda r: r["probe_id"])
 
     if output_jsonl:
-        out_p = Path(output_jsonl)
-        out_p.parent.mkdir(parents=True, exist_ok=True)
-        with open(out_p, "w", encoding="utf-8") as f:
-            for rec in records:
-                f.write(json.dumps(rec) + "\n")
-        if owner_user or owner_group:
-            _chown_file(out_p, owner_user or "promotheshchatterjee", owner_group)
+        out_p = validate_operation_path(output_jsonl, FileOperationType.DATA_FILE, "output_jsonl", allow_symlinks=False, is_test_fixture=is_test_fixture)
+        content = "".join(json.dumps(rec) + "\n" for rec in records)
+        safe_atomic_write_text(
+            out_p,
+            content,
+            op_type=FileOperationType.DATA_FILE,
+            param_name="output_jsonl",
+            owner_user=owner_user,
+            owner_group=owner_group,
+            is_test_fixture=is_test_fixture
+        )
 
     summary = {
         "status": "OK",
@@ -2129,6 +3419,13 @@ def start_nginx_privileged(
     Enforces that config_file strictly resides within repo_root, tests syntax,
     and forces the worker process to drop privileges to an unprivileged user.
     """
+    if repo_root:
+        repo_root = validate_secure_path(repo_root, "repo_root", allow_symlinks=False)
+    if config_file:
+        config_file = validate_secure_path(config_file, "config_file", allow_symlinks=False)
+    if lock_file:
+        lock_file = validate_secure_path(lock_file, "lock_file", allow_symlinks=False)
+
     with coordinate_lock(caller_holds_lock=caller_holds_lock, lock_path=lock_file):
         root_dir = (repo_root or REPO_ROOT).resolve()
         conf = (config_file or (root_dir / "lab" / "nginx.conf")).resolve()
@@ -2209,6 +3506,13 @@ def stop_nginx_privileged(
     """
     Gracefully stops the Nginx HTTP measurement endpoint in ps028-sv and removes pid file.
     """
+    if repo_root:
+        repo_root = validate_secure_path(repo_root, "repo_root", allow_symlinks=False)
+    if config_file:
+        config_file = validate_secure_path(config_file, "config_file", allow_symlinks=False)
+    if lock_file:
+        lock_file = validate_secure_path(lock_file, "lock_file", allow_symlinks=False)
+
     with coordinate_lock(caller_holds_lock=caller_holds_lock, lock_path=lock_file):
         root_dir = (repo_root or REPO_ROOT).resolve()
         conf = (config_file or (root_dir / "lab" / "nginx.conf")).resolve()
@@ -2249,8 +3553,151 @@ def stop_nginx_privileged(
 
 
 # ==============================================================================
-# Helper Invocation Wrapper (Called from unprivileged Python processes)
+# Helper Invocation Wrapper & Unified Dispatch Contract
 # ==============================================================================
+
+def dispatch_action(args: argparse.Namespace) -> Dict[str, Any]:
+    """
+    Authoritative single dispatch contract shared between in-process and CLI execution.
+    All parameter validation, type conversion, and bounds checks are uniformly enforced.
+    """
+    lock_p = Path(args.lock_file) if getattr(args, "lock_file", None) else None
+
+    if args.action == "apply-scenario":
+        sc_path = Path(args.scenarios_path) if getattr(args, "scenarios_path", None) else DEFAULT_SCENARIOS_PATH
+        return apply_scenario_privileged(
+            scenario_id=args.scenario,
+            scenarios_path=sc_path,
+            caller_holds_lock=args.caller_holds_lock,
+            lock_file=lock_p
+        )
+    elif args.action == "restore-baseline":
+        sc_path = Path(args.scenarios_path) if getattr(args, "scenarios_path", None) else DEFAULT_SCENARIOS_PATH
+        return restore_baseline_privileged(
+            scenarios_path=sc_path,
+            caller_holds_lock=args.caller_holds_lock,
+            lock_file=lock_p
+        )
+    elif args.action == "apply-dns":
+        if not (0 <= args.a_delay <= 2000):
+            raise PrivilegedHelperError(f"Invalid a_delay {args.a_delay}: must be between 0 and 2000")
+        if not (0 <= args.aaaa_delay <= 2000):
+            raise PrivilegedHelperError(f"Invalid aaaa_delay {args.aaaa_delay}: must be between 0 and 2000")
+        return apply_dns_delays_privileged(
+            a_delay_ms=args.a_delay,
+            aaaa_delay_ms=args.aaaa_delay,
+            config_file=Path(args.config_file) if getattr(args, "config_file", None) else None,
+            backup_file_a3=Path(args.backup_file_a3) if getattr(args, "backup_file_a3", None) else None,
+            backup_file_a4=Path(args.backup_file_a4) if getattr(args, "backup_file_a4", None) else None,
+            caller_holds_lock=args.caller_holds_lock,
+            lock_file=lock_p
+        )
+    elif args.action == "restore-dns":
+        return restore_dns_privileged(
+            config_file=Path(args.config_file) if getattr(args, "config_file", None) else None,
+            backup_file_a4=Path(args.backup_file_a4) if getattr(args, "backup_file_a4", None) else None,
+            caller_holds_lock=args.caller_holds_lock,
+            lock_file=lock_p
+        )
+    elif args.action == "verify-baseline":
+        return verify_baseline_privileged(
+            caller_holds_lock=args.caller_holds_lock,
+            lock_file=lock_p
+        )
+    elif args.action == "start-capture":
+        return start_capture_privileged(
+            output_pcap=Path(args.output_pcap),
+            log_file=Path(args.log_file),
+            netns=args.netns,
+            interface=args.interface,
+            bpf_filter=args.filter,
+            buffer_size_kb=args.buffer_size_kb,
+            owner_user=args.owner_user,
+            owner_group=args.owner_group,
+            readiness_timeout=args.readiness_timeout,
+            caller_holds_lock=args.caller_holds_lock,
+            lock_file=lock_p
+        )
+    elif args.action == "stop-capture":
+        pcap = Path(args.pcap) if args.pcap else None
+        return stop_capture_privileged(
+            pid=args.pid,
+            pcap_path=pcap,
+            timeout=args.timeout,
+            owner_user=args.owner_user,
+            owner_group=args.owner_group,
+            verify_pcap=not args.no_verify_pcap,
+            caller_holds_lock=args.caller_holds_lock,
+            lock_file=lock_p
+        )
+    elif args.action == "check-auth":
+        return check_sudo_authorization()
+    elif args.action == "setup-s5-counters":
+        return setup_s5_counters_privileged(
+            client_ip=args.client_ip,
+            target_ip=args.target_ip,
+            port=args.port,
+            oifname=args.oifname,
+            drop_pct=args.drop_pct,
+            caller_holds_lock=args.caller_holds_lock,
+            lock_file=lock_p
+        )
+    elif args.action == "read-s5-counters":
+        return read_s5_counters_privileged(
+            caller_holds_lock=args.caller_holds_lock,
+            lock_file=lock_p
+        )
+    elif args.action == "measure-s5":
+        return measure_s5_privileged(
+            target_ip=args.target_ip,
+            port=args.port,
+            probe_count=args.probe_count,
+            timeout=args.timeout,
+            concurrency=args.concurrency,
+            netns=args.netns,
+            output_jsonl=args.output_jsonl,
+            owner_user=args.owner_user,
+            owner_group=args.owner_group,
+            caller_holds_lock=args.caller_holds_lock,
+            lock_file=lock_p,
+            in_netns=False
+        )
+    elif args.action == "measure-s5-worker":
+        return measure_s5_privileged(
+            target_ip=args.target_ip,
+            port=args.port,
+            probe_count=args.probe_count,
+            timeout=args.timeout,
+            concurrency=args.concurrency,
+            netns=args.netns,
+            output_jsonl=args.output_jsonl,
+            owner_user=args.owner_user,
+            owner_group=args.owner_group,
+            caller_holds_lock=False,
+            lock_file=None,
+            in_netns=True
+        )
+    elif args.action == "launch-snap-browser":
+        launch_snap_browser_main(args)
+        return {"status": "OK", "action": "launch-snap-browser"}
+    elif args.action == "start-nginx":
+        return start_nginx_privileged(
+            repo_root=Path(args.repo_root) if args.repo_root else None,
+            config_file=Path(args.config_file) if args.config_file else None,
+            worker_user=args.worker_user,
+            caller_holds_lock=args.caller_holds_lock,
+            lock_file=lock_p
+        )
+    elif args.action == "stop-nginx":
+        return stop_nginx_privileged(
+            repo_root=Path(args.repo_root) if args.repo_root else None,
+            config_file=Path(args.config_file) if args.config_file else None,
+            caller_holds_lock=args.caller_holds_lock,
+            lock_file=lock_p
+        )
+    else:
+        raise PrivilegedHelperError(f"Unknown helper action: {args.action}")
+
 
 def run_helper_action(
     action: str,
@@ -2265,255 +3712,19 @@ def run_helper_action(
     Parses JSON output from helper.
     """
     if os.geteuid() == 0:
-        # Run directly in-process if already root
-        if action == "apply-scenario":
-            sc_id = "S0"
-            sc_path = DEFAULT_SCENARIOS_PATH
-            if extra_args:
-                for i, a in enumerate(extra_args):
-                    if a == "--scenario" and i + 1 < len(extra_args):
-                        sc_id = extra_args[i + 1]
-                    elif a == "--scenarios-path" and i + 1 < len(extra_args):
-                        sc_path = Path(extra_args[i + 1])
-            return apply_scenario_privileged(
-                scenario_id=sc_id,
-                scenarios_path=sc_path,
-                caller_holds_lock=caller_holds_lock,
-                lock_file=lock_file
-            )
-        elif action == "restore-baseline":
-            return restore_baseline_privileged(
-                caller_holds_lock=caller_holds_lock,
-                lock_file=lock_file
-            )
-        elif action == "apply-dns":
-            a_d = 0
-            aaaa_d = 0
-            cfg_p = None
-            bak_a3 = None
-            bak_a4 = None
-            if extra_args:
-                for i, a in enumerate(extra_args):
-                    if a == "--a-delay" and i + 1 < len(extra_args):
-                        a_d = int(extra_args[i + 1])
-                    elif a == "--aaaa-delay" and i + 1 < len(extra_args):
-                        aaaa_d = int(extra_args[i + 1])
-                    elif a == "--config-file" and i + 1 < len(extra_args):
-                        cfg_p = Path(extra_args[i + 1])
-                    elif a == "--backup-file-a3" and i + 1 < len(extra_args):
-                        bak_a3 = Path(extra_args[i + 1])
-                    elif a == "--backup-file-a4" and i + 1 < len(extra_args):
-                        bak_a4 = Path(extra_args[i + 1])
-            return apply_dns_delays_privileged(
-                a_delay_ms=a_d,
-                aaaa_delay_ms=aaaa_d,
-                config_file=cfg_p,
-                backup_file_a3=bak_a3,
-                backup_file_a4=bak_a4,
-                caller_holds_lock=caller_holds_lock,
-                lock_file=lock_file
-            )
-        elif action == "restore-dns":
-            cfg_p = None
-            bak_a4 = None
-            if extra_args:
-                for i, a in enumerate(extra_args):
-                    if a == "--config-file" and i + 1 < len(extra_args):
-                        cfg_p = Path(extra_args[i + 1])
-                    elif a == "--backup-file-a4" and i + 1 < len(extra_args):
-                        bak_a4 = Path(extra_args[i + 1])
-            return restore_dns_privileged(
-                config_file=cfg_p,
-                backup_file_a4=bak_a4,
-                caller_holds_lock=caller_holds_lock,
-                lock_file=lock_file
-            )
-        elif action == "verify-baseline":
-            return verify_baseline_privileged(
-                caller_holds_lock=caller_holds_lock,
-                lock_file=lock_file
-            )
-        elif action == "start-capture":
-            out_pcap = None
-            log_f = None
-            netns = CLIENT_NETNS
-            iface = "any"
-            filt = "port 53 or port 80"
-            user = None
-            group = None
-            r_timeout = 3.0
-            if extra_args:
-                for i, a in enumerate(extra_args):
-                    if a == "--output-pcap" and i + 1 < len(extra_args):
-                        out_pcap = Path(extra_args[i + 1])
-                    elif a == "--log-file" and i + 1 < len(extra_args):
-                        log_f = Path(extra_args[i + 1])
-                    elif a == "--netns" and i + 1 < len(extra_args):
-                        netns = extra_args[i + 1]
-                    elif a == "--interface" and i + 1 < len(extra_args):
-                        iface = extra_args[i + 1]
-                    elif a == "--filter" and i + 1 < len(extra_args):
-                        filt = extra_args[i + 1]
-                    elif a == "--owner-user" and i + 1 < len(extra_args):
-                        user = extra_args[i + 1]
-                    elif a == "--owner-group" and i + 1 < len(extra_args):
-                        group = extra_args[i + 1]
-                    elif a == "--readiness-timeout" and i + 1 < len(extra_args):
-                        r_timeout = float(extra_args[i + 1])
-            return start_capture_privileged(
-                output_pcap=out_pcap,
-                log_file=log_f,
-                netns=netns,
-                interface=iface,
-                bpf_filter=filt,
-                owner_user=user,
-                owner_group=group,
-                readiness_timeout=r_timeout,
-                caller_holds_lock=caller_holds_lock,
-                lock_file=lock_file
-            )
-        elif action == "stop-capture":
-            target_pid = 0
-            pcap = None
-            t_out = 5.0
-            user = None
-            group = None
-            v_pcap = True
-            if extra_args:
-                for i, a in enumerate(extra_args):
-                    if a == "--pid" and i + 1 < len(extra_args):
-                        target_pid = int(extra_args[i + 1])
-                    elif a == "--pcap" and i + 1 < len(extra_args):
-                        pcap = Path(extra_args[i + 1])
-                    elif a == "--timeout" and i + 1 < len(extra_args):
-                        t_out = float(extra_args[i + 1])
-                    elif a == "--owner-user" and i + 1 < len(extra_args):
-                        user = extra_args[i + 1]
-                    elif a == "--owner-group" and i + 1 < len(extra_args):
-                        group = extra_args[i + 1]
-                    elif a == "--no-verify-pcap":
-                        v_pcap = False
-            return stop_capture_privileged(
-                pid=target_pid,
-                pcap_path=pcap,
-                timeout=t_out,
-                owner_user=user,
-                owner_group=group,
-                verify_pcap=v_pcap,
-                caller_holds_lock=caller_holds_lock,
-                lock_file=lock_file
-            )
-        elif action == "check-auth":
-            return {"authorized": True, "method": "root"}
-        elif action == "setup-s5-counters":
-            c_ip = "2001:db8:1::2"
-            t_ip = "2001:db8:2::10"
-            p = 80
-            oif = "ps028-rt-sv6"
-            drop = 50
-            if extra_args:
-                for i, a in enumerate(extra_args):
-                    if a == "--client-ip" and i + 1 < len(extra_args):
-                        c_ip = extra_args[i + 1]
-                    elif a == "--target-ip" and i + 1 < len(extra_args):
-                        t_ip = extra_args[i + 1]
-                    elif a == "--port" and i + 1 < len(extra_args):
-                        p = int(extra_args[i + 1])
-                    elif a == "--oifname" and i + 1 < len(extra_args):
-                        oif = extra_args[i + 1]
-                    elif a == "--drop-pct" and i + 1 < len(extra_args):
-                        drop = int(extra_args[i + 1])
-            return setup_s5_counters_privileged(
-                client_ip=c_ip,
-                target_ip=t_ip,
-                port=p,
-                oifname=oif,
-                drop_pct=drop,
-                caller_holds_lock=caller_holds_lock,
-                lock_file=lock_file
-            )
-        elif action == "read-s5-counters":
-            return read_s5_counters_privileged(
-                caller_holds_lock=caller_holds_lock,
-                lock_file=lock_file
-            )
-        elif action == "measure-s5":
-            t_ip = "2001:db8:2::10"
-            p = 80
-            p_cnt = 50
-            t_out = 0.4
-            conc = 10
-            ns = "ps028-cl"
-            out_jsonl = None
-            user = None
-            group = None
-            if extra_args:
-                for i, a in enumerate(extra_args):
-                    if a == "--target-ip" and i + 1 < len(extra_args):
-                        t_ip = extra_args[i + 1]
-                    elif a == "--port" and i + 1 < len(extra_args):
-                        p = int(extra_args[i + 1])
-                    elif a in ("--probe-count", "--probes") and i + 1 < len(extra_args):
-                        p_cnt = int(extra_args[i + 1])
-                    elif a == "--timeout" and i + 1 < len(extra_args):
-                        t_out = float(extra_args[i + 1])
-                    elif a == "--concurrency" and i + 1 < len(extra_args):
-                        conc = int(extra_args[i + 1])
-                    elif a == "--netns" and i + 1 < len(extra_args):
-                        ns = extra_args[i + 1]
-                    elif a == "--output-jsonl" and i + 1 < len(extra_args):
-                        out_jsonl = extra_args[i + 1]
-                    elif a == "--owner-user" and i + 1 < len(extra_args):
-                        user = extra_args[i + 1]
-                    elif a == "--owner-group" and i + 1 < len(extra_args):
-                        group = extra_args[i + 1]
-            return measure_s5_privileged(
-                target_ip=t_ip,
-                port=p,
-                probe_count=p_cnt,
-                timeout=t_out,
-                concurrency=conc,
-                netns=ns,
-                output_jsonl=out_jsonl,
-                owner_user=user,
-                owner_group=group,
-                caller_holds_lock=caller_holds_lock,
-                lock_file=lock_file
-            )
-        elif action == "start-nginx":
-            r_root = None
-            c_file = None
-            w_user = None
-            if extra_args:
-                for i, a in enumerate(extra_args):
-                    if a == "--repo-root" and i + 1 < len(extra_args):
-                        r_root = Path(extra_args[i + 1])
-                    elif a == "--config-file" and i + 1 < len(extra_args):
-                        c_file = Path(extra_args[i + 1])
-                    elif a == "--worker-user" and i + 1 < len(extra_args):
-                        w_user = extra_args[i + 1]
-            return start_nginx_privileged(
-                repo_root=r_root,
-                config_file=c_file,
-                worker_user=w_user,
-                caller_holds_lock=caller_holds_lock,
-                lock_file=lock_file
-            )
-        elif action == "stop-nginx":
-            r_root = None
-            c_file = None
-            if extra_args:
-                for i, a in enumerate(extra_args):
-                    if a == "--repo-root" and i + 1 < len(extra_args):
-                        r_root = Path(extra_args[i + 1])
-                    elif a == "--config-file" and i + 1 < len(extra_args):
-                        c_file = Path(extra_args[i + 1])
-            return stop_nginx_privileged(
-                repo_root=r_root,
-                config_file=c_file,
-                caller_holds_lock=caller_holds_lock,
-                lock_file=lock_file
-            )
+        argv = [str(action)] + [str(a) for a in (extra_args or [])]
+        if caller_holds_lock and "--caller-holds-lock" not in argv and action not in ("check-auth", "measure-s5-worker"):
+            argv.append("--caller-holds-lock")
+        if lock_file and "--lock-file" not in argv and action not in ("check-auth", "measure-s5-worker"):
+            argv.extend(["--lock-file", str(lock_file)])
+
+        parser = build_parser()
+        try:
+            parsed_args = parser.parse_args(argv)
+        except SystemExit as exc:
+            raise PrivilegedHelperError(f"Argument parsing failed for action '{action}': {exc}")
+
+        return dispatch_action(parsed_args)
 
     # Not root: execute via sudo -n
     helper_script = SCRIPT_DIR / "privileged_helper.py"
@@ -2548,13 +3759,13 @@ def run_helper_action(
                 "Please authenticate by running 'sudo -v' in your terminal before executing live measurements."
             )
         raise PrivilegedHelperError(
-            f"Privileged helper failed (action={action}, code={proc.returncode}): {err_out or proc.stdout.strip()}"
+            f"Privileged helper action '{action}' failed (code {proc.returncode}): {err_out or proc.stdout.strip()}"
         )
 
-    # Parse JSON output from last line of stdout
-    lines = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
-    for line in reversed(lines):
-        if line.startswith("{") and line.endswith("}"):
+    out = proc.stdout.strip()
+    if out:
+        lines = [line.strip() for line in out.splitlines() if line.strip()]
+        for line in reversed(lines):
             try:
                 return json.loads(line)
             except json.JSONDecodeError:
@@ -2652,8 +3863,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_read_s5.add_argument("--caller-holds-lock", action="store_true")
     p_read_s5.add_argument("--lock-file", default=None)
 
-    # measure-s5
-    p_meas_s5 = subparsers.add_parser("measure-s5", help="Execute in-namespace S5 SYN probes and emit JSONL")
+    # measure-s5 (Host CLI entry: dispatches into netns worker)
+    p_meas_s5 = subparsers.add_parser("measure-s5", help="Coordinate and execute S5 SYN probes inside ps028-cl")
     p_meas_s5.add_argument("--target-ip", default="2001:db8:2::10", help="Target server IP")
     p_meas_s5.add_argument("--port", type=int, default=80, help="Target TCP port (1-65535)")
     p_meas_s5.add_argument("--probe-count", "--probes", dest="probe_count", type=int, default=50, help="Probe count (1-500)")
@@ -2663,9 +3874,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_meas_s5.add_argument("--output-jsonl", default=None, help="Output path for JSONL records")
     p_meas_s5.add_argument("--owner-user", default=None, help="Owner user for output file")
     p_meas_s5.add_argument("--owner-group", default=None, help="Owner group for output file")
-    p_meas_s5.add_argument("--in-netns", action="store_true", help="Internal flag: running within netns")
     p_meas_s5.add_argument("--caller-holds-lock", action="store_true")
     p_meas_s5.add_argument("--lock-file", default=None)
+
+    # measure-s5-worker (Internal worker executed exclusively inside ps028-cl)
+    p_meas_s5_worker = subparsers.add_parser("measure-s5-worker", help="Internal worker: execute probes inside netns")
+    p_meas_s5_worker.add_argument("--target-ip", default="2001:db8:2::10", help="Target server IP")
+    p_meas_s5_worker.add_argument("--port", type=int, default=80, help="Target TCP port (1-65535)")
+    p_meas_s5_worker.add_argument("--probe-count", "--probes", dest="probe_count", type=int, default=50, help="Probe count (1-500)")
+    p_meas_s5_worker.add_argument("--timeout", type=float, default=0.4, help="Connect timeout in seconds (0.05-10.0)")
+    p_meas_s5_worker.add_argument("--concurrency", type=int, default=10, help="Concurrency workers (1-50)")
+    p_meas_s5_worker.add_argument("--netns", default="ps028-cl", choices=["ps028-cl"], help="Client network namespace")
+    p_meas_s5_worker.add_argument("--output-jsonl", default=None, help="Output path for JSONL records")
+    p_meas_s5_worker.add_argument("--owner-user", default=None, help="Owner user for output file")
+    p_meas_s5_worker.add_argument("--owner-group", default=None, help="Owner group for output file")
 
     # launch-snap-browser
     p_snap = subparsers.add_parser("launch-snap-browser", help="Setup mounts and launch Snap browser")
@@ -2699,187 +3921,24 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    verify_privileged_import_closure(allow_repo=bool(os.environ.get("PS028_TEST_SUITE")))
     parser = build_parser()
-    args = parser.parse_args()
+    try:
+        args = parser.parse_args()
+    except SystemExit as exc:
+        return exc.code if isinstance(exc.code, int) else 2
 
     try:
-        lock_p = Path(args.lock_file) if getattr(args, "lock_file", None) else None
-        if args.action == "apply-scenario":
-            res = apply_scenario_privileged(
-                scenario_id=args.scenario,
-                scenarios_path=Path(args.scenarios_path),
-                caller_holds_lock=args.caller_holds_lock,
-                lock_file=lock_p
-            )
-            print(json.dumps(res))
-            return 0
-
-        elif args.action == "restore-baseline":
-            res = restore_baseline_privileged(
-                scenarios_path=Path(args.scenarios_path),
-                caller_holds_lock=args.caller_holds_lock,
-                lock_file=lock_p
-            )
-            print(json.dumps(res))
-            return 0
-
-        elif args.action == "apply-dns":
-            if not (0 <= args.a_delay <= 2000):
-                raise PrivilegedHelperError(f"Invalid a_delay {args.a_delay}: must be between 0 and 2000")
-            if not (0 <= args.aaaa_delay <= 2000):
-                raise PrivilegedHelperError(f"Invalid aaaa_delay {args.aaaa_delay}: must be between 0 and 2000")
-            res = apply_dns_delays_privileged(
-                a_delay_ms=args.a_delay,
-                aaaa_delay_ms=args.aaaa_delay,
-                config_file=Path(args.config_file) if getattr(args, "config_file", None) else None,
-                backup_file_a3=Path(args.backup_file_a3) if getattr(args, "backup_file_a3", None) else None,
-                backup_file_a4=Path(args.backup_file_a4) if getattr(args, "backup_file_a4", None) else None,
-                caller_holds_lock=args.caller_holds_lock,
-                lock_file=lock_p
-            )
-            print(json.dumps(res))
-            return 0
-
-        elif args.action == "restore-dns":
-            res = restore_dns_privileged(
-                config_file=Path(args.config_file) if getattr(args, "config_file", None) else None,
-                backup_file_a4=Path(args.backup_file_a4) if getattr(args, "backup_file_a4", None) else None,
-                caller_holds_lock=args.caller_holds_lock,
-                lock_file=lock_p
-            )
-            print(json.dumps(res))
-            return 0
-
-        elif args.action == "verify-baseline":
-            res = verify_baseline_privileged(
-                caller_holds_lock=args.caller_holds_lock,
-                lock_file=lock_p
-            )
-            print(json.dumps(res))
+        res = dispatch_action(args)
+        print(json.dumps(res))
+        if args.action == "verify-baseline":
             return 0 if res.get("all_passed") else 1
-
-        elif args.action == "start-capture":
-            res = None
-            try:
-                res = start_capture_privileged(
-                    output_pcap=Path(args.output_pcap),
-                    log_file=Path(args.log_file),
-                    netns=args.netns,
-                    interface=args.interface,
-                    bpf_filter=args.filter,
-                    buffer_size_kb=args.buffer_size_kb,
-                    owner_user=args.owner_user,
-                    owner_group=args.owner_group,
-                    readiness_timeout=args.readiness_timeout,
-                    caller_holds_lock=args.caller_holds_lock,
-                    lock_file=lock_p
-                )
-                print(json.dumps(res))
-                return 0
-            except Exception as exc:
-                if res and isinstance(res, dict) and "parent_pid" in res:
-                    try:
-                        stop_capture_privileged(
-                            pid=res["parent_pid"],
-                            pcap_path=Path(res["pcap_path"]) if "pcap_path" in res else None,
-                            verify_pcap=False,
-                            caller_holds_lock=args.caller_holds_lock,
-                            lock_file=lock_p
-                        )
-                    except Exception:
-                        pass
-                print(json.dumps({"status": "ERROR", "error": str(exc)}), file=sys.stderr)
-                return 1
-
-        elif args.action == "stop-capture":
-            pcap = Path(args.pcap) if args.pcap else None
-            res = stop_capture_privileged(
-                pid=args.pid,
-                pcap_path=pcap,
-                timeout=args.timeout,
-                owner_user=args.owner_user,
-                owner_group=args.owner_group,
-                verify_pcap=not args.no_verify_pcap,
-                caller_holds_lock=args.caller_holds_lock,
-                lock_file=lock_p
-            )
-            print(json.dumps(res))
-            return 0
-
         elif args.action == "check-auth":
-            auth = check_sudo_authorization()
-            print(json.dumps(auth))
-            return 0 if auth["authorized"] else 1
-
-        elif args.action == "setup-s5-counters":
-            res = setup_s5_counters_privileged(
-                client_ip=args.client_ip,
-                target_ip=args.target_ip,
-                port=args.port,
-                oifname=args.oifname,
-                drop_pct=args.drop_pct,
-                caller_holds_lock=args.caller_holds_lock,
-                lock_file=lock_p
-            )
-            print(json.dumps(res))
-            return 0
-
-        elif args.action == "read-s5-counters":
-            res = read_s5_counters_privileged(
-                caller_holds_lock=args.caller_holds_lock,
-                lock_file=lock_p
-            )
-            print(json.dumps(res))
-            return 0
-
-        elif args.action == "measure-s5":
-            res = measure_s5_privileged(
-                target_ip=args.target_ip,
-                port=args.port,
-                probe_count=args.probe_count,
-                timeout=args.timeout,
-                concurrency=args.concurrency,
-                netns=args.netns,
-                output_jsonl=args.output_jsonl,
-                owner_user=args.owner_user,
-                owner_group=args.owner_group,
-                caller_holds_lock=args.caller_holds_lock,
-                lock_file=lock_p,
-                in_netns=args.in_netns
-            )
-            print(json.dumps(res))
-            return 0
-
-        elif args.action == "launch-snap-browser":
-            launch_snap_browser_main(args)
-            return 0
-
-        elif args.action == "start-nginx":
-            res = start_nginx_privileged(
-                repo_root=Path(args.repo_root) if args.repo_root else None,
-                config_file=Path(args.config_file) if args.config_file else None,
-                worker_user=args.worker_user,
-                caller_holds_lock=args.caller_holds_lock,
-                lock_file=lock_p
-            )
-            print(json.dumps(res))
-            return 0
-
-        elif args.action == "stop-nginx":
-            res = stop_nginx_privileged(
-                repo_root=Path(args.repo_root) if args.repo_root else None,
-                config_file=Path(args.config_file) if args.config_file else None,
-                caller_holds_lock=args.caller_holds_lock,
-                lock_file=lock_p
-            )
-            print(json.dumps(res))
-            return 0
-
+            return 0 if res.get("authorized") else 1
+        return 0 if res.get("status") == "OK" else 1
     except Exception as exc:
         print(json.dumps({"status": "ERROR", "error": str(exc)}), file=sys.stderr)
         return 1
-
-    return 0
 
 
 if __name__ == "__main__":

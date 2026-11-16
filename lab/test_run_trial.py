@@ -556,7 +556,8 @@ class TestCaptureLifecycleAndHTTPStatusRegression(unittest.TestCase):
             output_pcap=pcap_path,
             log_file=log_file,
             netns="ps028-cl",
-            is_simulation=False
+            is_simulation=False,
+            is_test_fixture=True
         )
         self.assertIsNotNone(proc)
         mock_popen.assert_called_once()
@@ -596,7 +597,8 @@ class TestCaptureLifecycleAndHTTPStatusRegression(unittest.TestCase):
                 log_file=log_file,
                 netns="ps028-cl",
                 is_simulation=False,
-                readiness_timeout=0.1
+                readiness_timeout=0.1,
+                is_test_fixture=True
             )
         self.assertIn("timed out waiting for readiness", str(ctx.exception))
         mock_stop.assert_called_once_with(mock_proc, timeout=1.0)
@@ -625,7 +627,8 @@ class TestCaptureLifecycleAndHTTPStatusRegression(unittest.TestCase):
                 log_file=log_file,
                 netns="ps028-cl",
                 is_simulation=False,
-                readiness_timeout=0.5
+                readiness_timeout=0.5,
+                is_test_fixture=True
             )
         self.assertIn("terminated prematurely with code 1", str(ctx.exception))
 
@@ -1387,6 +1390,19 @@ class TestSafeCaptureProcessRegression(unittest.TestCase):
         # Parent process that exec'd tcpdump directly
         self._setup_proc_pid(3005, comm="tcpdump", cmdline_args=["tcpdump", "-i", "any"])
         self.assertTrue(run_trial.is_safe_capture_process(3005, is_parent=True, proc_dir=self.mock_proc))
+
+        # Direct tcpdump with stdout descriptor (-w -) and matching /proc/<pid>/fd/1
+        pcap_target = self.temp_dir / "target.pcap"
+        pcap_target.touch()
+        pid3006_dir = self._setup_proc_pid(3006, comm="tcpdump", cmdline_args=["tcpdump", "-i", "any", "-w", "-"])
+        fd_dir = pid3006_dir / "fd"
+        fd_dir.mkdir(parents=True, exist_ok=True)
+        os.symlink(str(pcap_target), str(fd_dir / "1"))
+        self.assertTrue(run_trial.is_safe_capture_process(3006, is_parent=False, proc_dir=self.mock_proc, expected_pcap=pcap_target))
+
+        # Rejects when /proc/<pid>/fd/1 does NOT point to expected_pcap
+        unrelated_pcap = self.temp_dir / "unrelated.pcap"
+        self.assertFalse(run_trial.is_safe_capture_process(3006, is_parent=False, proc_dir=self.mock_proc, expected_pcap=unrelated_pcap))
 
     def test_stop_packet_capture_distinguishes_exited_process_from_recycled_unrelated_pid(self):
         """
@@ -2510,7 +2526,8 @@ class TestCaptureFilterBufferAndDropAccountingRegression(unittest.TestCase):
             output_pcap=pcap_path,
             log_file=log_file,
             netns="ps028-cl",
-            is_simulation=False
+            is_simulation=False,
+            is_test_fixture=True
         )
         self.assertIsNotNone(proc)
         cmd_called = mock_popen.call_args[0][0]
@@ -2545,7 +2562,8 @@ class TestCaptureFilterBufferAndDropAccountingRegression(unittest.TestCase):
             output_pcap=pcap_path,
             log_file=log_file,
             netns="ps028-cl",
-            is_simulation=False
+            is_simulation=False,
+            is_test_fixture=True
         )
         self.assertEqual(proc.pid, 33333)
         mock_helper.assert_called_once()

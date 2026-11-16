@@ -142,39 +142,165 @@ def compute_sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def get_git_info() -> Dict[str, str]:
-    """Retrieves current git commit and branch."""
-    commit = "7c6ab23c2a378bbc8556fcc15f5911f626502576"
-    branch = "regional/ps028-phase-cd"
+def get_git_info() -> Dict[str, Any]:
+    """
+    Retrieves current git commit, branch, dirty status, diff digests, and provenance verification status.
+    Fails closed without hardcoded fallbacks if git is unavailable.
+    """
+    commit = "UNKNOWN"
+    branch = "UNKNOWN"
+    dirty = True  # Fails closed to dirty if status cannot be authoritatively determined
+    git_status = "UNAVAILABLE"
+    staged_diff_sha = None
+    unstaged_diff_sha = None
+    untracked_diff_sha = None
+    dep_lock_sha = None
+    composite_source_digest = None
+
     try:
-        commit_out = subprocess.check_output(
-            ["git", "rev-parse", "HEAD"], cwd=str(REPO_ROOT), text=True
-        ).strip()
-        if commit_out:
-            commit = commit_out
+        commit_res = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=str(REPO_ROOT),
+            text=True,
+            capture_output=True,
+            timeout=5
+        )
+        if commit_res.returncode == 0 and commit_res.stdout.strip():
+            commit = commit_res.stdout.strip()
     except Exception:
         pass
+
     try:
-        branch_out = subprocess.check_output(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=str(REPO_ROOT), text=True
-        ).strip()
-        if branch_out:
-            branch = branch_out
+        branch_res = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=str(REPO_ROOT),
+            text=True,
+            capture_output=True,
+            timeout=5
+        )
+        if branch_res.returncode == 0 and branch_res.stdout.strip():
+            branch = branch_res.stdout.strip()
     except Exception:
         pass
-    return {"git_commit": commit, "git_branch": branch}
+
+    try:
+        status_res = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=str(REPO_ROOT),
+            text=True,
+            capture_output=True,
+            timeout=5
+        )
+        if status_res.returncode == 0:
+            dirty = bool(status_res.stdout.strip())
+            if commit != "UNKNOWN":
+                git_status = "VERIFIED"
+
+            # Compute diff digests for source fingerprint
+            staged_res = subprocess.run(
+                ["git", "diff", "--staged"],
+                cwd=str(REPO_ROOT),
+                capture_output=True,
+                timeout=5
+            )
+            unstaged_res = subprocess.run(
+                ["git", "diff"],
+                cwd=str(REPO_ROOT),
+                capture_output=True,
+                timeout=5
+            )
+            staged_bytes = staged_res.stdout if staged_res.returncode == 0 else b""
+            unstaged_bytes = unstaged_res.stdout if unstaged_res.returncode == 0 else b""
+            staged_diff_sha = hashlib.sha256(staged_bytes).hexdigest()
+            unstaged_diff_sha = hashlib.sha256(unstaged_bytes).hexdigest()
+
+            # Hash untracked files (excluding derived output artifacts)
+            untracked_files = []
+            for line in status_res.stdout.splitlines():
+                if line.startswith("?? "):
+                    rel_p = line[3:].strip()
+                    if not rel_p.startswith("lab/derived"):
+                        untracked_files.append(rel_p)
+            untracked_files.sort()
+            untracked_diff_sha = None
+            if untracked_files:
+                untracked_h = hashlib.sha256()
+                for uf in untracked_files:
+                    untracked_h.update(uf.encode("utf-8"))
+                    uf_p = REPO_ROOT / uf
+                    if uf_p.is_file():
+                        try:
+                            with open(uf_p, "rb") as f:
+                                while chunk := f.read(65536):
+                                    untracked_h.update(chunk)
+                        except OSError:
+                            pass
+                untracked_diff_sha = untracked_h.hexdigest()
+
+            lock_p = REPO_ROOT / "requirements.lock"
+            dep_lock_sha = compute_sha256(lock_p) if lock_p.is_file() else None
+
+            comp_parts = [commit, staged_diff_sha, unstaged_diff_sha]
+            if untracked_diff_sha:
+                comp_parts.append(untracked_diff_sha)
+            if dep_lock_sha:
+                comp_parts.append(dep_lock_sha)
+            composite_source_digest = hashlib.sha256(":".join(comp_parts).encode("utf-8")).hexdigest()
+        else:
+            dirty = True
+            git_status = "UNAVAILABLE"
+    except Exception:
+        dirty = True
+        git_status = "UNAVAILABLE"
+
+    return {
+        "git_commit": commit,
+        "git_branch": branch,
+        "git_dirty": dirty,
+        "git_status": git_status,
+        "staged_diff_sha256": staged_diff_sha,
+        "unstaged_diff_sha256": unstaged_diff_sha,
+        "untracked_diff_sha256": untracked_diff_sha,
+        "dependency_lock_sha256": dep_lock_sha,
+        "composite_source_digest": composite_source_digest,
+    }
 
 
 def get_tshark_version() -> str:
-    """Retrieves installed tshark version string."""
+    """Retrieves installed tshark version string, or UNAVAILABLE on failure."""
     try:
-        out = subprocess.check_output(["tshark", "-v"], text=True)
-        for line in out.splitlines():
+        res = subprocess.run(["tshark", "-v"], text=True, capture_output=True, timeout=5)
+        combined = (res.stdout or "") + "\n" + (res.stderr or "")
+        match = re.search(r"TShark\s+\(Wireshark\)\s+([0-9]+\.[0-9]+(?:\.[0-9]+)?)", combined)
+        if match:
+            return match.group(1)
+        for line in combined.splitlines():
             if "TShark (Wireshark)" in line:
-                return line.split()[2]
+                parts = line.split()
+                if len(parts) >= 3:
+                    return parts[2]
     except Exception:
         pass
-    return "4.2.2"
+    return "UNAVAILABLE"
+
+
+def get_tcpdump_version() -> str:
+    """Retrieves installed tcpdump version string dynamically, or UNAVAILABLE on failure."""
+    try:
+        res = subprocess.run(["tcpdump", "--version"], text=True, capture_output=True, timeout=5)
+        combined = (res.stdout or "") + "\n" + (res.stderr or "")
+        match = re.search(r"tcpdump\s+version\s+([0-9]+\.[0-9]+(?:\.[0-9]+)?)", combined)
+        if match:
+            return match.group(1)
+        for line in combined.splitlines():
+            line_s = line.strip()
+            if "tcpdump version" in line_s:
+                parts = line_s.split()
+                if len(parts) >= 3:
+                    return parts[2]
+    except Exception:
+        pass
+    return "UNAVAILABLE"
 
 
 def write_deterministic_csv(output_path: Path, fieldnames: List[str], rows: List[Dict[str, Any]]) -> str:
@@ -210,16 +336,42 @@ def write_provenance_sidecar(
         except ValueError:
             rederived_str = str(rederived_dir)
 
+    tshark_ver = get_tshark_version()
+    tcpdump_ver = get_tcpdump_version()
+
+    # Strict provenance contract: clean tree, known commit, verified git status, and both tools available
+    is_verified = (
+        git_info.get("git_commit") != "UNKNOWN"
+        and git_info.get("git_status") == "VERIFIED"
+        and not git_info.get("git_dirty", True)
+        and tshark_ver != "UNAVAILABLE"
+        and tcpdump_ver != "UNAVAILABLE"
+    )
+    provenance_status = "VERIFIED" if is_verified else "INCOMPLETE"
+
     provenance = {
         "target_file": target_csv.name,
         "sha256": csv_sha,
         "row_count": row_count,
         "generated_by_command": "python3 lab/export_campaign_evidence.py",
+        "provenance_status": provenance_status,
         "git_commit": git_info["git_commit"],
         "git_branch": git_info["git_branch"],
+        "git_dirty": git_info["git_dirty"],
+        "git_status": git_info["git_status"],
+        "source_fingerprint": {
+            "git_commit": git_info["git_commit"],
+            "git_branch": git_info["git_branch"],
+            "git_dirty": git_info["git_dirty"],
+            "staged_diff_sha256": git_info.get("staged_diff_sha256"),
+            "unstaged_diff_sha256": git_info.get("unstaged_diff_sha256"),
+            "untracked_diff_sha256": git_info.get("untracked_diff_sha256"),
+            "dependency_lock_sha256": git_info.get("dependency_lock_sha256"),
+            "composite_source_digest": git_info.get("composite_source_digest"),
+        },
         "python_version": platform.python_version(),
-        "tshark_version": get_tshark_version(),
-        "tcpdump_version": "4.99.4",
+        "tshark_version": tshark_ver,
+        "tcpdump_version": tcpdump_ver,
         "platform": platform.platform(),
         "dissector_flags": ["-o", "tcp.relative_sequence_numbers:FALSE"],
         "input_manifest": input_manifest_str,

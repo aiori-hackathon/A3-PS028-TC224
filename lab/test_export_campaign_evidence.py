@@ -25,7 +25,9 @@ import subprocess
 import tempfile
 from typing import Optional
 import unittest
+from unittest.mock import patch, MagicMock
 
+import lab.export_campaign_evidence as exp_evidence
 from lab.export_campaign_evidence import (
     EventSource,
     export_trial_timeline,
@@ -569,6 +571,225 @@ class TestExportCampaignEvidence(unittest.TestCase):
             ]
             proc = subprocess.run(cmd, capture_output=True, text=True, cwd=str(REPO_ROOT))
             self.assertNotEqual(proc.returncode, 0, "Exporter must fail closed on unknown schema version")
+
+
+class TestExportCampaignEvidenceProvenanceHardenings(unittest.TestCase):
+    """
+    Provenance & Security Regression Suite:
+    Eliminates hardcoded stale fallbacks, detects dirty repos, fails closed on tool failure.
+    """
+
+    def test_git_info_live(self):
+        """TC-PROV-01: Live get_git_info returns valid commit, branch, and status."""
+        info = exp_evidence.get_git_info()
+        self.assertIn("git_commit", info)
+        self.assertIn("git_branch", info)
+        self.assertIn("git_dirty", info)
+        self.assertIn("git_status", info)
+        self.assertNotEqual(info["git_commit"], "7c6ab23c2a378bbc8556fcc15f5911f626502576")
+        self.assertNotEqual(info["git_branch"], "regional/ps028-phase-cd")
+        self.assertIsInstance(info["git_dirty"], bool)
+        self.assertEqual(info["git_status"], "VERIFIED")
+
+    @patch("subprocess.run")
+    def test_git_info_failure_fails_closed(self, mock_run):
+        """TC-PROV-02: Failure in git commands returns UNKNOWN, UNAVAILABLE, and git_dirty=True."""
+        mock_run.side_effect = OSError("git not found")
+        info = exp_evidence.get_git_info()
+        self.assertEqual(info["git_commit"], "UNKNOWN")
+        self.assertEqual(info["git_branch"], "UNKNOWN")
+        self.assertTrue(info["git_dirty"], "git_dirty must fail closed to True when git status cannot be determined")
+        self.assertEqual(info["git_status"], "UNAVAILABLE")
+
+    @patch("subprocess.run")
+    def test_git_info_dirty_flag_detection(self, mock_run):
+        """TC-PROV-03: Dirty working tree is accurately detected and diff digests computed."""
+        def fake_run(cmd, *args, **kwargs):
+            if cmd == ["git", "rev-parse", "HEAD"]:
+                return MagicMock(returncode=0, stdout="a" * 40)
+            elif cmd == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+                return MagicMock(returncode=0, stdout="feat/test\n")
+            elif cmd == ["git", "status", "--porcelain"]:
+                return MagicMock(returncode=0, stdout=" M lab/test.py\n")
+            elif cmd == ["git", "diff", "--staged"]:
+                return MagicMock(returncode=0, stdout=b"staged diff bytes")
+            elif cmd == ["git", "diff"]:
+                return MagicMock(returncode=0, stdout=b"unstaged diff bytes")
+            return MagicMock(returncode=1, stdout="")
+
+        mock_run.side_effect = fake_run
+        info = exp_evidence.get_git_info()
+        self.assertEqual(info["git_commit"], "a" * 40)
+        self.assertEqual(info["git_branch"], "feat/test")
+        self.assertTrue(info["git_dirty"])
+        self.assertEqual(info["git_status"], "VERIFIED")
+        self.assertIsNotNone(info["staged_diff_sha256"])
+        self.assertIsNotNone(info["unstaged_diff_sha256"])
+        self.assertIsNotNone(info["composite_source_digest"])
+
+    def test_tshark_version_live(self):
+        """TC-PROV-04: Live get_tshark_version returns a valid version or UNAVAILABLE."""
+        ver = exp_evidence.get_tshark_version()
+        self.assertIsInstance(ver, str)
+        self.assertTrue(ver == "UNAVAILABLE" or len(ver) > 0)
+
+    @patch("subprocess.run")
+    def test_tshark_version_failure_returns_unavailable(self, mock_run):
+        """TC-PROV-05: Failed tshark execution returns UNAVAILABLE, never hardcoded 4.2.2."""
+        mock_run.side_effect = OSError("tshark missing")
+        ver = exp_evidence.get_tshark_version()
+        self.assertEqual(ver, "UNAVAILABLE")
+
+    def test_tcpdump_version_live(self):
+        """TC-PROV-06: Live get_tcpdump_version dynamically parses version from tcpdump --version."""
+        ver = exp_evidence.get_tcpdump_version()
+        self.assertIsInstance(ver, str)
+        self.assertTrue(ver == "UNAVAILABLE" or len(ver) > 0)
+
+    @patch("subprocess.run")
+    def test_tcpdump_version_failure_returns_unavailable(self, mock_run):
+        """TC-PROV-07: Failed tcpdump execution returns UNAVAILABLE, never hardcoded 4.99.4."""
+        mock_run.side_effect = OSError("tcpdump missing")
+        ver = exp_evidence.get_tcpdump_version()
+        self.assertEqual(ver, "UNAVAILABLE")
+
+    @patch("lab.export_campaign_evidence.get_git_info")
+    def test_write_provenance_sidecar_clean_verified(self, mock_git):
+        """TC-PROV-08: Sidecar for clean repo contains all fields and verifies status."""
+        mock_git.return_value = {
+            "git_commit": "a" * 40,
+            "git_branch": "fix/clean-branch",
+            "git_dirty": False,
+            "git_status": "VERIFIED",
+            "staged_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "unstaged_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "composite_source_digest": "b" * 64,
+        }
+        with tempfile.TemporaryDirectory() as tmpdir:
+            csv_path = Path(tmpdir) / "test_attempts.csv"
+            csv_path.write_text("col1,col2\nval1,val2\n", encoding="utf-8")
+            manifest_path = Path(tmpdir) / "campaign_manifest.json"
+            manifest_path.write_text("{}", encoding="utf-8")
+
+            prov_path = exp_evidence.write_provenance_sidecar(
+                target_csv=csv_path,
+                row_count=1,
+                manifest_path=manifest_path,
+            )
+            self.assertTrue(prov_path.is_file())
+            data = json.loads(prov_path.read_text(encoding="utf-8"))
+
+            for req in ["target_file", "sha256", "row_count", "git_commit", "git_branch",
+                        "git_dirty", "git_status", "provenance_status", "source_fingerprint",
+                        "tshark_version", "tcpdump_version", "python_version", "platform"]:
+                self.assertIn(req, data)
+
+            self.assertEqual(data["git_status"], "VERIFIED")
+            self.assertFalse(data["git_dirty"])
+            self.assertEqual(data["provenance_status"], "VERIFIED")
+
+    @patch("lab.export_campaign_evidence.get_git_info")
+    def test_write_provenance_sidecar_dirty_incomplete(self, mock_git):
+        """TC-PROV-09: Sidecar for dirty repo is marked INCOMPLETE per completeness contract."""
+        mock_git.return_value = {
+            "git_commit": "a" * 40,
+            "git_branch": "fix/dirty-branch",
+            "git_dirty": True,
+            "git_status": "VERIFIED",
+            "staged_diff_sha256": "c" * 64,
+            "unstaged_diff_sha256": "d" * 64,
+            "composite_source_digest": "e" * 64,
+        }
+        with tempfile.TemporaryDirectory() as tmpdir:
+            csv_path = Path(tmpdir) / "test_attempts.csv"
+            csv_path.write_text("col1,col2\nval1,val2\n", encoding="utf-8")
+            manifest_path = Path(tmpdir) / "campaign_manifest.json"
+            manifest_path.write_text("{}", encoding="utf-8")
+
+            prov_path = exp_evidence.write_provenance_sidecar(
+                target_csv=csv_path,
+                row_count=1,
+                manifest_path=manifest_path,
+            )
+            data = json.loads(prov_path.read_text(encoding="utf-8"))
+            self.assertTrue(data["git_dirty"])
+            self.assertEqual(data["provenance_status"], "INCOMPLETE")
+
+    @patch("lab.export_campaign_evidence.get_tshark_version")
+    def test_write_provenance_sidecar_incomplete_on_tool_failure(self, mock_tshark):
+        """TC-PROV-10: Sidecar status is INCOMPLETE if tshark is UNAVAILABLE."""
+        mock_tshark.return_value = "UNAVAILABLE"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            csv_path = Path(tmpdir) / "test_attempts.csv"
+            csv_path.write_text("col1,col2\nval1,val2\n", encoding="utf-8")
+            manifest_path = Path(tmpdir) / "campaign_manifest.json"
+            manifest_path.write_text("{}", encoding="utf-8")
+
+            prov_path = exp_evidence.write_provenance_sidecar(
+                target_csv=csv_path,
+                row_count=1,
+                manifest_path=manifest_path,
+            )
+            data = json.loads(prov_path.read_text(encoding="utf-8"))
+            self.assertEqual(data["provenance_status"], "INCOMPLETE")
+
+    def test_no_hardcoded_stale_strings(self):
+        """TC-PROV-11: Ensures stale commit SHA and branch do not exist in source code."""
+        source_text = Path(exp_evidence.__file__).read_text(encoding="utf-8")
+        self.assertNotIn("7c6ab23c2a378bbc8556fcc15f5911f626502576", source_text)
+        self.assertNotIn("regional/ps028-phase-cd", source_text)
+
+    @patch("subprocess.run")
+    def test_git_info_detached_head(self, mock_run):
+        """TC-PROV-12: Detached HEAD reports branch as 'HEAD' accurately without error."""
+        def fake_run(cmd, *args, **kwargs):
+            if cmd == ["git", "rev-parse", "HEAD"]:
+                return MagicMock(returncode=0, stdout="c" * 40)
+            elif cmd == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+                return MagicMock(returncode=0, stdout="HEAD\n")
+            elif cmd == ["git", "status", "--porcelain"]:
+                return MagicMock(returncode=0, stdout="")
+            elif cmd == ["git", "diff", "--staged"]:
+                return MagicMock(returncode=0, stdout=b"")
+            elif cmd == ["git", "diff"]:
+                return MagicMock(returncode=0, stdout=b"")
+            return MagicMock(returncode=1, stdout="")
+
+        mock_run.side_effect = fake_run
+        info = exp_evidence.get_git_info()
+        self.assertEqual(info["git_commit"], "c" * 40)
+        self.assertEqual(info["git_branch"], "HEAD")
+        self.assertFalse(info["git_dirty"])
+        self.assertEqual(info["git_status"], "VERIFIED")
+
+    @patch("subprocess.run")
+    def test_git_info_untracked_files_digest(self, mock_run):
+        """TC-PROV-13: Untracked files contribute to composite source digest."""
+        def fake_run(cmd, *args, **kwargs):
+            if cmd == ["git", "rev-parse", "HEAD"]:
+                return MagicMock(returncode=0, stdout="d" * 40)
+            elif cmd == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+                return MagicMock(returncode=0, stdout="fix/untracked\n")
+            elif cmd == ["git", "status", "--porcelain"]:
+                return MagicMock(returncode=0, stdout="?? new_script.py\n")
+            elif cmd == ["git", "diff", "--staged"]:
+                return MagicMock(returncode=0, stdout=b"")
+            elif cmd == ["git", "diff"]:
+                return MagicMock(returncode=0, stdout=b"")
+            return MagicMock(returncode=1, stdout="")
+
+        mock_run.side_effect = fake_run
+        info = exp_evidence.get_git_info()
+        self.assertTrue(info["git_dirty"])
+        self.assertIsNotNone(info["untracked_diff_sha256"])
+        self.assertIsNotNone(info["composite_source_digest"])
+
+    @patch("subprocess.run")
+    def test_tool_version_parsing_unexpected_output(self, mock_run):
+        """TC-PROV-14: Malformed or unexpected tool output fails closed to UNAVAILABLE."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="Unexpected tool banner without version number\n", stderr="")
+        self.assertEqual(exp_evidence.get_tshark_version(), "UNAVAILABLE")
+        self.assertEqual(exp_evidence.get_tcpdump_version(), "UNAVAILABLE")
 
 
 if __name__ == "__main__":

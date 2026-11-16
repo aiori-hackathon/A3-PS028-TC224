@@ -3,7 +3,10 @@
 # The core measurement analyzer and evidence exporter use the Python standard library.
 # The scenario configuration parser requires PyYAML.
 # The technical report PDF builder requires markdown-it-py.
+# mdurl is required transitively by markdown-it-py for URL tokenization.
+# The DNS delay and resolution verification harness requires dnspython.
 
 PyYAML==6.0.1
-markdown-it-py>=3.0.0
+markdown-it-py==3.0.0
+mdurl==0.1.2
 dnspython==2.6.1

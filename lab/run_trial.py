@@ -600,12 +600,41 @@ def is_safe_capture_process(
         for i, a in enumerate(args):
             if a == "-w" and i + 1 < len(args):
                 val = args[i + 1]
-                if val == pcap_str or val == pcap_raw or Path(val).name == pcap_name:
+                if val == "-":
+                    # Descriptor-based capture: tcpdump writes directly to stdout (FD 1)
+                    fd1_path = proc_entry / "fd" / "1"
+                    try:
+                        target = os.readlink(fd1_path)
+                        if (
+                            target == pcap_str
+                            or target == pcap_raw
+                            or Path(target).name == pcap_name
+                            or Path(target).resolve() == Path(expected_pcap).resolve()
+                        ):
+                            pcap_matched = True
+                            break
+                    except Exception:
+                        pass
+                elif val == pcap_str or val == pcap_raw or Path(val).name == pcap_name:
                     pcap_matched = True
                     break
             elif a.startswith("-w") and len(a) > 2:
                 val = a[2:]
-                if val == pcap_str or val == pcap_raw or Path(val).name == pcap_name:
+                if val == "-":
+                    fd1_path = proc_entry / "fd" / "1"
+                    try:
+                        target = os.readlink(fd1_path)
+                        if (
+                            target == pcap_str
+                            or target == pcap_raw
+                            or Path(target).name == pcap_name
+                            or Path(target).resolve() == Path(expected_pcap).resolve()
+                        ):
+                            pcap_matched = True
+                            break
+                    except Exception:
+                        pass
+                elif val == pcap_str or val == pcap_raw or Path(val).name == pcap_name:
                     pcap_matched = True
                     break
             elif a == pcap_str or a == pcap_raw or (a.endswith(".pcap") and Path(a).name == pcap_name):
@@ -804,7 +833,8 @@ def start_packet_capture(
     is_simulation: bool = False,
     readiness_timeout: float = 3.0,
     caller_holds_lock: Optional[bool] = None,
-    lock_file: Optional[Path] = None
+    lock_file: Optional[Path] = None,
+    is_test_fixture: bool = False
 ) -> Optional[Any]:
     """
     Starts an unbuffered, immediate-mode tcpdump packet capture process inside the target namespace.
@@ -842,7 +872,8 @@ def start_packet_capture(
                 owner_user=normal_user,
                 readiness_timeout=readiness_timeout,
                 caller_holds_lock=caller_holds_lock,
-                lock_file=lock_file
+                lock_file=lock_file,
+                is_test_fixture=is_test_fixture
             )
         except priv_helper.PrivilegedHelperError as exc:
             raise TrialExecutionError(str(exc))
