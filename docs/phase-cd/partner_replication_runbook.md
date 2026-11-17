@@ -2,7 +2,7 @@
 
 - **Document ID**: `PS028-RUNBOOK-CORE-REPLICATION`
 - **Status**: **STANDARD OPERATING PROCEDURE (PENDING AUTHENTIC PARTNER EVIDENCE)**
-- **Governing Requirements**: AIORI-3 PS-028 Core Campaign Replication Matrix (Requirements #1–#6, #20)
+- **Governing Requirements**: AIORI-3 PS-028 Core Campaign Replication Matrix (Requirements #1–#6, #18)
 - **Rule Compliance**: Rule R1 (No Fabricated Data), Rule R6 (Evidence Classes Separated), Rule R7 (No Conformance Claims)
 
 ---
@@ -13,7 +13,7 @@ To establish external reproducibility and cross-platform scientific validity, th
 - **Canonical Scenarios**: S0 through S6 (7 impairment/delay scenarios).
 - **Target Client Implementations**: Pinned Google Chrome and Mozilla Firefox builds.
 - **Trial Repetitions**: Exactly 20 valid live trials per browser per scenario ($7 \times 2 \times 20 = 280\text{ trials}$).
-- **Milestone Scope**: Independent final verification milestone. Excludes Phase D exploratory sweeps (D1/D2), empirical netem parameter sweeps, and the Amendment A11 200-probe acceptance batch.
+- **Milestone Scope**: Canonical 280-trial core measurement experiment. Excludes exploratory sweeps and non-canonical parameter probes.
 
 > [!CAUTION]
 > **Rule R1 Non-Negotiable Mandate:**
@@ -21,90 +21,115 @@ To establish external reproducibility and cross-platform scientific validity, th
 
 ---
 
-## 2. Amendment Scope Reconciliation (A2, A4, A6, A8, A10, A11, A13)
+## 2. Applicable Protocol Requirements (A2, A4, A8, A10, A13)
 
-The partner replication manifest references historical project amendments. Their scope relative to the 280-trial core replication campaign is explicitly defined below:
+The partner replication manifest adheres strictly to the applicable project protocol amendments:
 
-### 2.1 Applicable Core-Campaign Protocol Requirements
 * **Amendment A2 (Sample Size Rigor)**: Exactly $n=20$ valid live trials per browser per scenario ($7 \times 2 \times 20 = 280$ trials total). Exploratory or pilot runs with $n < 20$ are strictly barred from final claims.
 * **Amendment A4 (Controlled DNS Responder Integrity)**: Controlled DNS responder with wildcard `*.he.test.`, immediate NOERROR/NODATA for HTTPS Type 65 queries, and fail-closed lock reload via SIGHUP.
 * **Amendment A8 (Browser DNS Controls & Metric Isolation)**: Effective browser-level DoH/TRR disablement, isolated ephemeral user profiles, and separation of DNS transaction metrics from TCP connection setup timing (`t_setup_total_ms`).
 * **Amendment A10 (Specification of Record Integrity)**: Pinned specification revision of record remains `draft-ietf-happy-happyeyeballs-v3-04` (published 1 July 2026; dated status check: 2026-11-13).
 * **Amendment A13 (Deterministic Ordering & Provenance Sidecars)**: Pre-persisted random seeds, Schema 1.1.0 ledgers, and `.provenance.json` cryptographic sidecars for all derived outputs.
 
-### 2.2 Explicit Amendment Exclusions
-* **Amendment A6 (Uniform Netem Sweep Exclusion)**: Live uniform-netem parameter sweeps (`tc netem delay 0ms 0ms` parameter variations) are part of Phase D empirical research, which was **permanently removed from the delivery plan by owner decision**. The core campaign S0 scenario uses the canonical 10ms baseline link delay without parameter sweeps.
-* **Amendment A11 (200-Probe Acceptance Batch Exclusion)**: The live 200-probe statistical acceptance batch with Clopper-Pearson 99% Exact Binomial confidence intervals is part of Phase D empirical research, which was **permanently removed from the delivery plan by owner decision**. For Scenario S5, the core campaign executes 20 valid live browser trials preceded by a 50-probe testbed readiness check.
-
 ---
 
 ## 3. Prerequisites and Environment Verification
 
-The partner host MUST run a Linux-based operating system (bare-metal Ubuntu 24.04 LTS or WSL2 with systemd) with kernel `iproute2`, `tc-netem`, and `nftables` support.
+The partner host environment MUST run a supported Linux distribution (Ubuntu 24.04 LTS bare-metal or under WSL2 with systemd) with kernel `iproute2`, `tc-netem`, and `nftables` support.
 
-### 3.1 Verify Host Capabilities & Service Identity
+### 3.1 Stage 1: Read-Only Host Preflight & Service Identity Verification
+Execute the safe, non-mutating preflight script to audit host readiness without altering network state:
 ```bash
-# Verify Python version >= 3.10
-python3 --version
+# Execute read-only partner preflight audit
+python3 lab/partner_preflight.py
 
-# Verify network namespace and routing tools
-which ip tc nft tshark nginx
+# Optional: output structured JSON report for partner record-keeping
+python3 lab/partner_preflight.py --json -o partner_preflight_report.json
+```
 
-# Verify browser binaries match exact pinned versions
-/usr/bin/google-chrome --version  # Expected: Google Chrome 156.0.8078.73
-/usr/bin/firefox --version        # Expected: Mozilla Firefox 159.0
+Verify service identity and capture partner host's baseline network snapshot before creating topology:
+```bash
+# Resolve operating user dynamically
+OPERATOR_USER="${SUDO_USER:-$(id -un)}"
+echo "Operating user: ${OPERATOR_USER}"
 
 # Verify or provision dedicated Nginx service user 'ps028-sv'
 # For privilege isolation, Nginx worker processes run strictly under ps028-sv (never the operator account)
 id -u ps028-sv || sudo useradd --system --no-create-home -s /usr/sbin/nologin ps028-sv
 
-# Verify pre-topology host network baseline snapshot
-# Expected baseline digest: 523ae7224a35323e87ff362058418da9873e0c64849ebfd88dad7cae6b62c0e9
-sha256sum /home/indrani/.local/state/ps028/host-network-before-topology.txt
+# Establish machine-specific state directory
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/ps028"
+mkdir -p "${STATE_DIR}"
+BASELINE_FILE="${STATE_DIR}/host-network-baseline-$(hostname).txt"
+
+# Capture partner host's own network baseline snapshot before topology creation
+sudo ./lab/setup_topology.sh snapshot-host "${BASELINE_FILE}"
+sha256sum "${BASELINE_FILE}" > "${BASELINE_FILE}.sha256"
+echo "Partner host baseline snapshot saved to ${BASELINE_FILE}"
 ```
 
-### 3.2 Configure Non-Interactive Sudoers & Runtime Environment
-To execute network shaping, packet captures, and namespace operations without interactive password prompts, deploy the hardened privileged helper and sudoers rule using the verified deployment script (see `docs/phase-cd/sudoers_configuration.md` for complete architecture and manual audit procedures):
+### 3.2 Stage 2: Deployment Specification Dry-Run
+Before executing any privileged installation or upgrade, execute the deployment script in `--dry-run` mode. This audits Git provenance, source checkout cleanliness, absence of dirty working tree modifications, source permissions, service account properties, existing installation integrity, and sudoers syntax without modifying host files.
 ```bash
-# 1. Inspect proposed changes in dry-run mode
-./lab/deploy_privileged_helper.sh --dry-run
-
-# 2. Deploy trusted helper under /usr/local/libexec/ps028/ and install sudoers drop-in
-sudo ./lab/deploy_privileged_helper.sh --user indrani
+# Execute read-only dry-run audit with pinned release commit SHA
+./lab/deploy_privileged_helper.sh --dry-run --user "${OPERATOR_USER}" --release-sha <APPROVED_RELEASE_SHA>
 ```
-The script installs `/usr/local/libexec/ps028/privileged_helper.py` (and companion configs), provisions dedicated runtime state directories (`/run/ps028`, `/var/log/ps028`, `/var/lib/ps028` owned by `root:root` mode `0755`), installs `/etc/sudoers.d/ps028-helper` (mode `0440`), and verifies syntax with `visudo -cf`.
+> [!NOTE]
+> The dry-run command fails closed (returns a non-zero exit code) if any prerequisite fails (e.g., missing `ps028-sv`, dirty git tree, altered existing files, or invalid visudo syntax). It must report `[SUCCESS] Dry-run specification check complete.` before live deployment.
+
+### 3.3 Stage 3: Transactional Installation / Upgrade
+Deploy or upgrade the privileged helper under `/usr/local/libexec/ps028/` and install the non-interactive sudoers drop-in `/etc/sudoers.d/ps028-helper`:
+```bash
+# Transactionally install or upgrade the privileged helper using pinned release commit SHA
+sudo ./lab/deploy_privileged_helper.sh --user "${OPERATOR_USER}" --release-sha <APPROVED_RELEASE_SHA>
+
+# If upgrading an unmanifested legacy installation on the partner host:
+# The legacy baseline commit SHA is pinned to 176f688bacb5858fcc0daedb454200918e427f3f (ps028-p0-accepted-2026-11-14^{commit}).
+sudo ./lab/deploy_privileged_helper.sh --user "${OPERATOR_USER}" --release-sha <APPROVED_RELEASE_SHA> --migrate-unmanifested --legacy-baseline-commit 176f688bacb5858fcc0daedb454200918e427f3f
+```
+
+**Transactional Guarantees, State Machine & Safety Architecture:**
+1. **Existing Installation Audit**: If an existing deployment is present, its manifest and all files are audited. Any altered files, unmanifested files, or symlinks cause an immediate abort before any files are modified.
+2. **Legacy Migration Path & Strict Permission Invariants**:
+   - Authoritative location: `/usr/local/libexec/ps028/privileged_helper.py`.
+   - `--migrate-unmanifested` verifies that every installed file matches an authentic historical Git commit before synthesizing a baseline manifest. Hash verification is never bypassed.
+   - **Permission Invariants**: Rejects any group-writable or world-writable files (`st_mode & 0o022 != 0`) or directories. Executables must have mode `0750` or `0755`; non-executable modules/configs must have mode `0640` or `0644`.
+3. **Exclusive Concurrent Deployment Locking**: Exclusive non-blocking kernel lock (`flock -n`) on `${TARGET_PARENT}/.ps028_deploy.lock` held throughout operations.
+4. **Discrete State Journaling & Crash Recovery**: Discrete state transitions committed to disk via `fsync` before file renames, supporting automatic recovery from process crashes or signals.
+
+### 3.4 Stage 4: Post-Installation Integrity Verification
+Verify that the deployed helper is functional and authorized via sudoers:
+```bash
+# Verify non-interactive helper authentication and subcommand registration
+sudo /usr/bin/python3 -I /usr/local/libexec/ps028/privileged_helper.py check-auth
+
+# Verify installed manifest matches exact deployed source revision
+cat /usr/local/libexec/ps028/deployment_manifest.json
+```
 
 ---
 
 ## 4. Replication Execution Workflow
 
-### Step 1: Preflight Baseline Self-Test (Live Partner Readiness)
+### Step 1: Live Topology Setup (Separate Authorization Gate)
 
 > [!WARNING]
-> **PARTNER-ONLY LIVE NETWORK OPERATION — OWNER/PARTNER AUTHORIZATION REQUIRED**
+> **SEPARATE AUTHORIZATION GATE: LIVE TOPOLOGY PROVISIONING**
 >
-> Executing `lab/self_test_scenarios.py` without `--dry-run` performs **live network configuration changes**, creates network namespaces, installs `tc netem` queuing disciplines, configures `nftables` packet drop rules, launches DNS responders, and executes live socket connection probes.
->
-> **Execution Requirements & Protocol:**
-> 1. **Explicit Authorization**: This command must only be executed by authorized partner laboratory personnel on a dedicated, non-production testbed host with explicit owner authorization.
-> 2. **Environment Invariants**: Verify that host kernel versions match prerequisites, sudoers rules are installed, and no production network services share interface queues.
-> 3. **Scenario Cleanup**: The test harness restores baseline impairments after each scenario check. If any check fails, immediately execute `sudo ./lab/teardown.sh` to purge residual namespaces and firewall tables.
-> 4. **Post-Baseline Verification**: Run `./lab/setup_topology.sh check-host-invariance` to verify 100% restoration of host network state.
-> 5. **Failure Handling**: On any `[FAIL]` or error output, halt execution immediately (`FAIL-STOP`). Do NOT proceed to campaign execution.
-> 6. **Evidence Outputs**: Preflight self-test results are saved to `--output-dir` with full execution timestamps, kernel metadata, and per-probe latency records.
-> 7. **Probe Count and Scope Distinctions**:
->    - **50-Probe Preflight Self-Test**: For Scenario S5 (stochastic 50% SYN loss), this readiness check runs **50 live TCP SYN probes by default** (`probe_count=50`, verifying that observed packet loss falls within $[20\%, 80\%]$) to verify that kernel packet dropping functions correctly.
->    - **280-Trial Core Campaign**: The core campaign consists of 20 live browser trials per scenario across 7 scenarios and 2 browsers ($7 \times 2 \times 20 = 280\text{ trials}$).
->    - **Excluded 200-Probe A11 Batch**: The 200-probe statistical acceptance batch is part of Phase D research and is **excluded** from this campaign.
+> Helper deployment ONLY installs the trusted execution boundary under `/usr/local/libexec/ps028/`.
+> Network topology setup (`sudo ./lab/setup_topology.sh setup`) constitutes a strictly separate, explicit authorization gate.
+> Do NOT provision network namespaces without explicit authorization on a dedicated testbed.
 
 ```bash
-# LIVE PREFLIGHT COMMAND (DO NOT RUN WITHOUT EXPLICIT AUTHORIZATION):
-python3 lab/self_test_scenarios.py --bundle --output-dir lab/derived/partner-replication/self_tests
-```
-Verify that all preflight baseline checks report `[OK]`.
+# Provision isolated network namespaces, veth interfaces, and baseline 10ms delays
+sudo ./lab/setup_topology.sh setup
 
-### Step 2: Initialize Partner Campaign
-Create an independent campaign directory dedicated to the partner replication. Note that `--browsers` and `--scenarios` require comma-separated values:
+# Verify topology status and routing
+sudo ./lab/setup_topology.sh status
+```
+
+### Step 2: Initialize Canonical 280-Trial Campaign
+Create an independent campaign directory dedicated to the partner replication:
 ```bash
 PARTNER_CAMPAIGN="ps028-partner-$(hostname)-$(date +%Y%m%d)"
 python3 lab/run_campaign.py \
@@ -113,9 +138,10 @@ python3 lab/run_campaign.py \
   --browsers "google-chrome,firefox" \
   --scenarios "S0,S1,S2,S3,S4,S5,S6"
 ```
+Verify that all 280 trials complete with status `PASS`.
 
 ### Step 3: Run Deterministic Post-Campaign Dissection & Evidence Export
-Upon completion of all 280 planned trials, execute the deterministic analysis and evidence exporter. Partner trials natively generate Schema 1.1.0 JSONs; do NOT run the historical rederivation script (`lab/rederive_historical_campaign.py` is reserved exclusively for historical Phase C campaign data):
+Upon completion of all 280 planned trials, execute the deterministic analysis and evidence exporter. Partner trials natively generate Schema 1.1.0 JSONs:
 ```bash
 python3 lab/export_campaign_evidence.py \
   --campaign-dir "lab/campaigns/${PARTNER_CAMPAIGN}" \
@@ -123,7 +149,17 @@ python3 lab/export_campaign_evidence.py \
   --target all
 ```
 
-### Step 4: Cryptographic Package & Handover
+### Step 4: Topology Teardown & Host Invariance Verification
+Clean up all network namespaces, interfaces, routing, and verify that the partner host network has been 100% restored to its original pre-experiment baseline snapshot:
+```bash
+# Teardown PS-028 network namespaces and interfaces
+sudo ./lab/setup_topology.sh teardown
+
+# Verify 100% restoration against the partner host's own baseline snapshot
+sudo ./lab/setup_topology.sh check-host-invariance "${BASELINE_FILE}"
+```
+
+### Step 5: Cryptographic Package, Handover Archive & Local Verification
 Compute the cryptographic integrity manifest and package the campaign evidence outside the campaign directory:
 ```bash
 # 1. Compute checksums of campaign contents (excluding checksum manifests and archives)
@@ -136,6 +172,12 @@ tar -czvf "${PARTNER_CAMPAIGN}.tar.gz" "${PARTNER_CAMPAIGN}"
 
 # 3. Compute SHA-256 digest of the final handover archive
 sha256sum "${PARTNER_CAMPAIGN}.tar.gz" > "${PARTNER_CAMPAIGN}.tar.gz.sha256"
+cd ../..
+
+# 4. Verify handover package against all PS-028 criteria before submission
+python3 lab/verify_partner_handover.py \
+  --archive "lab/campaigns/${PARTNER_CAMPAIGN}.tar.gz" \
+  --derived-dir "lab/derived/partner-replication"
 ```
 
-Submit the archive (`${PARTNER_CAMPAIGN}.tar.gz`) and SHA-256 digest (`${PARTNER_CAMPAIGN}.tar.gz.sha256`) to the lead repository maintainer. The maintainer will inspect the authentic cryptographic evidence and update `docs/phase-cd/partner_replication_manifest.json` from `PENDING_AUTHENTIC_PARTNER_EVIDENCE` to `VERIFIED`.
+Submit the verified archive (`${PARTNER_CAMPAIGN}.tar.gz`) and SHA-256 digest (`${PARTNER_CAMPAIGN}.tar.gz.sha256`) to the lead repository maintainer. The maintainer will inspect the authentic cryptographic evidence and update `docs/phase-cd/partner_replication_manifest.json` from `PENDING_AUTHENTIC_PARTNER_EVIDENCE` to `VERIFIED`.

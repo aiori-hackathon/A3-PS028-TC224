@@ -1766,9 +1766,6 @@ def setup_snap_isolated_dns(
        with the lab resolver, and bind-mounts it to the target placeholder inside the private tmpfs.
     7. Leaves host /run/snapd/ns, host /etc/resolv.conf, and unrelated browser processes completely untouched.
     """
-    # 1. Resolver validation
-    verified_ip = get_lab_resolver_ip(resolv_conf_path=resolv_conf_path, expected_ip=resolver_ip)
-
     is_test_env = (
         is_test_fixture
         or str(snap_ns_dir).startswith("/tmp")
@@ -1777,7 +1774,8 @@ def setup_snap_isolated_dns(
         or str(host_proc_root).startswith(str(REPO_ROOT))
     )
 
-    # 1b. Boundary validation for host_proc_root
+    # 1. Security boundary validation for host_proc_root in production mode
+    # Must reject any path other than strictly /proc/1/root before resolver discovery
     if not is_test_env:
         host_proc_str = str(host_proc_root).rstrip("/")
         if host_proc_str != "/proc/1/root":
@@ -1793,6 +1791,9 @@ def setup_snap_isolated_dns(
                     raise SnapMountError(f"Security error: host_proc_root '{host_proc_root}' cannot be group or world-writable")
             except OSError as e:
                 raise SnapMountError(f"Security error: cannot stat host_proc_root '{host_proc_root}': {e}") from e
+
+    # 2. Resolver validation
+    verified_ip = get_lab_resolver_ip(resolv_conf_path=resolv_conf_path, expected_ip=resolver_ip)
 
     snap_ns_path = Path(snap_ns_dir)
     if not snap_ns_path.exists():
@@ -2091,18 +2092,63 @@ def launch_snap_browser_main(args: argparse.Namespace) -> None:
                 sys.stderr.flush()
                 sys.exit(74)
 
-        # URL validation
-        if arg.startswith("http://") or arg.startswith("https://"):
+        # URL / navigation target validation (Blocker 7)
+        # Standalone navigation targets (do not start with -) and --app= targets are validated.
+        # Browser options starting with - or -- (e.g. --proxy-server=http://...) are options, not navigation targets.
+        url_target = None
+        if arg.startswith("--app="):
+            url_target = arg.split("=", 1)[1]
+        elif not arg.startswith("-"):
+            if "://" in arg or re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*:", arg):
+                url_target = arg
+
+        if url_target is not None:
             try:
-                parsed_url = urllib.parse.urlsplit(arg)
-                if parsed_url.scheme not in ("http", "https"):
-                    sys.stderr.write(f"Security error: invalid URL scheme in '{arg}'\n")
+                parsed_url = urllib.parse.urlsplit(url_target)
+                scheme = (parsed_url.scheme or "").lower()
+                if scheme not in ("http", "https"):
+                    sys.stderr.write(f"Security error: prohibited URL scheme in '{arg}'. Only http:// and https:// are permitted.\n")
                     sys.stderr.flush()
                     sys.exit(75)
-                if not parsed_url.netloc:
+
+                host = parsed_url.hostname
+                if not host:
                     sys.stderr.write(f"Security error: missing hostname in URL '{arg}'\n")
                     sys.stderr.flush()
                     sys.exit(75)
+
+                try:
+                    port = parsed_url.port
+                    if port is not None and not (1 <= port <= 65535):
+                        sys.stderr.write(f"Security error: invalid port in URL '{arg}'\n")
+                        sys.stderr.flush()
+                        sys.exit(75)
+                except ValueError as pe:
+                    sys.stderr.write(f"Security error: invalid port in URL '{arg}': {pe}\n")
+                    sys.stderr.flush()
+                    sys.exit(75)
+
+                netloc = parsed_url.netloc or ""
+                if "@" in netloc:
+                    netloc = netloc.rsplit("@", 1)[1]
+
+                if "[" in netloc or "]" in netloc:
+                    if not re.match(r"^\[[^\]]+\](?::[0-9]+)?$", netloc):
+                        sys.stderr.write(f"Security error: malformed bracketed IPv6 authority in URL '{arg}'\n")
+                        sys.stderr.flush()
+                        sys.exit(75)
+                    try:
+                        ipaddress.IPv6Address(host)
+                    except ValueError as ip_err:
+                        sys.stderr.write(f"Security error: invalid IPv6 literal in URL '{arg}': {ip_err}\n")
+                        sys.stderr.flush()
+                        sys.exit(75)
+                elif ":" in host:
+                    sys.stderr.write(f"Security error: unbracketed IPv6 authority in URL '{arg}'\n")
+                    sys.stderr.flush()
+                    sys.exit(75)
+            except SystemExit:
+                raise
             except Exception as e:
                 sys.stderr.write(f"Security error: malformed URL '{arg}': {e}\n")
                 sys.stderr.flush()
@@ -5484,9 +5530,11 @@ class UniqueStoreFalseAction(argparse._StoreFalseAction):
 class StrictArgumentParser(argparse.ArgumentParser):
     """
     ArgumentParser subclass that enforces strict uniqueness of options across all
-    subcommands. Duplicate options are rejected with a parser error.
+    subcommands and disables prefix abbreviation matching (allow_abbrev=False).
+    Duplicate options are rejected with a parser error.
     """
     def __init__(self, *args, **kwargs):
+        kwargs["allow_abbrev"] = False
         super().__init__(*args, **kwargs)
         self.register("action", None, UniqueStoreAction)
         self.register("action", "store", UniqueStoreAction)
@@ -5496,7 +5544,7 @@ class StrictArgumentParser(argparse.ArgumentParser):
 
 def build_parser() -> argparse.ArgumentParser:
     parser = StrictArgumentParser(description="PS-028 Privileged Operations Helper")
-    subparsers = parser.add_subparsers(dest="action", required=True)
+    subparsers = parser.add_subparsers(dest="action", required=True, parser_class=StrictArgumentParser)
 
     # apply-scenario
     p_apply = subparsers.add_parser("apply-scenario", help="Apply S0-S6 impairments")

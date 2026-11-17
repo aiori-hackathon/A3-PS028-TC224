@@ -3067,9 +3067,18 @@ class TestFirefoxSupportRegression(unittest.TestCase):
             "BROWSER DNS CONFIGURATION VERIFIED — LIVE DNS PATH NOT YET EXPERIMENTALLY VERIFIED"
         )
 
-        # Execute Chrome process
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
-        self.assertEqual(proc.returncode, 0)
+        # Execute Chrome process with verified unprivileged browser environment
+        proc = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=15)
+        self.assertEqual(
+            proc.returncode, 0,
+            f"Chrome execution failed with returncode {proc.returncode}.\n"
+            f"Chrome version: {chrome_ver}\n"
+            f"Executable: {chrome_bin}\n"
+            f"Command: {cmd}\n"
+            f"Profile path: {profile}\n"
+            f"STDOUT:\n{proc.stdout}\n"
+            f"STDERR:\n{proc.stderr}\n"
+        )
         self.assertTrue(netlog_path.is_file(), "Netlog file must be created by Chrome")
 
         # Inspect netlog for secure_dns_mode and event types

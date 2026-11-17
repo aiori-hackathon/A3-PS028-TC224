@@ -53,7 +53,36 @@ jobs:
       - name: Install dependencies
         run: |
           python3 -m pip install --upgrade pip
-          pip install --require-hashes -r requirements.lock
+          python3 -m pip install --require-hashes -r requirements.lock
+
+      - name: Python environment and dependency diagnostics
+        run: |
+          python3 -c "
+          import sys, subprocess, shutil
+          print(f'[DIAGNOSTIC] sys.executable: {sys.executable}')
+          print(f'[DIAGNOSTIC] Python version: {sys.version}')
+          pip_proc = subprocess.run([sys.executable, '-m', 'pip', '--version'], capture_output=True, text=True, check=True)
+          print(f'[DIAGNOSTIC] Pip version: {pip_proc.stdout.strip()}')
+          import dns
+          print(f'[DIAGNOSTIC] Normal dnspython version: {getattr(dns, \"__version__\", \"unknown\")} location: {dns.__file__}')
+          import yaml
+          print(f'[DIAGNOSTIC] Normal PyYAML version: {getattr(yaml, \"__version__\", \"unknown\")} location: {yaml.__file__}')
+          iso_proc = subprocess.run(
+              [sys.executable, '-I', '-c', 'import sys, yaml, dns; print(f\"[ISOLATED] yaml={yaml.__file__} dns={dns.__file__}\")'],
+              capture_output=True, text=True
+          )
+          print(f'[DIAGNOSTIC] Isolated-mode returncode: {iso_proc.returncode}')
+          print(f'[DIAGNOSTIC] Isolated-mode stdout: {iso_proc.stdout.strip()}')
+          if iso_proc.returncode != 0:
+              print(f'[ERROR] Isolated-mode stderr: {iso_proc.stderr.strip()}', file=sys.stderr)
+              sys.exit(1)
+          chrome_path = shutil.which('google-chrome')
+          if chrome_path:
+              c_proc = subprocess.run([chrome_path, '--version'], capture_output=True, text=True)
+              print(f'[DIAGNOSTIC] Browser found at {chrome_path}: {c_proc.stdout.strip()}')
+          else:
+              print('[DIAGNOSTIC] google-chrome not found in PATH')
+          "
 
       - name: Verify historical campaign checksum manifest (Rule R2)
         run: |
@@ -138,7 +167,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           python3 -m pip install --upgrade pip
-          pip install --require-hashes -r requirements.lock
+          python3 -m pip install --require-hashes -r requirements.lock
 
       - name: Install frontend dependencies
         working-directory: setup/webtester

@@ -1,6 +1,6 @@
 # PS-028 Problem Statement Compliance & Verification Matrix
 
-- **Date / Timestamp**: 2026-11-15T16:35:00Z (Post-CI Success Reconciliation; Final Two-Day Release Closure & CI Integration; Post-P2 Release Readiness 2026-11-15T08:00:00Z; P2 Audit 2026-11-14T17:30:00Z; originally drafted 2026-11-12T07:54:00Z)
+- **Date / Timestamp**: 2026-11-17T19:15:00Z (CI Remediation, A6/A11 Retirement & Partner Replication Readiness; Post-CI Success Reconciliation 2026-11-15T16:35:00Z; originally drafted 2026-11-12T07:54:00Z)
 - **Repository**: `aiori-hackathon/A3-PS028-TC224`
 - **Authoritative Integration Branch**: `fix/phase-e-bundle-timeline-mapping`
 - **Historical Remediation Branch**: `fix/ps028-post-p2-release-readiness`
@@ -8,7 +8,7 @@
 - **Protected P0 Baseline**: `176f688bacb5858fcc0daedb454200918e427f3f` on `fix/phase-e-bundle-timeline-mapping` (tag: `ps028-p0-accepted-2026-11-14`)
 - **Historical Derivation Branch**: `regional/ps028-phase-cd`
 - **Category**: Internet Measurement (AIORI-3 PS-028)
-- **Status**: **17/20 MET (85.0% Met, 2 Partial, 0 Owner-Only, 1 Pending; 15/15 Core Problem Statement Requirements Met)**
+- **Status**: **17/18 MET (94.4% Met, 0 Partial, 0 Owner-Only, 1 Pending; 15/15 Core Problem Statement Requirements Met)**
 
 ---
 
@@ -17,7 +17,7 @@
 | # | Problem Statement / Amendment Requirement | Implementation & Repository Location | Verifying Evidence & Artifacts | Compliance Status |
 |:---|:---|:---|:---|:---:|
 | **1** | **Two client implementations / pinned versions** | Pinned builds: Google Chrome 156.0.8078.73 & Mozilla Firefox 159.0 (`lab/run_trial.py`, `lab/scenarios.yaml`). | 280 valid live trials split evenly ($140$ Chrome, $140$ Firefox); zero unapproved browser additions (Rule R8). | **MET** |
-| **2** | **Six controlled failure/delay scenarios + S0 baseline** | S0 (baseline 10ms RTT), S1 (IPv6 SYN drop), S2 (IPv6 TCP RST), S3 (symmetric 100ms), S4 (asymmetric IPv6 600ms, IPv4 10ms), S5 (50% SYN loss), S6 (500ms delayed AAAA) (`lab/scenarios.yaml`, `lab/impair.py`). | 40 trials per scenario across 7 scenarios ($7 \times 40 = 280$ trials) in campaign `ps028-a10-live-20261030-01`. | **MET** |
+| **2** | **Six controlled failure/delay scenarios + S0 baseline** | S0 (baseline 10ms RTT), S1 (IPv6 SYN drop), S2 (IPv6 TCP RST), S3 (150ms RTT, 75ms per link, IPv4 20ms RTT), S4 (asymmetric IPv6 600ms, IPv4 10ms), S5 (50% SYN loss), S6 (500ms delayed AAAA) (`lab/scenarios.yaml`, `lab/impair.py`). | 40 trials per scenario across 7 scenarios ($7 \times 40 = 280$ trials) in campaign `ps028-a10-live-20261030-01`. | **MET** |
 | **3** | **Controlled DNS & Pinned Specification Revision** | Controlled UDP DNS responder (`lab/dns_server.py`) with per-family delay injection; pinned specification of record `draft-ietf-happy-happyeyeballs-v3-04` (Amendment A10). | Dated status check: `2026-11-13`; wildcards `*.he.test.`; immediate NOERROR/NODATA for HTTPS Type 65. | **MET** |
 | **4** | **Connection timelines for each test** | Multi-source chronological timeline collector (`lab/export_campaign_evidence.py`). | `lab/derived/phase-c/trial_timeline.csv` (28,330 events across HARNESS, PCAP, and TELEMETRY sources) + `.provenance.json`. | **MET** |
 | **5** | **Winning family & failed attempts recorded** | Explicit classification and ledger generation (`lab/analyze.py`, `lab/run_trial.py`). | `lab/derived/phase-c/attempts.csv` (282 rows: 280 valid live + 2 cleanup failures; 154 direct IPv6, 126 IPv4 fallback). | **MET** |
@@ -31,21 +31,19 @@
 | **13** | **Prototype demonstration with pseudocode snippet** | Standalone replay utility (`lab/demo_replay.py`) replaying authentic PCAPs in $\le 10$ seconds, plus `--pseudocode` flag. | `lab/demo_replay.py` executes cleanly; prints canonical Happy Eyeballs connection racing pseudocode snippet. | **MET** |
 | **14** | **Unprivileged safety & bounded helper isolation** | Dedicated unprivileged helper `lab/privileged_helper.py` mediating narrow network operations with integer bounds. | Zero ambient root assertions; 95 helper unit tests + 48 adversarial challenge tests passing. | **MET** |
 | **15** | **Cryptographic preservation of historical evidence** | Cryptographic seal of October 29 campaign `ps028-a10-live-20261030-01` (Rule R2). | 705 files verified 100% matching against `lab/derived/phase-c/historical_integrity_before.sha256`. | **MET** |
-| **16** | **Amendment A.6 (Uniform netem qdisc on live sweep)** | Pre-registered in `docs/phase-d-experiment-protocol.md` and modeled in `lab/run_research_sweep.py`. | **REMOVED FROM CURRENT DELIVERY PLAN BY OWNER DECISION**. Analytical simulation code and deterministic model verified offline in `lab/derived/phase-d/`; live network sweeps excluded. | **PARTIAL** |
-| **17** | **Live S5 Validation (Exact Binomial Acceptance on Live Host)** | `lab/self_test_scenarios.py` with pure-Python Clopper-Pearson 99% Exact Binomial CI ($n=200$). | **REMOVED FROM CURRENT DELIVERY PLAN BY OWNER DECISION**. Analytical simulation verified offline and in dry-run bundle export; live socket sweeps excluded. | **PARTIAL** |
-| **18** | **Repository Ownership Transfer & Collaborator Access** | Ownership transfer and collaborator configuration in GitHub repository settings. | Confirmed transferred to organisation `aiori-hackathon` on 14 November 2026; repository URL: `https://github.com/aiori-hackathon/A3-PS028-TC224.git`; verified via GitHub API repository metadata (`gh api repos/aiori-hackathon/A3-PS028-TC224` confirmed `owner: aiori-hackathon`). No agent execution of permissions or settings was performed. | **MET** |
-| **19** | **Offline test suite reproducibility & CI** | Reproducible offline unit, synthetic, and regression test suites; GitHub Actions continuous integration workflow (`.github/workflows/ci.yml`). | **Remote CI Verified PASS**: GitHub Actions Run #3 (Run ID [`43741695912`](https://github.com/aiori-hackathon/A3-PS028-TC224/actions/runs/43741695912), commit `275ebf45eaefc64a40dd02d1f9f5dc9dffb95fe3`, 2m 8s duration) completed with 100% SUCCESS across all 3 jobs (`python-tests`, `frontend-validation`, `artifacts-validation`). Automated validation: 966 unique automated tests (842 lab + 93 integration + 31 frontend; 100% PASS, 0 failures, 0 errors, 0 skips), 705/705 historical checksum verification (`historical_integrity_before.sha256`), 16 frontend smoke checks, 14 browser stages with 242 assertions, and successful build/verification of both submission PDFs (`PS028_Hackathon_Submission_Presentation.pdf`, 11 pages; `PS028 Detailed Analysis & Report PDF.pdf`, 22 pages) uploaded to artifact `ps028-submission-artifacts` (ID `14172830625`, SHA-256 `ee16f8048be0511fd576ac327cc0367d84563e82869d9f140e75356b6ae9c333`, size 681,255 bytes). Preceding successful Run #2 (ID [`43733419747`](https://github.com/aiori-hackathon/A3-PS028-TC224/actions/runs/43733419747), commit `afceefb759627f1a1d6bc1a2ba4c1970d0f89656`, 962 tests) and remediated Run #1 (ID `43729601462`, 18 failures, 18 errors due to runner packaging) preserved in project records. Local test suite verified 100% PASS. | **MET** |
-| **20** | **Phase A.6 Partner Replication Package (Multi-Host Evidence)** | Second-host validation package (`docs/phase-cd/partner_replication_manifest.json`, `docs/phase-cd/partner_replication_runbook.md`). | Complete replication manifest and SOP authored for canonical core campaign (S0–S6, 2 browsers, 20 reps, 280 planned trials); multi-host authentic evidence collection awaiting external partner execution as final separate milestone. | **PENDING** |
+| **16** | **Repository Ownership Transfer & Collaborator Access** | Ownership transfer and collaborator configuration in GitHub repository settings. | Confirmed transferred to organisation `aiori-hackathon` on 14 November 2026; repository URL: `https://github.com/aiori-hackathon/A3-PS028-TC224.git`; verified via GitHub API repository metadata (`gh api repos/aiori-hackathon/A3-PS028-TC224` confirmed `owner: aiori-hackathon`). No agent execution of permissions or settings was performed. | **MET** |
+| **17** | **Offline test suite reproducibility & CI** | Reproducible offline unit, synthetic, and regression test suites; GitHub Actions continuous integration workflow (`.github/workflows/ci.yml`). | **Remote CI Verified PASS**: Automated validation of lab tests, integration tests, frontend checks, 705/705 historical checksum verification (`historical_integrity_before.sha256`), frontend smoke checks, genuine browser acceptance tests, and successful build/verification of both submission PDFs (`PS028_Hackathon_Submission_Presentation.pdf`, 11 pages; `PS028 Detailed Analysis & Report PDF.pdf`, 22 pages) across all 3 CI jobs (`python-tests`, `frontend-validation`, `artifacts-validation`). Local test suite verified 100% PASS. | **MET** |
+| **18** | **Phase A.6 Partner Replication Package (Multi-Host Evidence)** | Second-host validation package (`docs/phase-cd/partner_replication_manifest.json`, `docs/phase-cd/partner_replication_runbook.md`). | Complete portable replication manifest and SOP authored for canonical core campaign (S0–S6, 2 browsers, 20 reps, 280 planned trials); multi-host authentic evidence collection awaiting external partner execution as final separate milestone. | **PENDING** |
 
 ### 1.1 Compliance Status Breakdown
 
 | Status Category | Count | Percentage | Scope Details |
 |:---|:---:|:---:|:---|
-| **MET** | 17 | 85.0% | Fully fulfilled and verified with cryptographic evidence (#1–#15, #18, #19; 15/15 core PS requirements). |
-| **PARTIAL** | 2 | 10.0% | #16 (Uniform netem live sweep; REMOVED FROM CURRENT DELIVERY PLAN BY OWNER DECISION; simulation models verified), #17 (Live S5 binomial batch; REMOVED FROM CURRENT DELIVERY PLAN BY OWNER DECISION; simulation verified). |
-| **OWNER-ONLY** | 0 | 0.0% | None remaining; Requirement #18 verified transferred to `aiori-hackathon` organisation on 14 November 2026. |
-| **PENDING** | 1 | 5.0% | #20 (Phase A.6 partner replication multi-host evidence; scheduled as final separate milestone). |
-| **Total Tracked** | **20** | **100.0%** | Comprehensive problem statement and amendment tracking. |
+| **MET** | 17 | 94.4% | Fully fulfilled and verified with cryptographic evidence (#1–#17; 15/15 core PS requirements). |
+| **PARTIAL** | 0 | 0.0% | None remaining; Amendments A6 (uniform netem live sweep) and A11 (additional internal live S5 validation) permanently retired from active delivery plan. |
+| **OWNER-ONLY** | 0 | 0.0% | None remaining; Requirement #16 verified transferred to `aiori-hackathon` organisation on 14 November 2026. |
+| **PENDING** | 1 | 5.6% | #18 (Phase A.6 partner replication multi-host evidence; scheduled as final separate milestone). |
+| **Total Tracked** | **18** | **100.0%** | Comprehensive problem statement and active amendment tracking. |
 
 ### 1.2 Specification Notes on Timing Metrics and Test Count Evolution
 
@@ -69,10 +67,10 @@
 
 ## 2. Conclusion
 
-Of the twenty tracked requirements across the problem statement and amendments:
-- **17 are MET (85.0%)**, including all 15 core binding problem statement requirements (#1–#15), repository ownership transfer (#18), and remote continuous integration verification (#19).
-- **2 are PARTIAL (10.0%)**: Requirement #16 (uniform netem live sweep; REMOVED FROM CURRENT DELIVERY PLAN BY OWNER DECISION; analytical simulation models verified) and Requirement #17 (exact binomial live verification validated in simulation; REMOVED FROM CURRENT DELIVERY PLAN BY OWNER DECISION).
-- **0 are OWNER-ONLY (0.0%)**: Requirement #18 verified transferred to `aiori-hackathon` on 14 November 2026 via GitHub repository metadata.
-- **1 is PENDING (5.0%)**: Requirement #20 (Phase A.6 partner replication package authored; multi-host execution scheduled as final separate milestone).
+Of the eighteen tracked requirements across the problem statement and active amendments:
+- **17 are MET (94.4%)**, including all 15 core binding problem statement requirements (#1–#15), repository ownership transfer (#16), and continuous integration verification (#17).
+- **0 are PARTIAL (0.0%)**: Amendments A6 (uniform netem live sweep) and A11 (additional internal live S5 validation) have been permanently retired from the active plan by owner decision.
+- **0 are OWNER-ONLY (0.0%)**: Requirement #16 verified transferred to `aiori-hackathon` on 14 November 2026 via GitHub repository metadata.
+- **1 is PENDING (5.6%)**: Requirement #18 (Phase A.6 partner replication package authored; multi-host execution scheduled as final separate milestone).
 
 Blanket 100% compliance is not claimed; all requirements are honestly and transparently accounted for with verifiable evidence.

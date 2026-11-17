@@ -47,7 +47,7 @@ import struct
 import subprocess
 import tempfile
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 import unittest
 from unittest.mock import MagicMock, call, patch
 
@@ -65,6 +65,35 @@ import lab.preflight as preflight
 import lab.privileged_helper as priv_helper
 import lab.run_campaign as run_campaign
 import lab.run_trial as run_trial
+
+
+@contextlib.contextmanager
+def authorized_invoking_identity(
+    uid: int = 1000,
+    gid: int = 1000,
+    username: str = "mockuser",
+    home_dir: Optional[Path] = None,
+    shell: str = "/bin/bash",
+    permitted_groups: Optional[List[int]] = None
+):
+    """
+    Deterministic test fixture supplying an authorized unprivileged invoking identity.
+    Enforces that tests verify production authorization, privilege dropping, and
+    exit code handling identically across heterogeneous host environments (e.g., CI runner UID 1001).
+    """
+    actual_home = home_dir if home_dir is not None else Path(f"/home/{username}")
+    ident = UserIdentity(
+        uid=uid,
+        gid=gid,
+        username=username,
+        home_dir=actual_home,
+        shell=shell
+    )
+    groups = permitted_groups if permitted_groups is not None else [gid]
+    with patch("lab.privileged_helper.identity.resolve_invoking_identity", return_value=ident), \
+         patch("lab.identity.resolve_invoking_identity", return_value=ident), \
+         patch("os.getgrouplist", return_value=groups):
+        yield ident
 
 
 class TestPrivilegeSeparationAndPreflight(unittest.TestCase):
@@ -543,13 +572,16 @@ class TestSnapBrowserNamespaceMountsAndLaunch(unittest.TestCase):
     @patch("lab.privileged_helper.setup_snap_mounts")
     def test_launch_snap_browser_main_user_identity_drop(self, mock_setup_mounts, mock_setup_dns, mock_execvp, mock_which):
         """launch_snap_browser_main must drop privileges to target user UID/GID before exec."""
-        args = argparse.Namespace(
-            reuid=1000,
-            regid=1000,
-            mounts_file=self.mounts_file,
-            cmd=["--", "/snap/bin/chromium", "--headless=new"]
-        )
-        priv_helper.launch_snap_browser_main(args)
+        target_uid = 1000
+        target_gid = 1000
+        with authorized_invoking_identity(uid=target_uid, gid=target_gid):
+            args = argparse.Namespace(
+                reuid=target_uid,
+                regid=target_gid,
+                mounts_file=self.mounts_file,
+                cmd=["--", "/snap/bin/chromium", "--headless=new"]
+            )
+            priv_helper.launch_snap_browser_main(args)
 
         mock_setup_mounts.assert_called_once_with(mounts_file=self.mounts_file)
         mock_setup_dns.assert_called_once()
@@ -558,8 +590,8 @@ class TestSnapBrowserNamespaceMountsAndLaunch(unittest.TestCase):
         self.assertEqual(exec_binary, "/usr/bin/setpriv")
         self.assertEqual(exec_args, [
             "/usr/bin/setpriv",
-            "--reuid=1000",
-            "--regid=1000",
+            f"--reuid={target_uid}",
+            f"--regid={target_gid}",
             "--init-groups",
             "/snap/bin/chromium",
             "--headless=new"
@@ -810,15 +842,18 @@ class TestSnapBrowserNamespaceMountsAndLaunch(unittest.TestCase):
     @patch("lab.privileged_helper.setup_snap_isolated_dns", side_effect=priv_helper.SnapMountError("Isolated DNS failure"))
     def test_launch_snap_browser_main_exits_71_on_isolated_dns_error(self, mock_setup_dns, mock_setup_mounts):
         """launch_snap_browser_main must exit with code 71 when setup_snap_isolated_dns fails."""
-        args = argparse.Namespace(
-            reuid=1000,
-            regid=1000,
-            mounts_file=self.mounts_file,
-            cmd=["--", "/snap/bin/chromium", "--headless=new"]
-        )
-        with self.assertRaises(SystemExit) as ctx:
-            priv_helper.launch_snap_browser_main(args)
-        self.assertEqual(ctx.exception.code, 71)
+        target_uid = 1000
+        target_gid = 1000
+        with authorized_invoking_identity(uid=target_uid, gid=target_gid):
+            args = argparse.Namespace(
+                reuid=target_uid,
+                regid=target_gid,
+                mounts_file=self.mounts_file,
+                cmd=["--", "/snap/bin/chromium", "--headless=new"]
+            )
+            with self.assertRaises(SystemExit) as ctx:
+                priv_helper.launch_snap_browser_main(args)
+            self.assertEqual(ctx.exception.code, 71)
 
     def test_is_snap_browser_detection(self):
         """Verifies accurate detection of Snap vs non-Snap browser binaries."""
@@ -3117,11 +3152,16 @@ class TestPrivilegedHelperSecurityHardenings(unittest.TestCase):
             # 2. Execute isolated python -I from inside the untrusted directory with malicious PYTHONPATH
             test_script = self.temp_dir / "verify_isolated.py"
             test_script.write_text(
-                "import sys, yaml, dns\n"
+                "import sys, pathlib, yaml, dns\n"
                 "assert '' not in sys.path\n"
                 "assert '.' not in sys.path\n"
                 "assert 'EXPLOIT_SHADOW_YAML' not in getattr(yaml, '__file__', '')\n"
                 "assert 'EXPLOIT_SHADOW_DNS' not in getattr(dns, '__file__', '')\n"
+                "yaml_p = str(pathlib.Path(yaml.__file__).resolve())\n"
+                "dns_p = str(pathlib.Path(dns.__file__).resolve())\n"
+                "cwd_p = str(pathlib.Path('.').resolve())\n"
+                "assert not yaml_p.startswith(cwd_p), f'yaml loaded from untrusted dir: {yaml_p}'\n"
+                "assert not dns_p.startswith(cwd_p), f'dns loaded from untrusted dir: {dns_p}'\n"
                 "print('ISOLATED_OK')\n",
                 encoding="utf-8"
             )
@@ -3131,7 +3171,7 @@ class TestPrivilegedHelperSecurityHardenings(unittest.TestCase):
             env["PYTHONHOME"] = str(u_path)
 
             res = subprocess.run(
-                ["python3", "-I", str(test_script)],
+                [sys.executable, "-I", str(test_script)],
                 cwd=str(u_path),
                 env=env,
                 capture_output=True,
@@ -4025,22 +4065,25 @@ class TestPrivilegedHelperArgumentBoundaries(unittest.TestCase):
             ["mount", "-t", "tmpfs", "none", "/mnt"],
             ["chmod", "777", "/etc/passwd"],
         ]
-        for cmd in prohibited_commands:
-            args = argparse.Namespace(
-                reuid=1000,
-                regid=1000,
-                mounts_file="/proc/mounts",
-                snap_name=None,
-                resolver_ip="10.0.1.1",
-                resolv_conf=None,
-                snap_ns_dir="/run/snapd/ns",
-                source_fd=None,
-                host_proc_root="/proc/1/root",
-                cmd=cmd
-            )
-            with self.assertRaises(SystemExit) as cm:
-                priv_helper.launch_snap_browser_main(args)
-            self.assertEqual(cm.exception.code, 72)
+        target_uid = 1000
+        target_gid = 1000
+        with authorized_invoking_identity(uid=target_uid, gid=target_gid):
+            for cmd in prohibited_commands:
+                args = argparse.Namespace(
+                    reuid=target_uid,
+                    regid=target_gid,
+                    mounts_file="/proc/mounts",
+                    snap_name=None,
+                    resolver_ip="10.0.1.1",
+                    resolv_conf=None,
+                    snap_ns_dir="/run/snapd/ns",
+                    source_fd=None,
+                    host_proc_root="/proc/1/root",
+                    cmd=cmd
+                )
+                with self.assertRaises(SystemExit) as cm:
+                    priv_helper.launch_snap_browser_main(args)
+                self.assertEqual(cm.exception.code, 72)
 
     def test_reload_dns_rejects_invalid_configuration_schema(self):
         """reload-dns must validate replacement configuration schema and reject invalid JSON."""
@@ -4367,15 +4410,18 @@ class TestBrowserExecutableHardening(unittest.TestCase):
         fake_chrome.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
         fake_chrome.chmod(0o755)
 
-        args = argparse.Namespace(
-            reuid=1000,
-            regid=1000,
-            cmd=[str(fake_chrome)],
-            is_test_fixture=False
-        )
-        with self.assertRaises(SystemExit) as cm:
-            priv_helper.launch_snap_browser_main(args)
-        self.assertEqual(cm.exception.code, 72)
+        target_uid = 1000
+        target_gid = 1000
+        with authorized_invoking_identity(uid=target_uid, gid=target_gid):
+            args = argparse.Namespace(
+                reuid=target_uid,
+                regid=target_gid,
+                cmd=[str(fake_chrome)],
+                is_test_fixture=False
+            )
+            with self.assertRaises(SystemExit) as cm:
+                priv_helper.launch_snap_browser_main(args)
+            self.assertEqual(cm.exception.code, 72)
 
     def test_launch_snap_browser_main_rejects_inode_modification_before_exec(self):
         """launch_snap_browser_main detects and exits 72 if the executable inode changes before exec."""
@@ -4789,28 +4835,29 @@ class TestProcessLifecycleAndSignalingSecurity(unittest.TestCase):
 
     def test_launch_snap_browser_rejects_unauthorized_reuid(self):
         """launch_snap_browser_main rejects --reuid mismatching invoking identity with code 74."""
-        args = argparse.Namespace(
-            reuid=99999,
-            regid=1000,
-            cmd=["--", "/snap/bin/chromium", "http://10.0.1.10/test"],
-            is_test_fixture=False
-        )
-        with self.assertRaises(SystemExit) as cm:
-            priv_helper.launch_snap_browser_main(args)
-        self.assertEqual(cm.exception.code, 74)
+        with authorized_invoking_identity(uid=1000, gid=1000):
+            args = argparse.Namespace(
+                reuid=99999,
+                regid=1000,
+                cmd=["--", "/snap/bin/chromium", "http://10.0.1.10/test"],
+                is_test_fixture=False
+            )
+            with self.assertRaises(SystemExit) as cm:
+                priv_helper.launch_snap_browser_main(args)
+            self.assertEqual(cm.exception.code, 74)
 
     def test_launch_snap_browser_rejects_unauthorized_regid(self):
         """launch_snap_browser_main rejects --regid not in permitted groups with code 74."""
-        inv_user = identity.resolve_invoking_identity()
-        args = argparse.Namespace(
-            reuid=inv_user.uid,
-            regid=88888,
-            cmd=["--", "/snap/bin/chromium", "http://10.0.1.10/test"],
-            is_test_fixture=False
-        )
-        with self.assertRaises(SystemExit) as cm:
-            priv_helper.launch_snap_browser_main(args)
-        self.assertEqual(cm.exception.code, 74)
+        with authorized_invoking_identity(uid=1000, gid=1000, permitted_groups=[1000]):
+            args = argparse.Namespace(
+                reuid=1000,
+                regid=88888,
+                cmd=["--", "/snap/bin/chromium", "http://10.0.1.10/test"],
+                is_test_fixture=False
+            )
+            with self.assertRaises(SystemExit) as cm:
+                priv_helper.launch_snap_browser_main(args)
+            self.assertEqual(cm.exception.code, 74)
 
     def test_launch_snap_browser_rejects_root_direct_invocation(self):
         """launch_snap_browser_main rejects direct root invocation to prevent arbitrary UID drop."""
@@ -4869,6 +4916,20 @@ class TestProcessLifecycleAndSignalingSecurity(unittest.TestCase):
                 is_test_fixture=False
             )
         self.assertIn("strictly '/proc/1/root'", str(cm.exception))
+
+    def test_setup_snap_isolated_dns_rejects_tampered_host_proc_root_before_resolver_discovery(self):
+        """Regression: tampered host_proc_root is rejected before resolver discovery even if resolver config is missing/invalid."""
+        missing_resolv = self.temp_dir / "nonexistent_resolv.conf"
+        with self.assertRaises(priv_helper.SnapMountError) as cm:
+            priv_helper.setup_snap_isolated_dns(
+                snap_name="chromium",
+                snap_ns_dir="/run/snapd/ns",
+                host_proc_root="/var/tmp/tampered_proc",
+                resolv_conf_path=missing_resolv,
+                is_test_fixture=False
+            )
+        self.assertIn("strictly '/proc/1/root'", str(cm.exception))
+        self.assertNotIn("Lab resolver selection failed", str(cm.exception))
 
     def test_start_nginx_rejects_unexpected_supplementary_groups(self):
         """start_nginx_privileged fails closed if ps028-sv has unexpected supplementary groups."""
