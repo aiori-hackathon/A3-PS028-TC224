@@ -165,6 +165,9 @@ async function runBrowserAcceptanceTests() {
 
   try {
     const context = await browser.newContext();
+    await context.route(/fonts\.(googleapis|gstatic)\.com/, (route) => {
+      route.fulfill({ status: 200, contentType: 'text/css', body: '' });
+    });
     const page = await context.newPage();
 
     // Listen to console and page errors
@@ -692,9 +695,107 @@ assert(
     console.log('  [PASS] S5 invariant strict failure verified (summary cannot manufacture pass)');
 
     // -------------------------------------------------------------------------
-    // TEST STAGE 14: Verify Error Free Baseline Execution
+    // TEST STAGE 14: Scenario Analytics Dashboard Hydration & Page Verification
     // -------------------------------------------------------------------------
-    console.log('\n[STAGE 14] Verifying page errors and network request health in baseline session...');
+    console.log('\n[STAGE 14] Navigating to /analytics and verifying dashboard mount...');
+    await page.goto(`${baseUrl}/analytics`, { waitUntil: 'networkidle', timeout: 30000 });
+    const analyticsMounted = await page.waitForSelector('[data-testid="analytics-dashboard-mounted"]', { timeout: 15000 });
+    assert(analyticsMounted !== null, 'Scenario Analytics Dashboard root element must mount');
+
+    const analyticsTitle = await page.textContent('h1');
+    assert(analyticsTitle.includes('Scenario Analytics'), 'Page header must include Scenario Analytics');
+
+    const integrityBadge = await page.waitForSelector('[data-testid="analytics-integrity-badge"]', { timeout: 5000 });
+    const integrityText = await integrityBadge.textContent();
+    assert(integrityText.includes('Digest Consistent') || integrityText.includes('Verified'), 'Integrity badge must be visible and verified');
+    console.log('  [PASS] /analytics mounted and hydrated successfully with integrity verified');
+
+    // -------------------------------------------------------------------------
+    // TEST STAGE 15: All 7 Analytical Graph Cards Rendering
+    // -------------------------------------------------------------------------
+    console.log('\n[STAGE 15] Verifying all 7 analytical graph cards render...');
+    const g1 = await page.waitForSelector('[data-testid="graph-1-card"]', { timeout: 5000 });
+    const g2 = await page.waitForSelector('[data-testid="graph-2-card"]', { timeout: 5000 });
+    const g3 = await page.waitForSelector('[data-testid="graph-3-card"]', { timeout: 5000 });
+    const g4 = await page.waitForSelector('[data-testid="graph-4-card"]', { timeout: 5000 });
+    const g5 = await page.waitForSelector('[data-testid="graph-5-card"]', { timeout: 5000 });
+    const g6 = await page.waitForSelector('[data-testid="graph-6-card"]', { timeout: 5000 });
+    const g7 = await page.waitForSelector('[data-testid="graph-7-card"]', { timeout: 5000 });
+
+    assert(g1 !== null, 'Graph 1 (Connection Establishment Time) must render');
+    assert(g2 !== null, 'Graph 2 (IPv4 vs IPv6 Winner Distribution) must render');
+    assert(g3 !== null, 'Graph 3 (Connection Latency Distribution Box Plot) must render');
+    assert(g4 !== null, 'Graph 4 (DNS Resolution Performance) must render');
+    assert(g5 !== null, 'Graph 5 (SYN Retransmission Analysis) must render');
+    assert(g6 !== null, 'Graph 6 (Scenario Performance Heatmap) must render');
+    assert(g7 !== null, 'Graph 7 (TCP Connection Event Timeline) must render');
+    console.log('  [PASS] All 7 analytical graph cards rendered successfully');
+
+    // -------------------------------------------------------------------------
+    // TEST STAGE 16: Exercising Scenario Selection Controls
+    // -------------------------------------------------------------------------
+    console.log('\n[STAGE 16] Exercising scenario selection controls (Clear, Select All, Toggle)...');
+    const clearBtn = await page.waitForSelector('[data-testid="clear-all-btn"]', { timeout: 5000 });
+    const selectAllBtn = await page.waitForSelector('[data-testid="select-all-btn"]', { timeout: 5000 });
+    const downloadBtn = await page.waitForSelector('[data-testid="download-pdf-button"]', { timeout: 5000 });
+
+    // Click Clear Selection
+    await clearBtn.click();
+    await page.waitForTimeout(300);
+    const isDownloadDisabled = await downloadBtn.isDisabled();
+    assert(isDownloadDisabled === true, 'Download PDF button must be disabled when 0 scenarios selected');
+
+    // Click Select All
+    await selectAllBtn.click();
+    await page.waitForTimeout(300);
+    const isDownloadEnabled = await downloadBtn.isEnabled();
+    assert(isDownloadEnabled === true, 'Download PDF button must be enabled when scenarios are selected');
+
+    // Toggle S0 card off then on
+    const s0Card = await page.waitForSelector('[data-testid="scenario-card-S0"]', { timeout: 5000 });
+    await s0Card.click();
+    await page.waitForTimeout(200);
+    let s0Pressed = await s0Card.getAttribute('aria-pressed');
+    assert(s0Pressed === 'false', 'S0 must be unselected after click');
+
+    await s0Card.click();
+    await page.waitForTimeout(200);
+    s0Pressed = await s0Card.getAttribute('aria-pressed');
+    assert(s0Pressed === 'true', 'S0 must be re-selected after second click');
+    console.log('  [PASS] Scenario selection controls verified (Select All, Clear, Toggle, Disabled state)');
+
+    // -------------------------------------------------------------------------
+    // TEST STAGE 17: Exercising Browser and Metric Filters
+    // -------------------------------------------------------------------------
+    console.log('\n[STAGE 17] Exercising browser filtering and metric toggles...');
+    const chromeBtn = page.getByRole('button', { name: 'Chrome', exact: true }).first();
+    await chromeBtn.click();
+    await page.waitForTimeout(300);
+    const chromeSummaryText = await page.textContent('body');
+    assert(chromeSummaryText.includes('140'), 'Must reflect 140 trials for Chrome-only selection');
+
+    const bothBtn = page.getByRole('button', { name: 'Both', exact: true }).first();
+    await bothBtn.click();
+    await page.waitForTimeout(300);
+    const bothSummaryText = await page.textContent('body');
+    assert(bothSummaryText.includes('280'), 'Must reflect 280 trials for both browsers selection');
+    console.log('  [PASS] Browser filtering and metric controls verified');
+
+    // -------------------------------------------------------------------------
+    // TEST STAGE 18: Exercising PDF Report Generation and Download
+    // -------------------------------------------------------------------------
+    console.log('\n[STAGE 18] Exercising PDF report generation and download trigger...');
+    const downloadPromise = page.waitForEvent('download', { timeout: 15000 });
+    await downloadBtn.click();
+    const download = await downloadPromise;
+    const downloadName = download.suggestedFilename();
+    assert(downloadName.startsWith('PS028_Scenario_Analytics_Report'), `Expected filename starting with PS028_Scenario_Analytics_Report, got ${downloadName}`);
+    console.log(`  [PASS] PDF report downloaded successfully: ${downloadName}`);
+
+    // -------------------------------------------------------------------------
+    // TEST STAGE 19: Verify Error Free Baseline Execution
+    // -------------------------------------------------------------------------
+    console.log('\n[STAGE 19] Verifying page errors and network request health in baseline session...');
     console.log('\n[DIAGNOSTIC] HTTP responses with status >= 400:');
     console.log(
       httpErrors.length > 0
@@ -713,7 +814,7 @@ assert(
     console.log('  [PASS] Zero page errors, zero console errors, zero failed requests in baseline run');
 
     console.log('\n================================================================================');
-    console.log(`✓ ALL 14 BROWSER ACCEPTANCE TEST STAGES PASSED (${testsPassed} assertions verified)`);
+    console.log(`✓ ALL 19 BROWSER ACCEPTANCE TEST STAGES PASSED (${testsPassed} assertions verified)`);
     console.log(`Browser: Chromium/Chrome ${browserVersion}`);
     console.log('================================================================================\n');
 

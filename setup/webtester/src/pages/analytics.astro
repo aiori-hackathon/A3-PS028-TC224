@@ -1,0 +1,20 @@
+---
+import PageLayout from "@/layouts/main.astro";
+import Header from "@/components/header.astro";
+import { AnalyticsDashboard } from "@/components/analytics/analytics-dashboard.tsx";
+---
+
+<PageLayout title="Scenario Analytics & Performance Comparison - Happy Eyeballs Webtester">
+  <Header titleLine1="Scenario Analytics &" titleLine2="Performance Comparison">
+    <p class="text-black">
+      Explore IPv4/IPv6 connection behaviour across controlled network scenarios and browser implementations.
+    </p>
+    <p class="text-black">
+      Interactive comparative graphs, empirical latency distributions, DNS timing analysis, and dynamic PDF report generation for the October 2026 PS-028 Happy Eyeballs measurement campaign (<code>ps028-a10-live-20261030-01</code>).
+    </p>
+  </Header>
+
+  <div class="mt-8">
+    <AnalyticsDashboard client:load />
+  </div>
+</PageLayout>
