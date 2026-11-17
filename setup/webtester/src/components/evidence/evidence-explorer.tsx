@@ -237,7 +237,7 @@ export const EvidenceExplorer: React.FC = () => {
       <div className="flex flex-col items-center justify-center py-24 text-center">
         <div className="size-10 border-4 border-primary border-t-transparent rounded-full animate-spin mb-4" />
         <h2 className="text-xl font-bold tracking-tight">Loading Historical Campaign Evidence...</h2>
-        <p className="text-sm text-muted-foreground mt-2 max-w-md">
+        <p className="text-sm text-black mt-2 max-w-md">
           Retrieving authoritative Phase E bundle (<code>demo_bundle.json</code>) and verifying cryptographic SHA-256
           provenance.
         </p>
@@ -252,7 +252,7 @@ export const EvidenceExplorer: React.FC = () => {
           <AlertTriangle className="size-6 shrink-0" />
           <h2 className="text-lg font-bold">Historical Evidence Loading Error</h2>
         </div>
-        <p className="mt-2 text-sm text-muted-foreground">{loadError || 'Bundle could not be loaded.'}</p>
+        <p className="mt-2 text-sm text-black">{loadError || 'Bundle could not be loaded.'}</p>
         <div className="mt-4">
           <button
             onClick={() => window.location.reload()}
@@ -295,15 +295,15 @@ export const EvidenceExplorer: React.FC = () => {
       <div className="rounded-xl border border-blue-500/30 bg-blue-500/5 p-5 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-4 border-b border-blue-500/20 pb-4">
           <div className="flex items-center gap-3">
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30 tracking-wide uppercase">
-              <span className="size-2 rounded-full bg-amber-500 animate-pulse" />
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-red-500/20 text-red-700 dark:text-red-300 border border-red-500/30 tracking-wide uppercase">
+              <span className="size-2 rounded-full bg-red-500 animate-pulse" />
               Offline Historical Replay
             </span>
-            <span className="text-xs font-mono text-muted-foreground">
+            <span className="text-xs font-mono text-black text-bold">
               Campaign: <strong className="text-foreground">{bundle.campaign_id}</strong>
             </span>
-            <span className="text-xs text-muted-foreground">•</span>
-            <span className="text-xs font-mono text-muted-foreground">
+            <span className="text-xs text-black text-bold">•</span>
+            <span className="text-xs font-mono text-black text-bold">
               Evidence: <strong className="text-foreground">{bundle.evidence_type}</strong>
             </span>
           </div>
@@ -328,16 +328,16 @@ export const EvidenceExplorer: React.FC = () => {
             ) : (
               <span
                 data-testid="integrity-status-badge"
-                className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded text-xs font-medium bg-muted text-muted-foreground"
+                className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded text-xs font-medium bg-muted text-black"
               >
                 <ShieldCheck className="size-3.5" /> Hash Check Ready
               </span>
             )}
-            <span className="text-xs text-muted-foreground font-mono">v{bundle.bundle_schema_version}</span>
+            <span className="text-xs text-black font-mono">v{bundle.bundle_schema_version}</span>
           </div>
         </div>
 
-        <p className="mt-3 text-xs sm:text-sm text-muted-foreground leading-relaxed">
+        <p className="mt-3 text-xs sm:text-sm text-black opacity-100 font-medium leading-relaxed">
           <strong>Notice:</strong> This explorer presents recorded, tamper-evident historical experimental measurements
           from the October 2026 Happy Eyeballs campaign. It operates strictly in <em>read-only offline replay mode</em>.
           It does not launch live network experiments, initiate browser instances, or modify historical records.
@@ -353,7 +353,7 @@ export const EvidenceExplorer: React.FC = () => {
           className={`px-4 py-2.5 border-b-2 transition-colors whitespace-nowrap flex items-center gap-2 ${
             activeTab === 'overview'
               ? 'border-primary text-primary font-semibold'
-              : 'border-transparent text-muted-foreground hover:text-foreground hover:border-muted-foreground/30'
+              : 'border-transparent text-black hover:text-foreground hover:border-muted-foreground/30'
           }`}
         >
           <Database className="size-4" /> Campaign Overview
@@ -364,7 +364,7 @@ export const EvidenceExplorer: React.FC = () => {
           className={`px-4 py-2.5 border-b-2 transition-colors whitespace-nowrap flex items-center gap-2 ${
             activeTab === 'comparison'
               ? 'border-primary text-primary font-semibold'
-              : 'border-transparent text-muted-foreground hover:text-foreground hover:border-muted-foreground/30'
+              : 'border-transparent text-black hover:text-foreground hover:border-muted-foreground/30'
           }`}
         >
           <Layers className="size-4" /> Scenario & Cohort Comparison
@@ -375,7 +375,7 @@ export const EvidenceExplorer: React.FC = () => {
           className={`px-4 py-2.5 border-b-2 transition-colors whitespace-nowrap flex items-center gap-2 ${
             activeTab === 'trials'
               ? 'border-primary text-primary font-semibold'
-              : 'border-transparent text-muted-foreground hover:text-foreground hover:border-muted-foreground/30'
+              : 'border-transparent text-black hover:text-foreground hover:border-muted-foreground/30'
           }`}
         >
           <Search className="size-4" /> Trial Explorer ({filteredTrials.length})
@@ -386,7 +386,7 @@ export const EvidenceExplorer: React.FC = () => {
           className={`px-4 py-2.5 border-b-2 transition-colors whitespace-nowrap flex items-center gap-2 ${
             activeTab === 'trial-detail'
               ? 'border-primary text-primary font-semibold'
-              : 'border-transparent text-muted-foreground hover:text-foreground hover:border-muted-foreground/30'
+              : 'border-transparent text-black hover:text-foreground hover:border-muted-foreground/30'
           }`}
         >
           <Activity className="size-4" /> Selected Trial Detail{' '}
@@ -398,7 +398,7 @@ export const EvidenceExplorer: React.FC = () => {
           className={`px-4 py-2.5 border-b-2 transition-colors whitespace-nowrap flex items-center gap-2 ${
             activeTab === 'exclusions'
               ? 'border-primary text-primary font-semibold'
-              : 'border-transparent text-muted-foreground hover:text-foreground hover:border-muted-foreground/30'
+              : 'border-transparent text-black hover:text-foreground hover:border-muted-foreground/30'
           }`}
         >
           <AlertTriangle className="size-4 text-amber-500" /> Excluded Attempts ({bundle.exclusions?.length ?? 0})
@@ -409,7 +409,7 @@ export const EvidenceExplorer: React.FC = () => {
           className={`px-4 py-2.5 border-b-2 transition-colors whitespace-nowrap flex items-center gap-2 ${
             activeTab === 'provenance'
               ? 'border-primary text-primary font-semibold'
-              : 'border-transparent text-muted-foreground hover:text-foreground hover:border-muted-foreground/30'
+              : 'border-transparent text-black hover:text-foreground hover:border-muted-foreground/30'
           }`}
         >
           <ShieldCheck className="size-4" /> Provenance & Integrity
@@ -420,7 +420,7 @@ export const EvidenceExplorer: React.FC = () => {
           className={`px-4 py-2.5 border-b-2 transition-colors whitespace-nowrap flex items-center gap-2 ${
             activeTab === 'rfc'
               ? 'border-primary text-primary font-semibold'
-              : 'border-transparent text-muted-foreground hover:text-foreground hover:border-muted-foreground/30'
+              : 'border-transparent text-black hover:text-foreground hover:border-muted-foreground/30'
           }`}
         >
           <FileText className="size-4" /> RFC 8305 Assessment (7)
@@ -435,73 +435,73 @@ export const EvidenceExplorer: React.FC = () => {
           {/* Key Metric Cards */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
             <div className="p-4 rounded-lg border bg-card shadow-xs">
-              <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Valid Live Trials</div>
+              <div className="text-xs font-medium text-black uppercase tracking-wider">Valid Live Trials</div>
               <div className="text-2xl font-bold mt-1 text-primary">{bundle.trials?.length ?? 0}</div>
-              <div className="text-xs text-muted-foreground mt-1">100% completed live trials</div>
+              <div className="text-xs text-black mt-1">100% completed live trials</div>
             </div>
 
             <div className="p-4 rounded-lg border bg-card shadow-xs">
-              <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Excluded Attempts</div>
-              <div className="text-2xl font-bold mt-1 text-amber-600 dark:text-amber-400">
+              <div className="text-xs font-medium text-black uppercase tracking-wider">Excluded Attempts</div>
+              <div className="text-2xl font-bold mt-1 text-red-600 dark:text-red-400">
                 {bundle.exclusions?.length ?? 0}
               </div>
-              <div className="text-xs text-muted-foreground mt-1">Isolated teardown failures</div>
+              <div className="text-xs text-black mt-1">Isolated teardown failures</div>
             </div>
 
             <div className="p-4 rounded-lg border bg-card shadow-xs">
-              <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Controlled Scenarios</div>
-              <div className="text-2xl font-bold mt-1">
+              <div className="text-xs font-medium text-black uppercase tracking-wider">Controlled Scenarios</div>
+              <div className="text-2xl font-bold mt-1 text-primary">
                 {Object.keys(bundle.scenario_definitions ?? {}).length}
               </div>
-              <div className="text-xs text-muted-foreground mt-1">S0 (Baseline dual-stack) to S6 (Delayed AAAA)</div>
+              <div className="text-xs text-black mt-1">S0 (Baseline dual-stack) to S6 (Delayed AAAA)</div>
             </div>
 
             <div className="p-4 rounded-lg border bg-card shadow-xs">
-              <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Browser Cohorts</div>
-              <div className="text-2xl font-bold mt-1">
+              <div className="text-xs font-medium text-black uppercase tracking-wider">Browser Cohorts</div>
+              <div className="text-2xl font-bold mt-1 text-primary">
                 {Object.keys(bundle.browser_cohorts ?? {}).length}
               </div>
-              <div className="text-xs text-muted-foreground mt-1">Chrome 156 & Firefox 159</div>
+              <div className="text-xs text-black mt-1">Chrome 156 & Firefox 159</div>
             </div>
 
             <div className="p-4 rounded-lg border bg-card shadow-xs">
-              <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Timeline Events</div>
-              <div className="text-2xl font-bold mt-1">
+              <div className="text-xs font-medium text-black uppercase tracking-wider">Timeline Events</div>
+              <div className="text-2xl font-bold mt-1 text-primary">
                 {(bundle.reconciliation_summary?.timeline_events_count ?? 0).toLocaleString()}
               </div>
-              <div className="text-xs text-muted-foreground mt-1">28,326 valid + 4 exclusion</div>
+              <div className="text-xs text-black mt-1">28,326 valid + 4 exclusion</div>
             </div>
 
             <div className="p-4 rounded-lg border bg-card shadow-xs">
-              <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Connection Attempts</div>
-              <div className="text-2xl font-bold mt-1">
+              <div className="text-xs font-medium text-black uppercase tracking-wider">Connection Attempts</div>
+              <div className="text-2xl font-bold mt-1 text-primary">
                 {bundle.reconciliation_summary?.connection_attempts_count ?? 765}
               </div>
-              <div className="text-xs text-muted-foreground mt-1">Authoritative TCP flows</div>
+              <div className="text-xs text-black mt-1">Authoritative TCP flows</div>
             </div>
 
             <div className="p-4 rounded-lg border bg-card shadow-xs">
-              <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">HTTP/1.1 Subflows</div>
-              <div className="text-2xl font-bold mt-1">
+              <div className="text-xs font-medium text-black uppercase tracking-wider">HTTP/1.1 Subflows</div>
+              <div className="text-2xl font-bold mt-1 text-primary">
                 {bundle.reconciliation_summary?.s5_flows_count ?? 95}
               </div>
-              <div className="text-xs text-muted-foreground mt-1">Observed in S5 (Separate Telemetry)</div>
+              <div className="text-xs text-black mt-1">Observed in S5 (Separate Telemetry)</div>
             </div>
 
             <div className="p-4 rounded-lg border bg-card shadow-xs">
-              <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Cohort Repetitions</div>
-              <div className="text-2xl font-bold mt-1">
+              <div className="text-xs font-medium text-black uppercase tracking-wider">Cohort Repetitions</div>
+              <div className="text-2xl font-bold mt-1 text-primary">
                 {bundle.reconciliation_summary?.trials_per_cohort ?? 20}
               </div>
-              <div className="text-xs text-muted-foreground mt-1">Balanced n=20 per matrix slot</div>
+              <div className="text-xs text-black mt-1">Balanced n=20 per matrix slot</div>
             </div>
 
             <div className="p-4 rounded-lg border bg-card shadow-xs">
-              <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Integrity Audit</div>
+              <div className="text-xs font-medium text-black uppercase tracking-wider">Integrity Audit</div>
               {integrity.status === 'HASH_MATCHED' ? (
                 <>
-                  <div className="text-2xl font-bold mt-1 text-emerald-600 dark:text-emerald-400">Digest Matched</div>
-                  <div className="text-xs text-muted-foreground mt-1">Same-origin digest consistent</div>
+                  <div className="text-xl font-bold mt-1 text-emerald-600 dark:text-emerald-400">Digest Matched</div>
+                  <div className="text-xs text-black mt-1">Same-origin digest consistent</div>
                 </>
               ) : integrity.status === 'HASH_MISMATCHED' ? (
                 <>
@@ -510,8 +510,8 @@ export const EvidenceExplorer: React.FC = () => {
                 </>
               ) : (
                 <>
-                  <div className="text-2xl font-bold mt-1 text-muted-foreground">Pending</div>
-                  <div className="text-xs text-muted-foreground mt-1">Integrity check pending</div>
+                  <div className="text-2xl font-bold mt-1 text-black">Pending</div>
+                  <div className="text-xs text-black mt-1">Integrity check pending</div>
                 </>
               )}
             </div>
@@ -521,8 +521,8 @@ export const EvidenceExplorer: React.FC = () => {
           <div className="rounded-lg border bg-card p-5 space-y-4">
             <div className="flex items-center justify-between border-b pb-3">
               <div>
-                <h3 className="text-base font-semibold">Authoritative Evidence Cross-Checks</h3>
-                <p className="text-xs text-muted-foreground">
+                <h3 className="text-xl text-base font-semibold">Authoritative Evidence Cross-Checks</h3>
+                <p className="text-xs text-black">
                   Dynamic reconciliation of loaded JSON against historical campaign invariants.
                 </p>
               </div>
@@ -532,7 +532,7 @@ export const EvidenceExplorer: React.FC = () => {
                   integrity.status === 'HASH_MISMATCHED'
                     ? 'bg-rose-500/10 text-rose-700 dark:text-rose-400 border-rose-500/20'
                     : invariantChecks.every((inv) => inv.passed)
-                    ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20'
+                    ? 'bg-emerald-500/10 text-emerald-900 dark:text-emerald-2000 border border-emerald-500/20'
                     : 'bg-rose-500/10 text-rose-700 dark:text-rose-400 border-rose-500/20'
                 }`}
               >
@@ -548,25 +548,24 @@ export const EvidenceExplorer: React.FC = () => {
               {invariantChecks.map((chk) => (
                 <div
                   key={chk.name}
-                  className={`p-3 rounded border text-xs flex flex-col justify-between ${
+                  className={`p-3 rounded-xl border flex flex-col justify-between ${
                     chk.passed
-                      ? 'border-emerald-500/20 bg-emerald-500/5'
+                      ? 'border-emerald-600/100 bg-emerald-500/18'
                       : 'border-destructive/30 bg-destructive/5'
                   }`}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="font-semibold text-foreground">{chk.name}</span>
+                    <span className="text-lg font-semibold text-foreground">{chk.name}</span>
                     {chk.passed ? (
                       <CheckCircle2 className="size-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
                     ) : (
                       <AlertTriangle className="size-4 text-destructive shrink-0" />
                     )}
                   </div>
-                  <div className="mt-2 flex items-baseline gap-2 font-mono">
+                  <div className="mt-2 font-mono">
                     <span className="text-base font-bold text-foreground">{chk.actual}</span>
-                    <span className="text-muted-foreground text-xs">(expected {chk.expected})</span>
                   </div>
-                  <p className="text-[11px] text-muted-foreground mt-1">{chk.description}</p>
+                  <p className="text-sm text-black mt-1">{chk.description}</p>
                 </div>
               ))}
             </div>
@@ -582,11 +581,11 @@ export const EvidenceExplorer: React.FC = () => {
                 <h4 className="font-semibold text-base group-hover:text-primary transition-colors">
                   Inspect Scenario & Browser Matrix
                 </h4>
-                <p className="text-xs text-muted-foreground mt-1">
+                <p className="text-xs text-black mt-1">
                   Compare median t_connect_ms and t_setup_total_ms across all 14 empirical cohorts.
                 </p>
               </div>
-              <ArrowRight className="size-5 text-muted-foreground group-hover:text-primary group-hover:translate-x-1 transition-all" />
+              <ArrowRight className="size-5 text-black group-hover:text-primary group-hover:translate-x-1 transition-all" />
             </div>
 
             <div
@@ -597,11 +596,11 @@ export const EvidenceExplorer: React.FC = () => {
                 <h4 className="font-semibold text-base group-hover:text-primary transition-colors">
                   Search & Filter 280 Trials
                 </h4>
-                <p className="text-xs text-muted-foreground mt-1">
+                <p className="text-xs text-black mt-1">
                   Query trials by scenario, browser, classification, or ID to inspect raw timelines.
                 </p>
               </div>
-              <ArrowRight className="size-5 text-muted-foreground group-hover:text-primary group-hover:translate-x-1 transition-all" />
+              <ArrowRight className="size-5 text-black group-hover:text-primary group-hover:translate-x-1 transition-all" />
             </div>
           </div>
         </div>
@@ -617,7 +616,7 @@ export const EvidenceExplorer: React.FC = () => {
             <h4 className="font-semibold text-foreground flex items-center gap-2">
               <Clock className="size-4 text-primary" /> Principal Connection Timing Metrics Definition Guide
             </h4>
-            <div className="grid sm:grid-cols-2 gap-4 text-xs text-muted-foreground">
+            <div className="grid sm:grid-cols-2 gap-4 text-xs text-black">
               <div>
                 <strong className="text-foreground">Primary Handshake Completion (t_connect_ms):</strong> Measures
                 the strict TCP 3-way handshake duration from the initial primary SYN to matching final ACK transitioning
@@ -637,24 +636,24 @@ export const EvidenceExplorer: React.FC = () => {
           <div className="rounded-lg border bg-card overflow-hidden shadow-xs">
             <div className="p-4 border-b bg-muted/20">
               <h3 className="font-semibold text-base">Historical Campaign Cohort Matrix (14 Cohorts, N=280)</h3>
-              <p className="text-xs text-muted-foreground mt-0.5">
+              <p className="text-xs text-black mt-0.5">
                 Medians dynamically computed from original trial-level measurements (n=20 per cohort).
               </p>
             </div>
 
             <div className="overflow-x-auto">
-              <table className="w-full text-xs sm:text-sm">
+              <table className="w-full text-xs sm:text-sm text-center">
                 <thead>
-                  <tr className="border-b bg-muted/40 text-left font-medium text-muted-foreground">
+                  <tr className="border-b bg-muted/40 font-medium text-black">
                     <th className="p-3">Scenario</th>
                     <th className="p-3">Condition & Description</th>
                     <th className="p-3">Browser</th>
-                    <th className="p-3 text-right">Sample (n)</th>
-                    <th className="p-3 text-center">Winner Distribution</th>
-                    <th className="p-3 text-right">Median t_connect</th>
-                    <th className="p-3 text-right">Median t_setup_total</th>
-                    <th className="p-3 text-right">Median CAD</th>
-                    <th className="p-3 text-center">Action</th>
+                    <th className="p-3">Sample (n)</th>
+                    <th className="p-3">Winner Distribution</th>
+                    <th className="p-3">Median t_connect</th>
+                    <th className="p-3">Median t_setup_total</th>
+                    <th className="p-3">Median CAD</th>
+                    <th className="p-3">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
@@ -670,87 +669,87 @@ export const EvidenceExplorer: React.FC = () => {
                           {item.scenarioId}
                         </span>
                       </td>
-                      <td className="p-3 max-w-xs">
+                      <td className="p-3 max-w-xs text-center">
                         <div className="font-semibold text-foreground">{item.scenarioDef.title}</div>
-                        <div className="text-[11px] text-muted-foreground line-clamp-1">
+                        <div className="text-[11px] text-black line-clamp-1 text-center">
                           {item.scenarioDef.controlled_condition}
                         </div>
                       </td>
                       <td className="p-3 font-medium text-foreground whitespace-nowrap">
                         {item.stats.browserDisplayName}
                       </td>
-                      <td className="p-3 text-right font-mono text-muted-foreground">{item.stats.sampleSize} / 20</td>
-                      <td className="p-3 text-center whitespace-nowrap">
+                      <td className="p-3 font-mono text-black">{item.stats.sampleSize} / 20</td>
+                      <td className="p-3 whitespace-nowrap">
                         <span className="inline-flex items-center gap-1.5 text-xs font-mono">
-                          <span className="px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+                          <span className="px-2.5 py-1.5 rounded bg-blue-500/20 text-blue-900 dark:text-blue-500 border border-blue-500/70">
                             IPv6: {item.stats.ipv6Wins}
                           </span>
-                          <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                          <span className="px-2.5 py-1.5 rounded bg-emerald-500/20 text-emerald-900 dark:text-emerald-200 border border-emerald-500/70">
                             IPv4: {item.stats.ipv4Wins}
                           </span>
                         </span>
                       </td>
-                      <td className="p-3 text-right font-mono font-medium">
+                      <td className="p-3 font-mono font-medium">
                         {item.stats.tConnectMedian !== null ? `${item.stats.tConnectMedian.toFixed(2)} ms` : '—'}
                       </td>
-                      <td className="p-3 text-right font-mono font-bold text-foreground">
+                      <td className="p-3 font-mono font-bold text-foreground">
                         {item.stats.tSetupTotalMedian !== null ? `${item.stats.tSetupTotalMedian.toFixed(2)} ms` : '—'}
                       </td>
-                      <td className="p-3 text-right font-mono">
+                      <td className="p-3 font-mono">
                         {item.stats.cadClassification === 'VERIFIED_LOGICAL_CAD' ? (
-                          <div className="flex flex-col items-end">
-                            <span className="font-bold text-foreground">
+                          <div className="flex flex-col items-center">
+                            <span className="text-sm font-bold text-black">
                               {item.stats.cadMedian !== null ? `${item.stats.cadMedian.toFixed(2)} ms` : '—'}
                             </span>
-                            <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold">
+                            <span className="text-sm text-emerald-800 dark:text-emerald-300 font-semibold">
                               Verified logical CAD
                             </span>
                           </div>
                         ) : item.stats.cadClassification === 'PRE_PRIMARY_ACK_FAMILY_SYN_OFFSET' ? (
-                          <div className="flex flex-col items-end">
-                            <span className="font-bold text-foreground">
+                          <div className="flex flex-col items-center">
+                            <span className="text-sm font-bold text-black">
                               {item.stats.cadMedian !== null ? `${item.stats.cadMedian.toFixed(2)} ms` : '—'}
                             </span>
-                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-500/15 text-purple-700 dark:text-purple-300 border border-purple-500/30">
+                            <span className="text-sm px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-500/15 text-purple-900 dark:text-purple-200 border border-purple-500/30">
                               PRE-ACK OFFSET*
                             </span>
-                            <span className="text-[9px] text-muted-foreground mt-0.5">
+                            <span className="text-sm text-black mt-0.5">
                               (Pairing unverified)
                             </span>
                           </div>
                         ) : item.stats.cadClassification === 'NOT_ASSESSED' ? (
-                          <div className="flex flex-col items-end">
-                            <span className="px-1.5 py-0.5 rounded text-[11px] font-bold bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30">
+                          <div className="flex flex-col items-center">
+                            <span className="text-sm px-1.5 py-0.5 rounded text-[11px] font-bold bg-amber-500/15  text-amber-900 dark:text-amber-200 border border-amber-500/30">
                               NOT_ASSESSED*
                             </span>
                             {item.stats.rawFamilySynOffsetMedian !== null && (
-                              <span className="text-[10px] text-muted-foreground mt-0.5">
+                              <span className="text-sm text-black mt-0.5">
                                 Raw SYN offset: ~{item.stats.rawFamilySynOffsetMedian.toFixed(2)} ms
                               </span>
                             )}
                           </div>
                         ) : item.stats.cadClassification === 'RAW_FAMILY_SYN_OFFSET' ? (
-                          <div className="flex flex-col items-end">
-                            <span className="px-1.5 py-0.5 rounded text-[11px] font-bold bg-sky-500/15 text-sky-700 dark:text-sky-300 border border-sky-500/30">
+                          <div className="flex flex-col items-center">
+                            <span className="text-sm px-1.5 py-0.5 rounded text-[11px] font-bold bg-sky-500/15 text-sky-900 dark:text-sky-200 border border-sky-500/30">
                               RAW OFFSET*
                             </span>
                             {item.stats.rawFamilySynOffsetMedian !== null && (
-                              <span className="text-[10px] text-muted-foreground mt-0.5">
+                              <span className="text-sm text-black mt-0.5">
                                 Raw SYN offset: ~{item.stats.rawFamilySynOffsetMedian.toFixed(2)} ms
                               </span>
                             )}
-                            <span className="text-[9px] text-muted-foreground">
+                            <span className="text-[9px] text-black">
                               ({item.stats.oppSynAfterAckCount}/{item.stats.bothFamiliesObservedCount} post-ACK subflows)
                             </span>
                           </div>
                         ) : (
-                          <div className="flex flex-col items-end">
-                            <span className="text-muted-foreground">N/A</span>
-                            <span className="text-[10px] text-muted-foreground">Direct path</span>
+                          <div className="flex flex-col items-center">
+                            <span className="text-sm text-black">N/A</span>
+                            <span className="text-sm text-black">Direct path</span>
                           </div>
                         )}
                       </td>
-                      <td className="p-3 text-center">
+                      <td className="p-3">
                         <button
                           onClick={() => {
                             setScenarioFilter(item.scenarioId);
@@ -770,23 +769,23 @@ export const EvidenceExplorer: React.FC = () => {
           </div>
 
           {/* S1 & S4 CAD Qualification Notice */}
-          <div className="p-4 rounded-lg border border-purple-500/30 bg-purple-500/5 text-xs text-muted-foreground space-y-1.5">
+          <div className="p-4 rounded-lg border border-purple-500/30 bg-purple-500/5 text-sm text-black space-y-1.5">
             <div className="font-semibold text-purple-800 dark:text-purple-300 flex items-center gap-1.5">
               <AlertTriangle className="size-4 shrink-0 text-purple-500" />
-              *Qualification on Scenarios S1 &amp; S4 Pre-Primary-ACK Family SYN Offsets:
+              Qualification on Scenarios S1 &amp; S4 Pre-Primary-ACK Family SYN Offsets:
             </div>
-            <p>
+            <p className="text-black">
               In Scenarios S1 (IPv6 SYN blackhole) and S4 (IPv6 RTT 600 ms / IPv4 10 ms), cross-family attempts are verified to have been dispatched prior to primary handshake completion (100% in S1; 100% of dual-family trials in S4). However, captured packet evidence does not record internal browser socket/request correlation IDs linking specific TCP streams to a single attempt chain. To avoid inferring logical pairing where per-stream evidence is silent, these measurements are classified as <strong className="text-foreground">Pre-Primary-ACK Family SYN Offsets (PRE_PRIMARY_ACK_FAMILY_SYN_OFFSET)</strong> rather than certified logical CAD.
             </p>
           </div>
 
           {/* S2 CAD Qualification Notice */}
-          <div className="p-4 rounded-lg border border-amber-500/30 bg-amber-500/5 text-xs text-muted-foreground space-y-1.5">
+          <div className="p-4 rounded-lg border border-amber-500/30 bg-amber-500/5 text-sm text-black space-y-1.5">
             <div className="font-semibold text-amber-800 dark:text-amber-300 flex items-center gap-1.5">
               <AlertTriangle className="size-4 shrink-0 text-amber-500" />
-              *Qualification on Scenario S2 (IPv6 TCP RST) Connection Attempt Delay:
+              Qualification on Scenario S2 (IPv6 TCP RST) Connection Attempt Delay:
             </div>
-            <p>
+            <p className="text-black">
               In accordance with RFC 8305 §5 and Check <code>RFC8305-SEC5-CAD-10MS-FLOOR</code>, empirical CAD is evaluated
               under normative status <strong className="text-foreground">NOT_ASSESSED</strong>. Historical experimental
               measurements capture family-wide first-SYN timestamps and do not establish logical attempt pairing or a
@@ -797,12 +796,12 @@ export const EvidenceExplorer: React.FC = () => {
           </div>
 
           {/* S5 Handshake Ordering Qualification Notice */}
-          <div className="p-4 rounded-lg border border-sky-500/30 bg-sky-500/5 text-xs text-muted-foreground space-y-1.5">
+          <div className="p-4 rounded-lg border border-sky-500/30 bg-sky-500/5 text-sm text-black space-y-1.5">
             <div className="font-semibold text-sky-800 dark:text-sky-300 flex items-center gap-1.5">
               <AlertTriangle className="size-4 shrink-0 text-sky-500" />
-              *Qualification on Scenario S5 (IPv6 50% SYN loss) Family-Level SYN Offsets:
+              Qualification on Scenario S5 (IPv6 50% SYN loss) Family-Level SYN Offsets:
             </div>
-            <p>
+            <p className="text-black">
               In Scenario S5, IPv6 was the primary winning family in 33 of 40 valid S5 trials (Google Chrome 18/20, Mozilla Firefox 15/20).
               PCAP evidence demonstrates 0 TCP SYN retransmissions across all 40 S5 trials; instead, browsers initiated distinct TCP socket streams.
               Among the minority of trials where both address families were observed (5 in Chrome, 7 in Firefox),
@@ -818,70 +817,79 @@ export const EvidenceExplorer: React.FC = () => {
               <h4 className="font-semibold text-sm sm:text-base">
                 Primary-Handshake Ordering &amp; Address-Family Observation Audit (N=280)
               </h4>
-              <p className="text-xs text-muted-foreground mt-0.5">
+              <p className="text-xs text-black mt-0.5">
                 Evaluation of opposite-family SYN timing relative to primary connection final ACK across all 14 cohorts.
               </p>
             </div>
 
             <div className="overflow-x-auto">
-              <table className="w-full text-xs">
+              <table className="w-full text-xs text-center">
                 <thead>
-                  <tr className="border-b bg-muted/40 text-left font-medium text-muted-foreground">
-                    <th className="p-2.5">Scenario</th>
-                    <th className="p-2.5">Browser</th>
-                    <th className="p-2.5 text-right">Valid (n)</th>
-                    <th className="p-2.5 text-right">Both Families</th>
-                    <th className="p-2.5 text-right">Opp. SYN &lt; Final ACK</th>
-                    <th className="p-2.5 text-right">Opp. SYN &gt; Final ACK</th>
-                    <th className="p-2.5 text-right">Insufficient Pairing</th>
-                    <th className="p-2.5 text-left font-sans">Classification Breakdown</th>
-                    <th className="p-2.5 text-center">CAD Classification</th>
+                  <tr className="border-b bg-muted/40 font-medium text-black">
+                    <th className="text-black p-2.5">Scenario</th>
+                    <th className="text-black p-2.5">Browser</th>
+                    <th className="text-black p-2.5">Valid (n)</th>
+                    <th className="text-black p-2.5">Both Families</th>
+                    <th className="text-black p-2.5">Opp. SYN &lt; Final ACK</th>
+                    <th className="text-black p-2.5">Opp. SYN &gt; Final ACK</th>
+                    <th className="text-black p-2.5">Insufficient Pairing</th>
+                    <th className="text-black p-2.5 font-sans">Classification Breakdown</th>
+                    <th className="text-black p-2.5">CAD Classification</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y font-mono">
                   {handshakeAuditRows.map((row) => (
                     <tr key={`${row.scenarioId}-${row.browserId}`} className="hover:bg-muted/20">
                       <td className="p-2.5 font-bold text-foreground">
-                        <span className="inline-block px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 text-[11px]">
+                        <span className="inline-block px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 text-xs">
                           {row.scenarioId}
                         </span>
                       </td>
                       <td className="p-2.5 font-sans font-medium">{row.browserDisplayName}</td>
-                      <td className="p-2.5 text-right text-muted-foreground">{row.validTrialCount}</td>
-                      <td className="p-2.5 text-right font-semibold">{row.bothFamiliesObservedCount}</td>
-                      <td className="p-2.5 text-right text-emerald-600 dark:text-emerald-400">
+                      <td className="p-2.5 text-black">{row.validTrialCount}</td>
+                      <td className="p-2.5 text-black font-semibold">{row.bothFamiliesObservedCount}</td>
+                      <td className="p-2.5 text-sm font-semibold text-emerald-900">
                         {row.oppSynBeforeAckCount}
                       </td>
-                      <td className="p-2.5 text-right text-amber-600 dark:text-amber-400">
+                      <td className="p-2.5 text-sm font-semibold text-amber-900">
                         {row.oppSynAfterAckCount}
                       </td>
-                      <td className="p-2.5 text-right text-muted-foreground font-semibold">
+                      <td className="p-2.5 text-black font-semibold">
                         {row.insufficientPairingCount}
                       </td>
-                      <td className="p-2.5 text-left font-sans text-[11px] text-muted-foreground">
-                        {Object.entries(row.classificationCounts)
-                          .map(([cls, cnt]) => `${cls === 'PRE_PRIMARY_ACK_FAMILY_SYN_OFFSET' ? 'Pre-ACK Offset' : cls === 'RAW_FAMILY_SYN_OFFSET' ? 'Raw Offset' : cls}: ${cnt}`)
-                          .join('; ')}
+                      <td className="p-2.5 align-middle font-sans text-xs text-black">
+                        <div className="flex flex-col items-center gap-1">
+                          {Object.entries(row.classificationCounts).map(([cls, cnt]) => (
+                            <span key={cls} className="text-center">
+                              {cls === 'PRE_PRIMARY_ACK_FAMILY_SYN_OFFSET'
+                                ? 'Pre-ACK Offset'
+                                : cls === 'RAW_FAMILY_SYN_OFFSET'
+                                  ? 'Raw Offset'
+                                  : cls}
+                              : {cnt}
+                            </span>
+                          ))}
+                        </div>
                       </td>
                       <td className="p-2.5 text-center">
                         {row.cadClassification === 'VERIFIED_LOGICAL_CAD' ? (
-                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30">
+                          <span className="px-2 py-1.5 rounded text-[12px] font-bold bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30">
                             VERIFIED CAD
                           </span>
                         ) : row.cadClassification === 'PRE_PRIMARY_ACK_FAMILY_SYN_OFFSET' ? (
-                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-500/15 text-purple-700 dark:text-purple-300 border border-purple-500/30">
+                          <span className="px-2.5 py-1.5 rounded text-[12px] font-bold bg-purple-500/15 text-purple-700 dark:text-purple-300 border border-purple-500/30">
                             PRE-ACK OFFSET*
                           </span>
                         ) : row.cadClassification === 'NOT_ASSESSED' ? (
-                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30">
+                          <span className="px-7.5 py-1.5 rounded text-[12px] font-bold bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30">
                             NOT_ASSESSED
                           </span>
                         ) : row.cadClassification === 'RAW_FAMILY_SYN_OFFSET' ? (
-                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-sky-500/15 text-sky-700 dark:text-sky-300 border border-sky-500/30">
+                          <span className="px-2 py-1.5 rounded text-[12px] font-bold bg-sky-500/15 text-sky-700 dark:text-sky-300 border border-sky-500/30">
                             RAW OFFSET
                           </span>
                         ) : (
-                          <span className="px-2 py-0.5 rounded text-[10px] text-muted-foreground bg-muted">
+                          <span className="px-2 py-1.5 rounded text-[12px] text-black font-bold">
                             N/A
                           </span>
                         )}
@@ -905,7 +913,7 @@ export const EvidenceExplorer: React.FC = () => {
             <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
               {/* Search input */}
               <div className="relative">
-                <Search className="size-4 absolute left-3 top-3 text-muted-foreground" />
+                <Search className="size-4 absolute left-3 top-3 text-black" />
                 <input
                   type="text"
                   placeholder="Search by trial ID..."
@@ -914,7 +922,7 @@ export const EvidenceExplorer: React.FC = () => {
                     setSearchQuery(e.target.value);
                     setCurrentPage(1);
                   }}
-                  className="w-full pl-9 pr-3 py-2 text-xs sm:text-sm rounded border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                  className="w-full pl-9 pr-3 py-2 text-xs sm:text-sm rounded border bg-background text-foreground placeholder:text-black focus:outline-none focus:ring-1 focus:ring-primary"
                 />
               </div>
 
@@ -981,7 +989,7 @@ export const EvidenceExplorer: React.FC = () => {
               </div>
             </div>
 
-            <div className="flex items-center justify-between text-xs text-muted-foreground pt-1 border-t">
+            <div className="flex items-center justify-between text-xs text-black pt-1 border-t">
               <span>
                 Showing <strong>{filteredTrials.length}</strong> of <strong>{bundle.trials?.length ?? 0}</strong> valid
                 empirical trials
@@ -1009,22 +1017,22 @@ export const EvidenceExplorer: React.FC = () => {
             <div className="overflow-x-auto">
               <table className="w-full text-xs sm:text-sm">
                 <thead>
-                  <tr className="border-b bg-muted/40 text-left font-medium text-muted-foreground">
-                    <th className="p-3">Trial ID</th>
-                    <th className="p-3">Scenario</th>
-                    <th className="p-3">Browser</th>
-                    <th className="p-3">Rep #</th>
-                    <th className="p-3">Winning Family</th>
-                    <th className="p-3">Classification</th>
-                    <th className="p-3 text-right">t_connect</th>
-                    <th className="p-3 text-right">t_setup_total</th>
-                    <th className="p-3 text-center">Action</th>
+                  <tr className="border-b bg-muted/40 text-left font-medium text-black">
+                    <th className="text-black p-3">Trial ID</th>
+                    <th className="text-black p-3">Scenario</th>
+                    <th className="text-black p-3">Browser</th>
+                    <th className="text-black p-3">Rep #</th>
+                    <th className="text-black p-3">Winning Family</th>
+                    <th className="text-black p-3">Classification</th>
+                    <th className="text-black p-3 text-right">t_connect</th>
+                    <th className="text-black p-3 text-right">t_setup_total</th>
+                    <th className="text-black p-3 text-center">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
                   {paginatedTrials.length === 0 ? (
                     <tr>
-                      <td colSpan={9} className="p-8 text-center text-muted-foreground">
+                      <td colSpan={9} className="p-8 text-center text-black">
                         No valid trials match the selected filter criteria.
                       </td>
                     </tr>
@@ -1044,22 +1052,22 @@ export const EvidenceExplorer: React.FC = () => {
                             {t.scenario_id}
                           </span>
                         </td>
-                        <td className="p-3 text-muted-foreground whitespace-nowrap">
+                        <td className="p-3 text-black whitespace-nowrap">
                           {t.browser === 'google-chrome' ? 'Chrome' : 'Firefox'}
                         </td>
-                        <td className="p-3 font-mono text-muted-foreground">#{t.repetition}</td>
+                        <td className="p-3 font-mono text-black">#{t.repetition}</td>
                         <td className="p-3">
                           {(t.primary_flow?.winning_family || '').toLowerCase() === 'ipv6' ? (
-                            <span className="px-2 py-0.5 rounded text-xs font-mono bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+                            <span className="px-2.5 py-1.5 rounded text-xs font-mono bg-blue-500/20 text-blue-900 dark:text-blue-500 border border-blue-500/70">
                               IPv6
                             </span>
                           ) : (
-                            <span className="px-2 py-0.5 rounded text-xs font-mono bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                            <span className="px-2.5 py-1.5 rounded text-xs font-mono bg-emerald-500/20 text-emerald-900 dark:text-emerald-200 border border-emerald-500/70">
                               IPv4
                             </span>
                           )}
                         </td>
-                        <td className="p-3 font-mono text-xs text-muted-foreground">{t.classification}</td>
+                        <td className="p-3 font-mono text-xs text-black">{t.classification}</td>
                         <td className="p-3 text-right font-mono">
                           {t.metrics?.t_connect_ms !== null && t.metrics?.t_connect_ms !== undefined
                             ? `${t.metrics.t_connect_ms.toFixed(2)} ms`
@@ -1091,7 +1099,7 @@ export const EvidenceExplorer: React.FC = () => {
             {/* Pagination Controls */}
             {totalPages > 1 && (
               <div className="p-3 border-t bg-muted/20 flex items-center justify-between text-xs">
-                <span className="text-muted-foreground">
+                <span className="text-black">
                   Page <strong>{currentPage}</strong> of <strong>{totalPages}</strong>
                 </span>
                 <div className="flex items-center gap-1">
@@ -1126,10 +1134,10 @@ export const EvidenceExplorer: React.FC = () => {
           {!selectedTrial ? (
             <div className="p-8 text-center border rounded-lg bg-card">
               <h3 className="text-base font-semibold">No Trial Selected</h3>
-              <p className="text-xs text-muted-foreground mt-1">Please select a trial from the Trial Explorer tab.</p>
+              <p className="text-[15px] text-black mt-1">Please select a trial from the Trial Explorer tab.</p>
               <button
                 onClick={() => setActiveTab('trials')}
-                className="mt-4 px-4 py-2 bg-primary text-primary-foreground rounded text-sm font-medium hover:bg-primary/90"
+                className="mt-4 px-4 py-2 bg-primary text-primary-foreground rounded text-[15px] font-medium hover:bg-primary/90"
               >
                 Go to Trial Explorer
               </button>
@@ -1141,18 +1149,18 @@ export const EvidenceExplorer: React.FC = () => {
                 <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-3">
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="px-2.5 py-0.5 rounded font-mono font-bold text-xs bg-primary/10 text-primary border border-primary/20">
+                      <span className="px-2.5 py-0.5 rounded font-mono font-bold text-[15px] bg-primary/10 text-primary border border-primary/20">
                         {selectedTrial.scenario_id}
                       </span>
                       <h3 className="text-lg font-bold font-mono text-foreground">{selectedTrial.trial_id}</h3>
                     </div>
-                    <p className="text-xs text-muted-foreground mt-1">
+                    <p className="text-[15px] text-black mt-1">
                       {(AUTHORITATIVE_SCENARIOS[selectedTrial.scenario_id]?.title || bundle.scenario_definitions[selectedTrial.scenario_id]?.title)} · Repetition #{selectedTrial.repetition}
                     </p>
                   </div>
 
-                  <div className="flex items-center gap-2 text-xs">
-                    <span className="px-2.5 py-1 rounded bg-muted text-muted-foreground font-medium">
+                  <div className="flex items-center gap-2 text-[15px]">
+                    <span className="px-2.5 py-1 rounded bg-transparent text-black font-medium">
                       {selectedTrial.browser_version}
                     </span>
                     <span className="px-2.5 py-1 rounded bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 font-medium">
@@ -1164,27 +1172,27 @@ export const EvidenceExplorer: React.FC = () => {
                 {/* Primary Metrics Grid */}
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
                   <div className="p-3 rounded border bg-muted/20">
-                    <div className="text-[11px] text-muted-foreground uppercase">t_connect_ms</div>
+                    <div className="text-[15px] text-black uppercase">t_connect_ms</div>
                     <div className="text-base font-bold font-mono mt-0.5 text-foreground">
                       {selectedTrial.metrics?.t_connect_ms !== null
                         ? `${selectedTrial.metrics.t_connect_ms.toFixed(2)} ms`
                         : '—'}
                     </div>
-                    <div className="text-[10px] text-muted-foreground">RFC 9293 3-way handshake</div>
+                    <div className="text-[15px] text-black">RFC 9293 3-way handshake</div>
                   </div>
 
                   <div className="p-3 rounded border bg-muted/20">
-                    <div className="text-[11px] text-muted-foreground uppercase">t_setup_total_ms</div>
+                    <div className="text-[15px] text-black uppercase">t_setup_total_ms</div>
                     <div className="text-base font-bold font-mono mt-0.5 text-primary">
                       {selectedTrial.metrics?.t_setup_total_ms !== null
                         ? `${selectedTrial.metrics.t_setup_total_ms.toFixed(2)} ms`
                         : '—'}
                     </div>
-                    <div className="text-[10px] text-muted-foreground">First SYN to final ACK</div>
+                    <div className="text-[15px] text-black">First SYN to final ACK</div>
                   </div>
 
                   <div className="p-3 rounded border bg-muted/20">
-                    <div className="text-[11px] text-muted-foreground uppercase">
+                    <div className="text-[15px] text-black uppercase">
                       {selectedTrial.scenario_id === 'S2' || selectedTrial.scenario_id === 'S5'
                         ? 'Raw Family SYN Offset'
                         : selectedTrial.scenario_id === 'S1' || selectedTrial.scenario_id === 'S4'
@@ -1196,7 +1204,7 @@ export const EvidenceExplorer: React.FC = () => {
                         ? `${selectedTrial.metrics.connection_attempt_delay_ms.toFixed(2)} ms`
                         : 'N/A'}
                     </div>
-                    <div className="text-[10px] text-muted-foreground">
+                    <div className="text-[15px] text-black">
                       {selectedTrial.scenario_id === 'S2'
                         ? 'NOT_ASSESSED (RFC 8305 §5)'
                         : selectedTrial.scenario_id === 'S5'
@@ -1212,34 +1220,34 @@ export const EvidenceExplorer: React.FC = () => {
                   </div>
 
                   <div className="p-3 rounded border bg-muted/20">
-                    <div className="text-[11px] text-muted-foreground uppercase">Winning Family</div>
+                    <div className="text-[15px] text-black uppercase">Winning Family</div>
                     <div className="text-base font-bold font-mono mt-0.5 text-foreground uppercase">
                       {selectedTrial.primary_flow?.winning_family || '—'}
                     </div>
-                    <div className="text-[10px] text-muted-foreground">Primary flow family</div>
+                    <div className="text-[15px] text-black">Primary flow family</div>
                   </div>
 
                   <div className="p-3 rounded border bg-muted/20">
-                    <div className="text-[11px] text-muted-foreground uppercase">DNS Resolution</div>
+                    <div className="text-[15px] text-black uppercase">DNS Resolution</div>
                     <div className="text-base font-bold font-mono mt-0.5 text-foreground">
                       {selectedTrial.metrics?.dns_resolution_time_ms !== null
                         ? `${selectedTrial.metrics.dns_resolution_time_ms.toFixed(2)} ms`
                         : '—'}
                     </div>
-                    <div className="text-[10px] text-muted-foreground">Total DNS duration</div>
+                    <div className="text-[15px] text-black">Total DNS duration</div>
                   </div>
 
                   <div className="p-3 rounded border bg-muted/20">
-                    <div className="text-[11px] text-muted-foreground uppercase">Capture Evidence</div>
+                    <div className="text-[15px] text-black uppercase">Capture Evidence</div>
                     <div className="text-base font-bold font-mono mt-0.5 truncate text-foreground" title={selectedTrial.pcap_sha256}>
                       {selectedTrial.pcap_sha256 ? `${selectedTrial.pcap_sha256.slice(0, 8)}...` : '—'}
                     </div>
-                    <div className="text-[10px] text-muted-foreground">SHA-256 Verified</div>
+                    <div className="text-[15px] text-black">SHA-256 Verified</div>
                   </div>
                 </div>
 
                 {/* Classification Description */}
-                <div className="text-xs bg-muted/30 p-3 rounded border text-muted-foreground leading-relaxed">
+                <div className="text-[15px] bg-muted/30 p-3 rounded border text-black leading-relaxed">
                   <strong className="text-foreground">Classification: </strong>
                   <span className="font-mono text-primary font-semibold">{selectedTrial.classification}</span> —{' '}
                   {selectedTrial.classification_reason}
@@ -1248,7 +1256,7 @@ export const EvidenceExplorer: React.FC = () => {
                 {/* S1 & S4 Qualification Callout */}
                 {(selectedTrial.scenario_id === 'S1' || selectedTrial.scenario_id === 'S4') &&
                   selectedTrial.metrics?.connection_attempt_delay_ms !== null && (
-                    <div className="p-3.5 rounded border border-purple-500/30 bg-purple-500/5 text-xs text-muted-foreground flex items-start gap-2.5">
+                    <div className="p-3.5 rounded border border-purple-500/30 bg-purple-500/5 text-[15px] text-black flex items-start gap-2.5">
                       <AlertTriangle className="size-4 text-purple-500 shrink-0 mt-0.5" />
                       <div>
                         <span className="font-semibold text-foreground">Stream-Level Attempt Pairing Qualification: </span>
@@ -1259,7 +1267,7 @@ export const EvidenceExplorer: React.FC = () => {
 
                 {/* S2 CAD Qualification Callout */}
                 {selectedTrial.scenario_id === 'S2' && (
-                  <div className="p-3.5 rounded border border-amber-500/30 bg-amber-500/5 text-xs text-muted-foreground flex items-start gap-2.5">
+                  <div className="p-3.5 rounded border border-amber-500/30 bg-amber-500/5 text-[15px] text-black flex items-start gap-2.5">
                     <AlertTriangle className="size-4 text-amber-500 shrink-0 mt-0.5" />
                     <div>
                       <span className="font-semibold text-foreground">S2 CAD Assessment: NOT_ASSESSED</span> — Per RFC 8305 §5 /
@@ -1273,7 +1281,7 @@ export const EvidenceExplorer: React.FC = () => {
 
                 {/* S5 Handshake Ordering Callout */}
                 {selectedTrial.scenario_id === 'S5' && (
-                  <div className="p-3.5 rounded border border-sky-500/30 bg-sky-500/5 text-xs text-muted-foreground flex items-start gap-2.5">
+                  <div className="p-3.5 rounded border border-sky-500/30 bg-sky-500/5 text-[15px] text-black flex items-start gap-2.5">
                     <AlertTriangle className="size-4 text-sky-500 shrink-0 mt-0.5" />
                     <div>
                       <span className="font-semibold text-foreground">S5 Handshake Ordering &amp; Subflow Notice: </span>
@@ -1306,17 +1314,17 @@ export const EvidenceExplorer: React.FC = () => {
                 <div className="flex items-center justify-between border-b pb-2">
                   <div>
                     <h4 className="font-semibold text-base">Recorded TCP Connection Attempts</h4>
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-[15px] text-black">
                       Observed client TCP socket connection flows ({selectedTrial.connection_attempts?.length ?? 0} flows).
                     </p>
                   </div>
-                  <span className="text-xs font-mono text-muted-foreground">ps028-cl vantage point</span>
+                  <span className="text-[15px] font-mono text-black">ps028-cl vantage point</span>
                 </div>
 
                 <div className="overflow-x-auto">
-                  <table className="w-full text-xs">
+                  <table className="w-full text-[15px]">
                     <thead>
-                      <tr className="border-b bg-muted/40 text-left font-medium text-muted-foreground">
+                      <tr className="border-b bg-muted/40 text-left font-medium text-black">
                         <th className="p-2.5">Stream ID</th>
                         <th className="p-2.5">Family</th>
                         <th className="p-2.5">Client Endpoint</th>
@@ -1334,19 +1342,19 @@ export const EvidenceExplorer: React.FC = () => {
                           <td className="p-2.5 font-bold text-foreground">#{att.tcp_stream}</td>
                           <td className="p-2.5">
                             {att.family === 'IPv6' ? (
-                              <span className="px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400">
+                              <span className="px-2.5 py-1.5 rounded bg-blue-500/20 text-blue-900 dark:text-blue-500 border border-blue-500/70">
                                 IPv6
                               </span>
                             ) : (
-                              <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                              <span className="px-2.5 py-1.5 rounded bg-emerald-500/20 text-emerald-900 dark:text-emerald-200 border border-emerald-500/70">
                                 IPv4
                               </span>
                             )}
                           </td>
-                          <td className="p-2.5 text-muted-foreground">
+                          <td className="p-2.5 text-black">
                             {att.client_ip}:{att.client_port}
                           </td>
-                          <td className="p-2.5 text-muted-foreground">
+                          <td className="p-2.5 text-black">
                             {att.server_ip}:{att.server_port}
                           </td>
                           <td className="p-2.5 text-right">
@@ -1365,11 +1373,11 @@ export const EvidenceExplorer: React.FC = () => {
                           </td>
                           <td className="p-2.5 text-center">
                             {att.is_primary ? (
-                              <span className="px-1.5 py-0.5 rounded bg-primary/20 text-primary font-bold text-[10px]">
+                              <span className="px-1.5 py-0.5 rounded bg-primary/20 text-primary font-bold text-[15px]">
                                 PRIMARY
                               </span>
                             ) : (
-                              <span className="text-muted-foreground text-[10px]">ANCILLARY</span>
+                              <span className="text-black text-[15px]">ANCILLARY</span>
                             )}
                           </td>
                         </tr>
@@ -1384,7 +1392,7 @@ export const EvidenceExplorer: React.FC = () => {
                 <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-3">
                   <div>
                     <h4 className="font-semibold text-base">Chronological Multi-Source Event Timeline</h4>
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-[15px] text-black">
                       Synchronized HARNESS, PCAP, and BROWSER_TELEMETRY events ({selectedTrial.timeline_events?.length ?? 0}{' '}
                       events in this trial).
                     </p>
@@ -1396,7 +1404,7 @@ export const EvidenceExplorer: React.FC = () => {
                       value={timelineSourceFilter}
                       onChange={(e) => setTimelineSourceFilter(e.target.value)}
                       aria-label="Filter events by source"
-                      className="px-2.5 py-1 text-xs rounded border bg-background text-foreground"
+                      className="px-2.5 py-1 text-[15px] rounded border bg-background text-foreground"
                     >
                       <option value="ALL">All Sources</option>
                       <option value="HARNESS">HARNESS</option>
@@ -1409,13 +1417,13 @@ export const EvidenceExplorer: React.FC = () => {
                       placeholder="Filter events..."
                       value={timelineSearch}
                       onChange={(e) => setTimelineSearch(e.target.value)}
-                      className="px-2.5 py-1 text-xs rounded border bg-background text-foreground placeholder:text-muted-foreground w-36"
+                      className="px-2.5 py-1 text-[15px] rounded border bg-background text-foreground placeholder:text-black w-36"
                     />
                   </div>
                 </div>
 
                 {/* Relative Offset Explanation Notice */}
-                <div className="text-[11px] text-muted-foreground bg-muted/20 p-2.5 rounded border">
+                <div className="text-[15px] text-black bg-muted/20 p-2.5 rounded border">
                   <strong>Display Notice:</strong> Column <code>Δt (ms)</code> represents a{' '}
                   <em>UI-derived display offset</em> calculated relative to the first event in this trial:
                   <code className="ml-1">Δt = (t_event - t_first) * 1000 ms</code>. Absolute epoch timestamps remain the
@@ -1423,9 +1431,9 @@ export const EvidenceExplorer: React.FC = () => {
                 </div>
 
                 <div className="overflow-x-auto max-h-[500px]">
-                  <table className="w-full text-xs">
+                  <table className="w-full text-[15px]">
                     <thead className="sticky top-0 bg-card border-b z-10">
-                      <tr className="text-left font-medium text-muted-foreground">
+                      <tr className="text-left font-medium text-black">
                         <th className="p-2 w-12">#</th>
                         <th className="p-2 w-28">Δt (ms)</th>
                         <th className="p-2 w-44">Absolute Timestamp</th>
@@ -1444,26 +1452,26 @@ export const EvidenceExplorer: React.FC = () => {
                         const provTitle = `${ev.details}${ev.frame_number ? ` (Frame #${ev.frame_number})` : ''}${ev.pcap_sha256 ? ` | PCAP: ${ev.pcap_sha256.slice(0, 16)}...` : ''}${ev.source_path ? ` | Source: ${ev.source_path}` : ''}`;
                         return (
                           <tr key={idx} className="hover:bg-muted/20">
-                            <td className="p-2 font-mono text-[11px] text-muted-foreground">
+                            <td className="p-2 font-mono text-[15px] text-black">
                               {ev.event_index !== null && ev.event_index !== undefined ? ev.event_index : idx + 1}
                             </td>
                             <td className="p-2 font-semibold text-primary">
                               {relMs !== null ? `+${relMs.toFixed(2)} ms` : '—'}
                             </td>
-                            <td className="p-2 text-muted-foreground" title={new Date(ev.timestamp * 1000).toISOString()}>
+                            <td className="p-2 text-black" title={new Date(ev.timestamp * 1000).toISOString()}>
                               {ev.timestamp.toFixed(6)}
                             </td>
                             <td className="p-2">
                               {ev.source === 'HARNESS' ? (
-                                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30">
+                                <span className="px-1.5 py-0.5 rounded text-[15px] font-bold bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30">
                                   HARNESS
                                 </span>
                               ) : ev.source === 'PCAP' ? (
-                                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-sky-500/15 text-sky-700 dark:text-sky-300 border border-sky-500/30">
+                                <span className="px-1.5 py-0.5 rounded text-[15px] font-bold bg-sky-500/15 text-sky-700 dark:text-sky-300 border border-sky-500/30">
                                   PCAP
                                 </span>
                               ) : (
-                                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-500/15 text-purple-700 dark:text-purple-300 border border-purple-500/30">
+                                <span className="px-1.5 py-0.5 rounded text-[15px] font-bold bg-purple-500/15 text-purple-700 dark:text-purple-300 border border-purple-500/30">
                                   TELEMETRY
                                 </span>
                               )}
@@ -1471,11 +1479,11 @@ export const EvidenceExplorer: React.FC = () => {
                             <td className="p-2 font-semibold text-foreground">{ev.event_type}</td>
                             <td className="p-2">{ev.family || '—'}</td>
                             <td className="p-2">{ev.stream_id || '—'}</td>
-                            <td className="p-2 text-muted-foreground font-mono">{frameLabel}</td>
-                            <td className="p-2 text-muted-foreground font-sans max-w-md" title={provTitle}>
+                            <td className="p-2 text-black font-mono">{frameLabel}</td>
+                            <td className="p-2 text-black font-sans max-w-md" title={provTitle}>
                               <div className="text-foreground truncate">{ev.details}</div>
                               {ev.source_path && (
-                                <div className="text-[10px] text-muted-foreground/80 font-mono truncate">
+                                <div className="text-[15px] text-black font-mono truncate">
                                   <span>source: {ev.source_path}</span>
                                   {ev.pcap_sha256 ? <span> | sha256: {ev.pcap_sha256.slice(0, 16)}...</span> : null}
                                 </div>
@@ -1498,12 +1506,12 @@ export const EvidenceExplorer: React.FC = () => {
           ========================================================================= */}
       {activeTab === 'exclusions' && (
         <div className="space-y-6">
-          <div className="p-4 rounded-lg border border-amber-500/30 bg-amber-500/5 text-amber-800 dark:text-amber-200 text-xs sm:text-sm space-y-2">
+          <div className="p-4 rounded-lg border border-amber-500/30 bg-amber-500/5 text-[13px] sm:text-sm text-amber-800 dark:text-amber-200 space-y-2">
             <h4 className="font-semibold flex items-center gap-2">
               <AlertTriangle className="size-4 text-amber-600 dark:text-amber-400" /> Isolated Cleanup Failure
               Exclusions
             </h4>
-            <p className="text-xs leading-relaxed text-muted-foreground">
+            <p className="text-[15px] leading-relaxed text-black">
               During the October 2026 campaign, exactly 2 out of 282 total attempts experienced teardown failures (one
               Firefox S0 baseline pipe error and one Google Chrome S6 helper permission error). Per campaign contract,
               these attempts were <strong>completely excluded from all valid-trial metric calculations</strong> and
@@ -1522,29 +1530,29 @@ export const EvidenceExplorer: React.FC = () => {
               >
                 <div className="flex items-center justify-between border-b pb-3">
                   <div>
-                    <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-amber-500/20 text-amber-700 dark:text-amber-300">
+                    <span className="text-[13px] font-mono font-bold px-2 py-0.5 rounded bg-amber-500/20 text-amber-700 dark:text-amber-300">
                       {ex.scenario_id} ({ex.browser})
                     </span>
                     <h4 className="text-sm font-mono font-bold mt-2 text-foreground">{ex.trial_id}</h4>
                   </div>
-                  <span className="text-xs font-mono px-2 py-0.5 rounded bg-destructive/10 text-destructive border border-destructive/20">
+                  <span className="text-[13px] font-mono font-bold px-2 py-0.5 text-red-950 border border-red-700">
                     {ex.validity_category}
                   </span>
                 </div>
 
-                <div className="mt-3 space-y-1 text-xs text-muted-foreground font-mono">
+                <div className="mt-3 space-y-1 text-[13px] text-black font-mono">
                   <div>Slot ID: {ex.slot_id}</div>
                   <div>Status: {ex.status}</div>
                   <div>Repetition: #{ex.repetition} (Attempt #{ex.attempt_number})</div>
                 </div>
 
                 <div className="mt-4 border-t pt-3">
-                  <h5 className="text-xs font-semibold text-foreground mb-2">Preserved Boundary Lifecycle Events:</h5>
-                  <div className="space-y-1 font-mono text-[11px]">
+                  <h5 className="text-[13px] font-semibold text-foreground mb-2">Preserved Boundary Lifecycle Events:</h5>
+                  <div className="space-y-1 font-mono text-[13px]">
                     {ex.timeline_events?.map((ev, i) => (
                       <div key={i} className="flex items-center justify-between bg-muted/30 p-1.5 rounded">
                         <span className="font-semibold text-foreground">{ev.event_type}</span>
-                        <span className="text-muted-foreground" title={new Date(ev.timestamp * 1000).toISOString()}>
+                        <span className="text-black" title={new Date(ev.timestamp * 1000).toISOString()}>
                           {ev.timestamp.toFixed(6)}
                         </span>
                       </div>
@@ -1565,60 +1573,60 @@ export const EvidenceExplorer: React.FC = () => {
           <div className="rounded-lg border bg-card p-5 space-y-4">
             <div className="flex items-center justify-between border-b pb-3">
               <div>
-                <h3 className="text-base font-semibold">Cryptographic Provenance Verification</h3>
-                <p className="text-xs text-muted-foreground">
+                <h3 className="text-lg font-semibold">Cryptographic Provenance Verification</h3>
+                <p className="text-[13px] text-black">
                   Authoritative sidecar details from <code>demo_bundle.json.provenance.json</code>.
                 </p>
               </div>
               {integrity.status === 'HASH_MISMATCHED' ? (
                 <span
                   data-testid="provenance-integrity-status-badge"
-                  className="px-2.5 py-1 rounded text-xs font-mono bg-rose-500/10 text-rose-700 dark:text-rose-400 border border-rose-500/20 flex items-center gap-1.5 font-semibold"
+                  className="px-2.5 py-1 rounded text-[13px] font-mono bg-rose-500/10 text-rose-700 dark:text-rose-400 border border-rose-500/20 flex items-center gap-1.5 font-semibold"
                 >
                   <AlertTriangle className="size-4" /> Cryptographic Mismatch (Unverified)
                 </span>
               ) : (
                 <span
                   data-testid="provenance-integrity-status-badge"
-                  className="px-2.5 py-1 rounded text-xs font-mono bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1.5"
+                  className="px-2.5 py-1 rounded text-[13px] font-mono font-semibold bg-emerald-200 text-emerald-950 dark:bg-emerald-950 dark:text-emerald-100 border border-emerald-700 dark:border-emerald-400 flex items-center gap-1.5"
                 >
                   <ShieldCheck className="size-4" /> Bit-for-bit SHA-256 Match
                 </span>
               )}
             </div>
 
-            <div className="grid sm:grid-cols-2 gap-4 text-xs font-mono">
+            <div className="grid sm:grid-cols-2 gap-4 text-[13px] font-mono">
               <div className="p-3 rounded border bg-muted/20 space-y-1">
-                <span className="text-muted-foreground">Output Bundle SHA-256 (Sidecar):</span>
-                <div className="font-bold text-foreground break-all text-[11px]">
+                <span className="text-black">Output Bundle SHA-256 (Sidecar):</span>
+                <div className="font-bold text-foreground break-all text-[13px]">
                   {provenance?.output_bundle_sha256 || '268b69048024e4aeada9adca0252791efe56178fc551537221090539108ea29f'}
                 </div>
               </div>
 
               <div className="p-3 rounded border bg-muted/20 space-y-1">
-                <span className="text-muted-foreground">Computed Payload SHA-256 (Client-Side):</span>
-                <div className="font-bold text-foreground break-all text-[11px]">
+                <span className="text-black">Computed Payload SHA-256 (Client-Side):</span>
+                <div className="font-bold text-foreground break-all text-[13px]">
                   {computedSha256 || provenance?.output_bundle_sha256 || 'Verified on load'}
                 </div>
               </div>
 
               <div className="p-3 rounded border bg-muted/20 space-y-1">
-                <span className="text-muted-foreground">Generator Commit:</span>
-                <div className="font-bold text-foreground break-all text-[11px]">
+                <span className="text-black">Generator Commit:</span>
+                <div className="font-bold text-foreground break-all text-[13px]">
                   {provenance?.generator_commit || 'dd010ffeb30ec3565f6f70fe7309e919e5489a13'}
                 </div>
               </div>
 
               <div className="p-3 rounded border bg-muted/20 space-y-1">
-                <span className="text-muted-foreground">Generator Script:</span>
-                <div className="font-bold text-foreground text-[11px] font-sans">
+                <span className="text-black">Generator Script:</span>
+                <div className="font-bold text-foreground text-[13px] font-sans">
                   {provenance?.generator_script || 'lab/build_demo_bundle.py'} (v{provenance?.generator_version || '1.0.0'})
                 </div>
               </div>
 
               <div className="p-3 rounded border bg-muted/20 space-y-1">
-                <span className="text-muted-foreground">Campaign Identifier:</span>
-                <div className="font-bold text-foreground text-[11px]">
+                <span className="text-black">Campaign Identifier:</span>
+                <div className="font-bold text-foreground text-[13px]">
                   {provenance?.campaign_id || bundle.campaign_id}
                 </div>
               </div>
@@ -1626,11 +1634,11 @@ export const EvidenceExplorer: React.FC = () => {
 
             {/* Input Artifacts SHA-256 Table */}
             <div className="pt-2">
-              <h4 className="text-sm font-semibold mb-2">Input Artifacts Cryptographic Hashes:</h4>
+              <h4 className="text-base font-semibold mb-2">Input Artifacts Cryptographic Hashes:</h4>
               <div className="overflow-x-auto rounded border">
-                <table className="w-full text-xs font-mono">
+                <table className="w-full text-[13px] font-mono">
                   <thead>
-                    <tr className="border-b bg-muted/40 text-left text-muted-foreground">
+                    <tr className="border-b bg-muted/40 text-left text-black">
                       <th className="p-2.5">Input Evidence Artifact</th>
                       <th className="p-2.5">Cryptographic SHA-256 Checksum</th>
                     </tr>
@@ -1640,7 +1648,7 @@ export const EvidenceExplorer: React.FC = () => {
                       Object.entries(provenance.input_files_sha256).map(([filename, hash]) => (
                         <tr key={filename} className="hover:bg-muted/20">
                           <td className="p-2.5 font-bold text-foreground font-sans">{filename}</td>
-                          <td className="p-2.5 text-muted-foreground text-[11px]">{hash}</td>
+                          <td className="p-2.5 text-black text-[13px]">{hash}</td>
                         </tr>
                       ))}
                   </tbody>
@@ -1658,7 +1666,7 @@ export const EvidenceExplorer: React.FC = () => {
         <div className="space-y-4">
           <div className="p-4 rounded-lg border bg-muted/20 text-xs sm:text-sm">
             <h4 className="font-semibold text-foreground">RFC 8305 & Happy Eyeballs v3 (draft -04) Compliance Evaluation</h4>
-            <p className="text-xs text-muted-foreground mt-1">
+            <p className="text-xs text-black mt-1">
               7 normative checks extracted from authoritative <code>rfc8305_assessment.csv</code> evaluated under
               laboratory conditions.
             </p>
@@ -1672,17 +1680,17 @@ export const EvidenceExplorer: React.FC = () => {
                     <span className="font-mono font-bold text-xs px-2 py-0.5 rounded bg-primary/10 text-primary border border-primary/20">
                       {check.check_id}
                     </span>
-                    <span className="text-xs text-muted-foreground">({check.scenario_id})</span>
+                    <span className="text-xs text-black">({check.scenario_id})</span>
                   </div>
 
                   <div className="flex items-center gap-1.5 text-xs font-mono">
                     <span
-                      className={`px-2 py-0.5 rounded text-[11px] font-semibold border ${
+                      className={`px-2 py-0.5 rounded text-[14px] font-semibold border ${
                         check.recommendation_alignment_status === 'ALIGNED'
-                          ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20'
+                          ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-800 border-emerald-500/80'
                           : check.recommendation_alignment_status === 'OUTSIDE_RECOMMENDED_RANGE'
-                          ? 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20'
-                          : 'bg-muted text-muted-foreground border-border'
+                          ? 'bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/80'
+                          : 'text-black border-border'
                       }`}
                     >
                       {check.recommendation_alignment_status}
@@ -1694,11 +1702,11 @@ export const EvidenceExplorer: React.FC = () => {
                   {check.rfc_specification_requirement}
                 </div>
 
-                <p className="text-xs text-muted-foreground leading-relaxed">
+                <p className="text-xs text-black leading-relaxed">
                   {check.observable_behavior_summary}
                 </p>
 
-                <div className="flex flex-wrap gap-4 text-[11px] text-muted-foreground pt-1 border-t font-mono">
+                <div className="flex flex-wrap gap-4 text-[11px] text-black pt-1 border-t font-mono">
                   <span>Section: {check.rfc_section}</span>
                   <span>Recommended: {check.rfc_recommended_range}</span>
                   {check.observed_delay_ms && <span>Observed Median: {check.observed_delay_ms} ms</span>}

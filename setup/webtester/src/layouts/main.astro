@@ -1,12 +1,14 @@
 ---
 import "@/styles/global.css";
 import Footer from "@/components/footer.astro";
+import backgroundImage from "@/images/Screenshot 2026-11-17 153607 - Edited.png";
 
 type Props = {
   title: string;
+  backgroundOpacity?: number;
 };
 
-const { title } = Astro.props;
+const { title, backgroundOpacity = 0.18 } = Astro.props;
 ---
 
 <html lang="en">
@@ -14,17 +16,25 @@ const { title } = Astro.props;
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width" />
-    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
-    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
-    <link rel="manifest" href="/site.webmanifest" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Redaction+10:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
     <title>{title}</title>
   </head>
   <body>
-    <main class="mx-auto max-w-7xl p-6 sm:p-10 lg:p-12">
+    <img
+      class="page-background"
+      src={backgroundImage.src}
+      alt=""
+      aria-hidden="true"
+      style={`--background-image-opacity: ${backgroundOpacity}`}
+    />
+    <main class="page-content mx-auto max-w-7xl p-6 sm:p-10 lg:p-12">
       <slot />
     </main>
 
-    <Footer />
+    <div class="page-footer">
+      <Footer />
+    </div>
   </body>
 </html>

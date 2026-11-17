@@ -4,6 +4,7 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
+  --font-redaction: "Redaction 10", serif;
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -42,24 +43,25 @@
 }
 
 :root {
+  --background-image-inset: clamp(20px, 5vw, 70px);
   --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
+  --background: #fbebbf;
+  --foreground: #13381e;
+  --card: #c4b98a;
+  --card-foreground: oklch(26.058% 0.04674 71.972);
+  --popover: oklch(79.933% 0.09741 89.821);
+  --popover-foreground: oklch(63.766% 0.21107 143.117);
+  --primary: oklch(33.653% 0.10354 145.475);
   --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(33.653% 0.10354 145.475);
+  --secondary-foreground: oklch(0.985 0 0);
   --muted: oklch(0.97 0 0);
   --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
+  --accent: oklch(15.434% 0.00002 271.152);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
+  --border: oklch(12.009% 0.04141 26.066);
+  --input: oklch(15.434% 0.00002 271.152);
   --ring: oklch(0.708 0 0);
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
@@ -93,7 +95,7 @@
   --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.704 0.191 22.216);
   --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
+  --input: oklch(9.092% 0.03731 29.223 / 0.15);
   --ring: oklch(0.556 0 0);
   --chart-1: oklch(0.488 0.243 264.376);
   --chart-2: oklch(0.696 0.17 162.48);
@@ -118,4 +120,22 @@
   body {
     @apply bg-background text-foreground;
   }
+}
+
+.page-background {
+  position: fixed;
+  z-index: 0;
+  top: var(--background-image-inset);
+  left: var(--background-image-inset);
+  width: calc(100vw - 2 * var(--background-image-inset));
+  height: calc(100vh - 2 * var(--background-image-inset));
+  object-fit: contain;
+  opacity: var(--background-image-opacity, 0.18);
+  pointer-events: none;
+}
+
+.page-content,
+.page-footer {
+  position: relative;
+  z-index: 1;
 }
