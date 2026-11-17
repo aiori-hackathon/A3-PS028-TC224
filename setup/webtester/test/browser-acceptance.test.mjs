@@ -39,6 +39,13 @@ const MIME_TYPES = {
   '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.gif': 'image/gif',
+  '.ico': 'image/x-icon',
+  '.woff2': 'font/woff2',
 };
 
 async function runBrowserAcceptanceTests() {
@@ -53,25 +60,71 @@ async function runBrowserAcceptanceTests() {
 
   // 1. Create static HTTP server for production build
   const server = http.createServer((req, res) => {
-    let reqPath = req.url.split('?')[0];
+    let reqPath;
+
+    // Decode URL-encoded paths before filesystem lookup.
+    // Browser requests encode spaces as %20.
+    try {
+      reqPath = decodeURIComponent(
+        new URL(req.url || '/', 'http://127.0.0.1').pathname
+      );
+    } catch {
+      res.writeHead(400, { 'Content-Type': 'text/plain' });
+      res.end('Bad Request');
+      return;
+    }
+
+    // Convert URL path into a relative filesystem path.
+    const relativePath = reqPath.replace(/^[/\\]+/, '');
+    let filePath = path.resolve(distDir, relativePath);
+
+    // Prevent paths from escaping the production dist directory.
+    const isInsideDist = (candidate) => {
+      const relative = path.relative(distDir, candidate);
+
+      return (
+        relative === '' ||
+        (relative !== '..' &&
+          !relative.startsWith(`..${path.sep}`) &&
+          !path.isAbsolute(relative))
+      );
+    };
+
+    if (!isInsideDist(filePath)) {
+      res.writeHead(403, { 'Content-Type': 'text/plain' });
+      res.end('Forbidden');
+      return;
+    }
+
+    // Resolve directory routes to index.html.
     if (reqPath.endsWith('/')) {
-      reqPath += 'index.html';
-    } else if (!path.extname(reqPath)) {
-      if (fs.existsSync(path.join(distDir, reqPath, 'index.html'))) {
-        reqPath = path.join(reqPath, 'index.html');
+      filePath = path.join(filePath, 'index.html');
+    } else if (!path.extname(relativePath)) {
+      const indexPath = path.join(filePath, 'index.html');
+
+      if (fs.existsSync(indexPath)) {
+        filePath = indexPath;
       }
     }
 
-    const filePath = path.join(distDir, reqPath);
+    if (!isInsideDist(filePath)) {
+      res.writeHead(403, { 'Content-Type': 'text/plain' });
+      res.end('Forbidden');
+      return;
+    }
+
+    // Return 404 only when the actual decoded file is missing.
     if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
       res.writeHead(404, { 'Content-Type': 'text/plain' });
       res.end('Not Found');
       return;
     }
 
-    const ext = path.extname(filePath);
+    const ext = path.extname(filePath).toLowerCase();
     const contentType = MIME_TYPES[ext] || 'application/octet-stream';
-    res.writeHead(200, { 'Content-Type': contentType });
+    res.writeHead(200, {
+      'Content-Type': contentType,
+    });
     fs.createReadStream(filePath).pipe(res);
   });
 
@@ -98,6 +151,7 @@ async function runBrowserAcceptanceTests() {
   const pageErrors = [];
   const consoleErrors = [];
   const failedRequests = [];
+  const httpErrors = [];
   let testsPassed = 0;
   let testsFailed = 0;
 
@@ -119,7 +173,21 @@ async function runBrowserAcceptanceTests() {
     });
     page.on('console', (msg) => {
       if (msg.type() === 'error') {
-        consoleErrors.push(msg.text());
+        const location = msg.location();
+
+        consoleErrors.push(
+          `${msg.text()} | Source: ${location.url}:${location.lineNumber}`
+        );
+      }
+    });
+    // Record HTTP errors with their actual URLs.
+    page.on('response', (response) => {
+      if (response.status() >= 400) {
+        const request = response.request();
+
+        httpErrors.push(
+          `${response.status()} ${request.method()} ${request.resourceType()} ${response.url()}`
+        );
       }
     });
     page.on('requestfailed', (req) => {
@@ -214,10 +282,28 @@ async function runBrowserAcceptanceTests() {
     // -------------------------------------------------------------------------
     // TEST STAGE 5: Trial Pagination Controls & Filter Reset Behavior
     // -------------------------------------------------------------------------
-    console.log('\n[STAGE 5] Exercising trial pagination controls and filter reset behavior...');
-    const paginationTextSelector = 'div.border-t.bg-muted\\/20 span.text-muted-foreground';
-    let paginationText = await page.textContent(paginationTextSelector);
-    assert(paginationText.includes('Page 1 of 19'), `Expected initial pagination 'Page 1 of 19', got '${paginationText}'`);
+    // Verify all trials were restored after clearing the search.
+    const trialCountSummary = await page
+    .getByTestId('trial-count-summary')
+  .textContent();
+
+assert(
+  trialCountSummary.includes('Showing 280 of 280'),
+  `Expected all 280 trials to be restored, got '${trialCountSummary}'`
+);
+
+// Use a stable test identifier instead of Tailwind CSS classes.
+const paginationTextLocator = page
+  .getByTestId('trial-pagination')
+  .locator('span')
+  .first();
+
+let paginationText = await paginationTextLocator.textContent();
+
+assert(
+  paginationText.includes('Page 1 of 19'),
+  `Expected initial pagination 'Page 1 of 19', got '${paginationText}'`
+);
 
     // Verify Previous button is disabled on page 1
     const prevBtnDisabled = await page.getAttribute('button[aria-label="Previous Page"]', 'disabled');
@@ -228,7 +314,7 @@ async function runBrowserAcceptanceTests() {
     await page.click('button[aria-label="Next Page"]');
     await page.waitForTimeout(300);
 
-    paginationText = await page.textContent(paginationTextSelector);
+    paginationText = await paginationTextLocator.textContent();
     assert(paginationText.includes('Page 2 of 19'), `Expected 'Page 2 of 19' after clicking Next, got '${paginationText}'`);
     const firstTrialPage2 = (await page.textContent('tbody tr:first-child td:first-child')).trim();
     assert(firstTrialPage1 !== firstTrialPage2, `Page 2 first trial (${firstTrialPage2}) must differ from Page 1 (${firstTrialPage1})`);
@@ -236,32 +322,32 @@ async function runBrowserAcceptanceTests() {
     // Click Previous Page button to return to page 1
     await page.click('button[aria-label="Previous Page"]');
     await page.waitForTimeout(300);
-    paginationText = await page.textContent(paginationTextSelector);
+    paginationText = await paginationTextLocator.textContent();
     assert(paginationText.includes('Page 1 of 19'), `Expected 'Page 1 of 19' after clicking Previous, got '${paginationText}'`);
 
     // Filter by Scenario S2 (40 trials -> 3 pages of 15, 15, 10)
     await page.selectOption('select[aria-label="Filter trials by scenario"]', 'S2');
     await page.waitForTimeout(300);
-    paginationText = await page.textContent(paginationTextSelector);
+    paginationText = await paginationTextLocator.textContent();
     assert(paginationText.includes('Page 1 of 3'), `Expected 'Page 1 of 3' for Scenario S2, got '${paginationText}'`);
 
     // Navigate to page 2 of S2
     await page.click('button[aria-label="Next Page"]');
     await page.waitForTimeout(300);
-    paginationText = await page.textContent(paginationTextSelector);
+    paginationText = await paginationTextLocator.textContent();
     assert(paginationText.includes('Page 2 of 3'), `Expected 'Page 2 of 3', got '${paginationText}'`);
 
     // Now change browser filter to google-chrome (20 trials -> 2 pages of 15, 5)
     // Filter change MUST reset currentPage back to 1
     await page.selectOption('select[aria-label="Filter trials by browser"]', 'google-chrome');
     await page.waitForTimeout(300);
-    paginationText = await page.textContent(paginationTextSelector);
+    paginationText = await paginationTextLocator.textContent();
     assert(paginationText.includes('Page 1 of 2'), `Filter change must reset pagination to 'Page 1 of 2', got '${paginationText}'`);
 
     // Click "Reset Filters" button
     await page.click('button:has-text("Reset Filters")');
     await page.waitForTimeout(300);
-    paginationText = await page.textContent(paginationTextSelector);
+    paginationText = await paginationTextLocator.textContent();
     assert(paginationText.includes('Page 1 of 19'), `Reset filters must restore 'Page 1 of 19', got '${paginationText}'`);
     console.log('  [PASS] Pagination controls, page boundaries, and filter-reset behavior verified');
 
@@ -609,6 +695,18 @@ async function runBrowserAcceptanceTests() {
     // TEST STAGE 14: Verify Error Free Baseline Execution
     // -------------------------------------------------------------------------
     console.log('\n[STAGE 14] Verifying page errors and network request health in baseline session...');
+    console.log('\n[DIAGNOSTIC] HTTP responses with status >= 400:');
+    console.log(
+      httpErrors.length > 0
+        ? httpErrors.join('\n')
+        : 'No HTTP errors detected'
+    );
+    console.log('\n[DIAGNOSTIC] Browser console errors:');
+    console.log(
+      consoleErrors.length > 0
+        ? consoleErrors.join('\n')
+        : 'No console errors detected'
+    );
     assert(pageErrors.length === 0, `Expected 0 uncaught page errors, got: ${pageErrors.join('; ')}`);
     assert(consoleErrors.length === 0, `Expected 0 browser console errors, got: ${consoleErrors.join('; ')}`);
     assert(failedRequests.length === 0, `Expected 0 failed network requests, got: ${failedRequests.join('; ')}`);

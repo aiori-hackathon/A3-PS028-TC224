@@ -989,7 +989,7 @@ export const EvidenceExplorer: React.FC = () => {
               </div>
             </div>
 
-            <div className="flex items-center justify-between text-xs text-black pt-1 border-t">
+            <div data-testid="trial-count-summary" className="flex items-center justify-between text-xs text-muted-foreground pt-1 border-t">  
               <span>
                 Showing <strong>{filteredTrials.length}</strong> of <strong>{bundle.trials?.length ?? 0}</strong> valid
                 empirical trials
@@ -1098,7 +1098,7 @@ export const EvidenceExplorer: React.FC = () => {
 
             {/* Pagination Controls */}
             {totalPages > 1 && (
-              <div className="p-3 border-t bg-muted/20 flex items-center justify-between text-xs">
+              <div data-testid="trial-pagination" className="p-3 border-t bg-muted/20 flex items-center justify-between text-xs">
                 <span className="text-black">
                   Page <strong>{currentPage}</strong> of <strong>{totalPages}</strong>
                 </span>
