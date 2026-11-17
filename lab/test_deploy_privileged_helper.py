@@ -1254,6 +1254,8 @@ wait $CHILD_PID
         res1 = self._run_deploy()
         self.assertEqual(res1.returncode, 0, res1.stderr)
         helper_bin = self.target_dir / "privileged_helper.py"
+        current_uid = str(os.getuid() if os.getuid() != 0 else 1000)
+        current_gid = str(os.getgid() if os.getgid() != 0 else 1000)
 
         # 1. Root UID or GID request is rejected (exit code 74)
         res = subprocess.run(
@@ -1265,7 +1267,7 @@ wait $CHILD_PID
 
         # 2. Arbitrary non-browser executable: /bin/sh (exit code 72)
         res = subprocess.run(
-            ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", "1000", "--regid", "1000", "/bin/sh"],
+            ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", current_uid, "--regid", current_gid, "/bin/sh"],
             capture_output=True, text=True
         )
         self.assertEqual(res.returncode, 72)
@@ -1273,7 +1275,7 @@ wait $CHILD_PID
 
         # 3. Arbitrary non-browser executable: Python (exit code 72)
         res = subprocess.run(
-            ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", "1000", "--regid", "1000", "/usr/bin/python3"],
+            ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", current_uid, "--regid", current_gid, "/usr/bin/python3"],
             capture_output=True, text=True
         )
         self.assertEqual(res.returncode, 72)
@@ -1282,7 +1284,7 @@ wait $CHILD_PID
         # 4. Shell metacharacters in browser arguments (exit code 75)
         for bad_arg in ["; rm -rf /", "$(whoami)", "`id`", "http://test|cat", "http://test>out"]:
             res = subprocess.run(
-                ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", "1000", "--regid", "1000", "google-chrome", bad_arg],
+                ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", current_uid, "--regid", current_gid, "google-chrome", bad_arg],
                 capture_output=True, text=True
             )
             self.assertEqual(res.returncode, 75, f"Failed to reject metacharacter arg: {bad_arg}")
@@ -1290,7 +1292,7 @@ wait $CHILD_PID
 
         # 5. Profile path traversal outside allowed directories (exit code 74)
         res = subprocess.run(
-            ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", "1000", "--regid", "1000", "google-chrome", "--user-data-dir=/etc"],
+            ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", current_uid, "--regid", current_gid, "google-chrome", "--user-data-dir=/etc"],
             capture_output=True, text=True
         )
         self.assertEqual(res.returncode, 74)
@@ -1298,7 +1300,7 @@ wait $CHILD_PID
 
         # 6. Malformed URL: forbidden scheme file:// (exit code 75)
         res = subprocess.run(
-            ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", "1000", "--regid", "1000", "google-chrome", "file:///etc/passwd"],
+            ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", current_uid, "--regid", current_gid, "google-chrome", "file:///etc/passwd"],
             capture_output=True, text=True
         )
         self.assertEqual(res.returncode, 75)
@@ -1306,7 +1308,7 @@ wait $CHILD_PID
 
         # 7. Malformed URL: forbidden scheme ftp:// (exit code 75)
         res = subprocess.run(
-            ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", "1000", "--regid", "1000", "google-chrome", "ftp://example.invalid/"],
+            ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", current_uid, "--regid", current_gid, "google-chrome", "ftp://example.invalid/"],
             capture_output=True, text=True
         )
         self.assertEqual(res.returncode, 75)
@@ -1314,7 +1316,7 @@ wait $CHILD_PID
 
         # 8. Malformed URL: forbidden scheme javascript: (exit code 75)
         res = subprocess.run(
-            ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", "1000", "--regid", "1000", "google-chrome", "javascript:alert(1)"],
+            ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", current_uid, "--regid", current_gid, "google-chrome", "javascript:alert(1)"],
             capture_output=True, text=True
         )
         self.assertEqual(res.returncode, 75)
@@ -1322,7 +1324,7 @@ wait $CHILD_PID
 
         # 9. Malformed URL: forbidden scheme data: (exit code 75)
         res = subprocess.run(
-            ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", "1000", "--regid", "1000", "google-chrome", "data:text/html,evil"],
+            ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", current_uid, "--regid", current_gid, "google-chrome", "data:text/html,evil"],
             capture_output=True, text=True
         )
         self.assertEqual(res.returncode, 75)
@@ -1330,7 +1332,7 @@ wait $CHILD_PID
 
         # 10. Malformed URL: missing hostname (exit code 75)
         res = subprocess.run(
-            ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", "1000", "--regid", "1000", "google-chrome", "http://"],
+            ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", current_uid, "--regid", current_gid, "google-chrome", "http://"],
             capture_output=True, text=True
         )
         self.assertEqual(res.returncode, 75)
@@ -1338,7 +1340,7 @@ wait $CHILD_PID
 
         # 11. Valid HTTP URL and legitimate browser options pass URL validation (reach mount stage: exit code 71)
         res = subprocess.run(
-            ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", "1000", "--regid", "1000", "google-chrome",
+            ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", current_uid, "--regid", current_gid, "google-chrome",
              "--user-data-dir=/tmp/ps028_prof_valid", "--headless", "--no-sandbox", "http://127.0.0.1:80/"],
             capture_output=True, text=True
         )
@@ -1459,11 +1461,13 @@ TIMESTAMP={int(time.time())}
         res = self._run_deploy()
         self.assertEqual(res.returncode, 0, res.stderr)
         helper_bin = self.target_dir / "privileged_helper.py"
+        current_uid = str(os.getuid() if os.getuid() != 0 else 1000)
+        current_gid = str(os.getgid() if os.getgid() != 0 else 1000)
 
         # 1. Missing hostname rejection (exit code 75)
         for bad_url in ["http://", "http://:80", "http://user@"]:
             r = subprocess.run(
-                ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", "1000", "--regid", "1000", "google-chrome", bad_url],
+                ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", current_uid, "--regid", current_gid, "google-chrome", bad_url],
                 capture_output=True, text=True
             )
             self.assertEqual(r.returncode, 75, f"Expected 75 for missing hostname URL: {bad_url}")
@@ -1472,7 +1476,7 @@ TIMESTAMP={int(time.time())}
         # 2. Invalid port rejection: out-of-range, port 0, port > 65535 (exit code 75)
         for bad_port_url in ["http://example.invalid:99999", "http://[::1]:0", "http://[::1]:65536"]:
             r = subprocess.run(
-                ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", "1000", "--regid", "1000", "google-chrome", bad_port_url],
+                ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", current_uid, "--regid", current_gid, "google-chrome", bad_port_url],
                 capture_output=True, text=True
             )
             self.assertEqual(r.returncode, 75, f"Expected 75 for invalid port URL: {bad_port_url}")
@@ -1486,7 +1490,7 @@ TIMESTAMP={int(time.time())}
             "http://2001:db8::1/"
         ]:
             r = subprocess.run(
-                ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", "1000", "--regid", "1000", "google-chrome", bad_ipv6_url],
+                ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", current_uid, "--regid", current_gid, "google-chrome", bad_ipv6_url],
                 capture_output=True, text=True
             )
             self.assertEqual(r.returncode, 75, f"Expected 75 for bad IPv6 URL: {bad_ipv6_url}")
@@ -1503,7 +1507,7 @@ TIMESTAMP={int(time.time())}
             "data:text/html,example"
         ]:
             r = subprocess.run(
-                ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", "1000", "--regid", "1000", "google-chrome", bad_scheme],
+                ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", current_uid, "--regid", current_gid, "google-chrome", bad_scheme],
                 capture_output=True, text=True
             )
             self.assertEqual(r.returncode, 75, f"Expected 75 for bad scheme: {bad_scheme}")
@@ -1521,7 +1525,7 @@ TIMESTAMP={int(time.time())}
         ]
         for cmd_args in valid_cases:
             r = subprocess.run(
-                ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", "1000", "--regid", "1000", "google-chrome"] + cmd_args,
+                ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", current_uid, "--regid", current_gid, "google-chrome"] + cmd_args,
                 capture_output=True, text=True
             )
             self.assertEqual(r.returncode, 71, f"Expected 71 (SnapMountError) for valid arguments {cmd_args}, got {r.returncode}: {r.stderr}")
@@ -1529,14 +1533,14 @@ TIMESTAMP={int(time.time())}
         # 6. Malformed URL inside --app= argument is rejected with 75 before mount setup
         for bad_app in ["--app=http://", "--app=file:///etc/passwd", "--app=http://[invalid_ipv6]/"]:
             r = subprocess.run(
-                ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", "1000", "--regid", "1000", "google-chrome", bad_app],
+                ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", current_uid, "--regid", current_gid, "google-chrome", bad_app],
                 capture_output=True, text=True
             )
             self.assertEqual(r.returncode, 75, f"Expected 75 for bad app argument: {bad_app}")
 
         # 7. URL-valued browser flags (e.g. --proxy-server=http://proxy:8080) are options, not navigation targets (Blocker 7)
         r = subprocess.run(
-            ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", "1000", "--regid", "1000", "google-chrome",
+            ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", current_uid, "--regid", current_gid, "google-chrome",
              "--proxy-server=http://proxy.example:8080", "https://example.com/"],
             capture_output=True, text=True
         )

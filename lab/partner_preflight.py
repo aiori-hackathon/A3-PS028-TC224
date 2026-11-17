@@ -312,20 +312,41 @@ def get_helper_deployment_status() -> Dict[str, Any]:
     sudoers_path = Path("/etc/sudoers.d/ps028-helper")
     manifest_path = Path("/usr/local/libexec/ps028/deployment_manifest.json")
 
-    helper_installed = helper_path.is_file()
-    sudoers_installed = sudoers_path.is_file()
-    manifest_installed = manifest_path.is_file()
+    helper_installed = False
+    helper_mode = None
+    try:
+        if helper_path.is_file():
+            helper_installed = True
+            helper_mode = oct(helper_path.stat().st_mode & 0o777)
+    except (PermissionError, OSError):
+        pass
+
+    sudoers_installed = False
+    sudoers_mode = None
+    try:
+        if sudoers_path.is_file():
+            sudoers_installed = True
+            sudoers_mode = oct(sudoers_path.stat().st_mode & 0o777)
+    except (PermissionError, OSError):
+        pass
+
+    manifest_installed = False
+    try:
+        if manifest_path.is_file():
+            manifest_installed = True
+    except (PermissionError, OSError):
+        pass
 
     return {
         "helper_executable": {
             "path": str(helper_path),
             "installed": helper_installed,
-            "mode": oct(helper_path.stat().st_mode & 0o777) if helper_installed else None,
+            "mode": helper_mode,
         },
         "sudoers_drop_in": {
             "path": str(sudoers_path),
             "installed": sudoers_installed,
-            "mode": oct(sudoers_path.stat().st_mode & 0o777) if sudoers_installed else None,
+            "mode": sudoers_mode,
         },
         "deployment_manifest": {
             "path": str(manifest_path),
