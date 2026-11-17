@@ -35,8 +35,25 @@ LOCK_FILE = SCRIPT_DIR / ".verify_dns.lock"
 DNS_CONFIG_FILE = SCRIPT_DIR / "dns_config.json"
 DNS_BACKUP_A3 = SCRIPT_DIR / "dns_config.json.bak"
 DNS_BACKUP_A4 = SCRIPT_DIR / "dns_config.json.impair_bak"
-DNS_PID_FILE = SCRIPT_DIR / "dns.pid"
+
+DEFAULT_DNS_PID_FILE = Path("/run/ps028/dns.pid")
+DNS_PID_FILE = DEFAULT_DNS_PID_FILE
+
+DEFAULT_DNS_LOG_FILE = Path("/var/log/ps028/dns.log")
+DNS_LOG_FILE = DEFAULT_DNS_LOG_FILE
+
 DNS_SERVER_SCRIPT = SCRIPT_DIR / "dns_server.py"
+
+def resolve_dns_pid_file(preferred: Optional[Path] = None) -> Path:
+    if preferred is not None:
+        return preferred
+    return DEFAULT_DNS_PID_FILE
+
+
+def resolve_dns_log_file(preferred: Optional[Path] = None) -> Path:
+    if preferred is not None:
+        return preferred
+    return DEFAULT_DNS_LOG_FILE
 
 NFT_TABLE_NAME = "ps028_impair"
 NFT_FAMILY = "inet"
@@ -489,23 +506,24 @@ def save_dns_config_atomically(config: Dict[str, Any], path: Optional[Path] = No
 
 
 def verify_dns_process_identity(
-    pid_file: Path = DNS_PID_FILE
+    pid_file: Optional[Path] = None
 ) -> int:
     """
     Stage 1: Verify DNS server process liveness and cmdline identity.
     Fails closed with DNSPIDError on any discrepancy.
     """
-    if not pid_file.is_file():
-        raise DNSPIDError(f"DNS PID file {pid_file} does not exist: DNS server is not running")
+    target_pid_file = resolve_dns_pid_file(pid_file)
+    if not target_pid_file.is_file():
+        raise DNSPIDError(f"DNS PID file {target_pid_file} does not exist: DNS server is not running")
 
     try:
-        pid_str = pid_file.read_text(encoding="utf-8").strip()
+        pid_str = target_pid_file.read_text(encoding="utf-8").strip()
         pid = int(pid_str)
     except Exception as e:
-        raise DNSPIDError(f"Invalid DNS PID file {pid_file}: {e}")
+        raise DNSPIDError(f"Invalid DNS PID file {target_pid_file}: {e}")
 
     if pid <= 1:
-        raise DNSPIDError(f"Invalid DNS PID {pid} in {pid_file}: must be a user process > 1")
+        raise DNSPIDError(f"Invalid DNS PID {pid} in {target_pid_file}: must be a user process > 1")
 
     # Liveness check
     try:
@@ -522,7 +540,7 @@ def verify_dns_process_identity(
         cmdline = [a.decode("utf-8", errors="replace") for a in raw.split(b"\x00") if a]
         if not any("dns_server.py" in arg for arg in cmdline):
             raise DNSPIDError(
-                f"PID {pid} in {pid_file} does not match dns_server.py (cmdline: {cmdline})"
+                f"PID {pid} in {target_pid_file} does not match dns_server.py (cmdline: {cmdline})"
             )
     except (FileNotFoundError, ProcessLookupError):
         raise DNSPIDError(f"DNS server process {pid} terminated unexpectedly during verification")
@@ -659,8 +677,8 @@ def reload_dns_server(
         log_info("[DRY-RUN] Would deliver verified SIGHUP to DNS server process")
         return {"status": "DRY_RUN"}
 
-    target_pid_file = pid_file or DNS_PID_FILE
-    target_log_file = log_file or DNS_LOG_FILE
+    target_pid_file = resolve_dns_pid_file(pid_file)
+    target_log_file = resolve_dns_log_file(log_file)
     target_config = config_file or DNS_CONFIG_FILE
 
     # Stage 1: Verified PID Resolution & cmdline check
@@ -670,13 +688,20 @@ def reload_dns_server(
     initial_offset = target_log_file.stat().st_size if target_log_file.is_file() else 0
 
     # Stage 3: SIGHUP Signal Delivery
-    try:
-        os.kill(pid, signal.SIGHUP)
-        log_ok(f"SIGHUP delivered to verified DNS server (PID {pid}).")
-    except ProcessLookupError:
-        raise DNSSignalError(f"DNS server process PID {pid} died before SIGHUP delivery")
-    except PermissionError as e:
-        raise DNSSignalError(f"Permission denied sending SIGHUP to DNS server PID {pid}: {e}")
+    from lab.privileged_helper import safe_signal_process
+    success, reason = safe_signal_process(
+        pid,
+        signal.SIGHUP,
+        expected_cmd_substring="dns_server.py",
+        expected_netns="ps028-rt"
+    )
+    if not success:
+        if "terminated before" in reason or "already terminated" in reason:
+            raise DNSSignalError(f"DNS server process PID {pid} died before SIGHUP delivery: {reason}")
+        if "permission" in reason.lower() or "not permitted" in reason.lower():
+            raise DNSSignalError(f"Permission denied sending SIGHUP to DNS server PID {pid}: {reason}")
+        raise DNSSignalError(f"Failed to signal DNS server PID {pid}: {reason}")
+    log_ok(f"SIGHUP delivered to verified DNS server (PID {pid}).")
 
     # Stage 4: SIGHUP Confirmation Readback from dns.log
     read_dns_log_confirmation(
@@ -1150,7 +1175,7 @@ def clear_impairments(dry_run: bool = False, lock_file: Optional[Path] = None, l
         log_ok("System restored to baseline.")
 
 
-def self_test_baseline(dry_run: bool = False) -> bool:
+def self_test_baseline(dry_run: bool = False, dns_pid_file: Optional[Path] = None) -> bool:
     """
     Verify that the environment is in the pristine healthy baseline state:
     - No project nftables rules exist
@@ -1196,21 +1221,22 @@ def self_test_baseline(dry_run: bool = False) -> bool:
         log_ok("Check 3 PASSED: No leftover impairment DNS backups found.")
 
     # 4. Check DNS Server Process (Fail Closed)
+    active_dns_pid_file = resolve_dns_pid_file(dns_pid_file)
     if not dry_run:
-        if not DNS_PID_FILE.is_file():
-            log_error("Baseline Check FAILED: DNS PID file missing; DNS server is not running.")
+        if not active_dns_pid_file.is_file():
+            log_error(f"Baseline Check FAILED: DNS PID file missing at {active_dns_pid_file}; DNS server is not running.")
             all_passed = False
         else:
             try:
-                pid = verify_dns_process_identity(DNS_PID_FILE)
+                pid = verify_dns_process_identity(active_dns_pid_file)
                 log_ok(f"Check 4 PASSED: DNS server process (PID {pid}) verified active running dns_server.py.")
             except DNSPIDError as e:
                 log_error(f"Baseline Check FAILED: {e}")
                 all_passed = False
     else:
-        if DNS_PID_FILE.is_file():
+        if active_dns_pid_file.is_file():
             try:
-                pid = verify_dns_process_identity(DNS_PID_FILE)
+                pid = verify_dns_process_identity(active_dns_pid_file)
                 log_ok(f"Check 4 PASSED: DNS server process (PID {pid}) verified active running dns_server.py.")
             except DNSPIDError as e:
                 log_error(f"Baseline Check FAILED: {e}")

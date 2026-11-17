@@ -33,10 +33,13 @@ import argparse
 import contextlib
 import errno
 import fcntl
+import hashlib
 import json
 import os
 from pathlib import Path
 import pwd
+import grp
+import secrets
 import shutil
 import stat
 import signal
@@ -214,7 +217,7 @@ class TestLockCoordinationAndDeadlockPrevention(unittest.TestCase):
                 "--output-pcap", str(pcap_path),
                 "--log-file", str(log_path),
                 "--netns", "ps028-cl",
-                "--interface", "any",
+                "--interface", "ps028-cl-rt",
                 "--owner-user", invoking_user,
                 "--readiness-timeout", "1.0",
             ],
@@ -1711,7 +1714,7 @@ class TestCaptureLifecycleAndSafety(unittest.TestCase):
 
         mock_popen.side_effect = _popen_side
 
-        with patch("lab.run_trial.find_tcpdump_pid", side_effect=RuntimeError("Simulated post-spawn error")):
+        with patch("lab.privileged_helper.safe_write_pid_file", side_effect=RuntimeError("Simulated post-spawn error")):
             with patch("os.kill") as mock_kill:
                 with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
                     priv_helper.start_capture_privileged(
@@ -3719,6 +3722,1448 @@ class TestPrivilegedHelperSecurityHardenings(unittest.TestCase):
                         msg=f"Root execution failed to reject unrelated path '{test_path}' for {op_type}"
                     ):
                         priv_helper.validate_operation_path(test_path, op_type, is_test_fixture=False)
+
+
+class TestPartnerPrivilegedHelperIntegration(unittest.TestCase):
+    """
+    Regression and compliance tests for deployed helper integration,
+    isolated Python execution (-I), check-auth authorization,
+    and service lifecycle subcommands (status-nginx, start-dns, stop-dns, status-dns, reload-dns).
+    """
+
+    @patch("subprocess.run")
+    @patch("pathlib.Path.is_file")
+    @patch("os.geteuid", return_value=1000)
+    def test_check_sudo_authorization_invokes_check_auth_on_installed_helper(
+        self, mock_euid, mock_is_file, mock_run
+    ):
+        """Must execute sudo -n /usr/bin/python3 -I /usr/local/libexec/ps028/privileged_helper.py check-auth when installed."""
+        mock_is_file.return_value = True
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.stdout = '{"authorized": true}\n'
+        mock_proc.stderr = ""
+        mock_run.return_value = mock_proc
+
+        res = priv_helper.check_sudo_authorization(is_test_fixture=False)
+
+        self.assertTrue(res["authorized"])
+        mock_run.assert_called_once()
+        cmd = mock_run.call_args[0][0]
+        self.assertEqual(cmd, [
+            "sudo", "-n",
+            "/usr/bin/python3",
+            "-I",
+            "/usr/local/libexec/ps028/privileged_helper.py",
+            "check-auth"
+        ])
+
+    @patch("subprocess.run")
+    @patch("pathlib.Path.is_file")
+    @patch("os.geteuid", return_value=1000)
+    def test_run_helper_action_invokes_installed_helper_with_isolated_python(
+        self, mock_euid, mock_is_file, mock_run
+    ):
+        """run_helper_action must invoke the installed helper with /usr/bin/python3 -I when installed."""
+        mock_is_file.return_value = True
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.stdout = '{"status": "SUCCESS"}\n'
+        mock_proc.stderr = ""
+        mock_run.return_value = mock_proc
+
+        out = priv_helper.run_helper_action("verify-baseline", is_test_fixture=False)
+
+        self.assertEqual(out, {"status": "SUCCESS"})
+        cmd = mock_run.call_args[0][0]
+        self.assertEqual(cmd[:5], [
+            "sudo", "-n",
+            "/usr/bin/python3",
+            "-I",
+            "/usr/local/libexec/ps028/privileged_helper.py"
+        ])
+        self.assertEqual(cmd[5], "verify-baseline")
+
+    def test_build_parser_registers_all_twenty_subcommands(self):
+        """Parser must register and accept all 20 authorized subcommands."""
+        parser = priv_helper.build_parser()
+        expected_subcommands = {
+            "apply-scenario", "restore-baseline", "apply-dns", "restore-dns",
+            "verify-baseline", "start-capture", "stop-capture", "check-auth",
+            "setup-s5-counters", "read-s5-counters", "measure-s5", "measure-s5-worker",
+            "launch-snap-browser", "start-nginx", "stop-nginx", "status-nginx",
+            "start-dns", "stop-dns", "status-dns", "reload-dns"
+        }
+        subparsers_action = [
+            action for action in parser._actions
+            if isinstance(action, argparse._SubParsersAction)
+        ]
+        self.assertEqual(len(subparsers_action), 1)
+        registered = set(subparsers_action[0].choices.keys())
+        self.assertEqual(registered, expected_subcommands)
+
+    @patch("lab.privileged_helper.status_nginx_privileged", return_value={"status": "RUNNING", "pid": 1234})
+    def test_dispatch_action_status_nginx(self, mock_status):
+        """status-nginx action dispatches to status_nginx_privileged."""
+        parser = priv_helper.build_parser()
+        args = parser.parse_args(["status-nginx"])
+        result = priv_helper.dispatch_action(args)
+        mock_status.assert_called_once()
+        self.assertEqual(result["status"], "RUNNING")
+
+    @patch("lab.privileged_helper.start_dns_privileged", return_value={"status": "SUCCESS", "pid": 5678})
+    def test_dispatch_action_start_dns(self, mock_start):
+        """start-dns action dispatches to start_dns_privileged."""
+        parser = priv_helper.build_parser()
+        args = parser.parse_args(["start-dns"])
+        result = priv_helper.dispatch_action(args)
+        mock_start.assert_called_once()
+        self.assertEqual(result["status"], "SUCCESS")
+
+    @patch("lab.privileged_helper.stop_dns_privileged", return_value={"status": "SUCCESS"})
+    def test_dispatch_action_stop_dns(self, mock_stop):
+        """stop-dns action dispatches to stop_dns_privileged."""
+        parser = priv_helper.build_parser()
+        args = parser.parse_args(["stop-dns"])
+        result = priv_helper.dispatch_action(args)
+        mock_stop.assert_called_once()
+        self.assertEqual(result["status"], "SUCCESS")
+
+    @patch("lab.privileged_helper.status_dns_privileged", return_value={"status": "RUNNING", "pid": 5678})
+    def test_dispatch_action_status_dns(self, mock_status):
+        """status-dns action dispatches to status_dns_privileged."""
+        parser = priv_helper.build_parser()
+        args = parser.parse_args(["status-dns"])
+        result = priv_helper.dispatch_action(args)
+        mock_status.assert_called_once()
+        self.assertEqual(result["status"], "RUNNING")
+
+    @patch("lab.privileged_helper.reload_dns_privileged", return_value={"status": "SUCCESS"})
+    def test_dispatch_action_reload_dns(self, mock_reload):
+        """reload-dns action dispatches to reload_dns_privileged."""
+        parser = priv_helper.build_parser()
+        args = parser.parse_args(["reload-dns"])
+        result = priv_helper.dispatch_action(args)
+        mock_reload.assert_called_once()
+        self.assertEqual(result["status"], "SUCCESS")
+
+    def test_consistent_privileged_pid_paths(self):
+        """Privileged runtime components must agree on dedicated /run/ps028 PID paths."""
+        self.assertEqual(priv_helper.DEFAULT_DNS_PID_FILE, Path("/run/ps028/dns.pid"))
+        self.assertEqual(priv_helper.DEFAULT_NGINX_PID_FILE, Path("/run/ps028/nginx.pid"))
+        self.assertEqual(run_trial.DEFAULT_DNS_PID_FILE, Path("/run/ps028/dns.pid"))
+        self.assertEqual(run_trial.DEFAULT_NGINX_PID_FILE, Path("/run/ps028/nginx.pid"))
+        self.assertEqual(impair.DEFAULT_DNS_PID_FILE, Path("/run/ps028/dns.pid"))
+
+
+class TestStagingTreeDeploymentClosure(unittest.TestCase):
+    """
+    Section 8: Staging tree deployment closure verification.
+    Replicates the exact staging tree created by deploy_privileged_helper.sh
+    and verifies that python3 -I staging_root/privileged_helper.py --help
+    and python3 -I staging_root/lab/dns_server.py --help execute successfully
+    in isolated mode without referencing the repository checkout in sys.path.
+    """
+
+    def setUp(self):
+        self.temp_dir = Path(tempfile.mkdtemp(prefix="ps028_staging_closure_"))
+        self.staging_dir = self.temp_dir / "ps028"
+        self.staging_dir.mkdir(mode=0o755)
+        self.staging_lab = self.staging_dir / "lab"
+        self.staging_lab.mkdir(mode=0o755)
+        self.staging_www = self.staging_lab / "www"
+        self.staging_www.mkdir(mode=0o755)
+
+        # Copy deployment files
+        modules = [
+            "identity.py", "concurrency.py", "impair.py", "run_trial.py",
+            "analyze.py", "teardown.py", "scenarios.yaml", "dns_config.json",
+            "dns_server.py", "cl_resolv.conf", "nginx.conf"
+        ]
+        shutil.copy2(REPO_ROOT / "lab" / "privileged_helper.py", self.staging_dir / "privileged_helper.py")
+        (self.staging_lab / "__init__.py").touch(mode=0o644)
+
+        for mod in modules:
+            shutil.copy2(REPO_ROOT / "lab" / mod, self.staging_lab / mod)
+        shutil.copy2(REPO_ROOT / "lab" / "www" / "index.html", self.staging_www / "index.html")
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_staging_tree_privileged_helper_help_runs_in_isolated_python(self):
+        """python3 -I staging_root/privileged_helper.py --help must execute cleanly in isolated mode."""
+        env = {
+            "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+            "PS028_TEST_SUITE": "1"
+        }
+        proc = subprocess.run(
+            [sys.executable, "-I", str(self.staging_dir / "privileged_helper.py"), "--help"],
+            capture_output=True,
+            text=True,
+            cwd=str(self.temp_dir),
+            env=env
+        )
+        self.assertEqual(proc.returncode, 0, f"STDOUT: {proc.stdout}\nSTDERR: {proc.stderr}")
+        self.assertIn("PS-028 Privileged Operations Helper", proc.stdout)
+        self.assertIn("start-dns", proc.stdout)
+        self.assertIn("start-nginx", proc.stdout)
+
+    def test_staging_tree_dns_server_help_runs_in_isolated_python(self):
+        """python3 -I staging_root/lab/dns_server.py --help must execute cleanly in isolated mode."""
+        env = {
+            "PATH": os.environ.get("PATH", "/usr/bin:/bin")
+        }
+        proc = subprocess.run(
+            [sys.executable, "-I", str(self.staging_lab / "dns_server.py"), "--help"],
+            capture_output=True,
+            text=True,
+            cwd=str(self.temp_dir),
+            env=env
+        )
+        self.assertEqual(proc.returncode, 0, f"STDOUT: {proc.stdout}\nSTDERR: {proc.stderr}")
+        self.assertIn("PS-028 Controlled DNS Server", proc.stdout)
+
+    def test_staging_tree_manifest_integrity_verification(self):
+        """Verifies deployment manifest generation records all files with accurate sha256."""
+        import hashlib
+        files_record = []
+        for p in sorted(self.staging_dir.rglob("*")):
+            if p.is_file() and p.name != "deployment_manifest.json":
+                h = hashlib.sha256(p.read_bytes()).hexdigest()
+                mode = oct(p.stat().st_mode & 0o777)
+                rel = str(p.relative_to(self.staging_dir))
+                files_record.append({"path": rel, "sha256": h, "mode": mode})
+
+        manifest = {
+            "release_sha": "002a17d673b0c07162eb55fa6a3b81cf07e153c4",
+            "target_dir": str(self.staging_dir),
+            "file_count": len(files_record),
+            "files": files_record
+        }
+        manifest_path = self.staging_dir / "deployment_manifest.json"
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            json.dump(manifest, f, indent=2)
+
+        self.assertEqual(manifest["file_count"], 14)
+        for item in manifest["files"]:
+            actual_f = self.staging_dir / item["path"]
+            self.assertTrue(actual_f.is_file())
+            self.assertEqual(hashlib.sha256(actual_f.read_bytes()).hexdigest(), item["sha256"])
+
+
+class TestPrivilegedHelperArgumentBoundaries(unittest.TestCase):
+    """
+    Section 5: Privileged helper argument boundary and adversarial input tests.
+    Verifies that all registered actions enforce strict validation on paths,
+    scenarios, interfaces, numeric bounds, and commands.
+    """
+
+    def setUp(self):
+        self.temp_dir = Path(tempfile.mkdtemp(prefix="ps028_adv_test_"))
+        self.lock_file = self.temp_dir / ".lab.lock"
+        self.pcap_file = self.temp_dir / "test.pcap"
+        self.log_file = self.temp_dir / "test.log"
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_apply_scenario_rejects_invalid_scenario_names(self):
+        """apply-scenario must reject invalid or malicious scenario IDs."""
+        invalid_scenarios = ["S7", "S0; rm -rf /", "", "../etc/shadow", "INVALID"]
+        for bad_sc in invalid_scenarios:
+            with self.assertRaises(priv_helper.PrivilegedHelperError):
+                priv_helper.apply_scenario_privileged(
+                    scenario_id=bad_sc,
+                    lock_file=self.lock_file,
+                    is_test_fixture=True
+                )
+
+    def test_start_capture_rejects_unauthorized_interface_in_production(self):
+        """start-capture must reject unauthorized network interfaces when not in test fixture."""
+        unauthorized_interfaces = ["eth0", "lo", "any", "ps028-cl-rt; id", "../dummy"]
+        for bad_iface in unauthorized_interfaces:
+            with self.assertRaises(priv_helper.PrivilegedHelperError):
+                priv_helper.start_capture_privileged(
+                    output_pcap=self.pcap_file,
+                    log_file=self.log_file,
+                    interface=bad_iface,
+                    lock_file=self.lock_file,
+                    is_test_fixture=False
+                )
+
+    def test_start_capture_rejects_out_of_bounds_buffer_size(self):
+        """start-capture must reject buffer_size_kb outside [128, 65536]."""
+        bad_buffers = [0, 64, 127, 65537, 131072, -1]
+        for bad_buf in bad_buffers:
+            with self.assertRaises(priv_helper.PrivilegedHelperError):
+                priv_helper.start_capture_privileged(
+                    output_pcap=self.pcap_file,
+                    log_file=self.log_file,
+                    buffer_size_kb=bad_buf,
+                    lock_file=self.lock_file,
+                    is_test_fixture=True
+                )
+
+    def test_start_capture_rejects_path_traversal_in_output_pcap(self):
+        """start-capture must reject path traversal or symlinks in output_pcap."""
+        traversal_path = Path("/tmp/../../../../etc/shadow")
+        with self.assertRaises(priv_helper.PrivilegedHelperError):
+            priv_helper.start_capture_privileged(
+                output_pcap=traversal_path,
+                log_file=self.log_file,
+                lock_file=self.lock_file,
+                is_test_fixture=True
+            )
+
+    def test_launch_snap_browser_rejects_shell_and_system_binaries(self):
+        """launch-snap-browser must reject shell interpreters, python, and root utilities."""
+        prohibited_commands = [
+            ["bash", "-i"],
+            ["/bin/sh"],
+            ["python3", "-c", "import os; print(os.getuid())"],
+            ["sudo", "su"],
+            ["mount", "-t", "tmpfs", "none", "/mnt"],
+            ["chmod", "777", "/etc/passwd"],
+        ]
+        for cmd in prohibited_commands:
+            args = argparse.Namespace(
+                reuid=1000,
+                regid=1000,
+                mounts_file="/proc/mounts",
+                snap_name=None,
+                resolver_ip="10.0.1.1",
+                resolv_conf=None,
+                snap_ns_dir="/run/snapd/ns",
+                source_fd=None,
+                host_proc_root="/proc/1/root",
+                cmd=cmd
+            )
+            with self.assertRaises(SystemExit) as cm:
+                priv_helper.launch_snap_browser_main(args)
+            self.assertEqual(cm.exception.code, 72)
+
+    def test_reload_dns_rejects_invalid_configuration_schema(self):
+        """reload-dns must validate replacement configuration schema and reject invalid JSON."""
+        invalid_conf = self.temp_dir / "invalid_dns.json"
+        invalid_conf.write_text('{"bad_key": true}', encoding="utf-8")
+        dummy_pid_file = self.temp_dir / "dns.pid"
+        dummy_pid_file.write_text(f"{os.getpid()}\n", encoding="utf-8")
+
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as cm:
+            priv_helper.reload_dns_privileged(
+                pid_file=dummy_pid_file,
+                config_file=invalid_conf,
+                lock_file=self.lock_file,
+                is_test_fixture=True
+            )
+        self.assertIn("schema validation failed", str(cm.exception).lower())
+
+    def test_stop_nginx_refuses_to_signal_unverified_process(self):
+        """stop-nginx must refuse to signal a PID whose cmdline does not contain nginx."""
+        lab_dir = self.temp_dir / "lab"
+        lab_dir.mkdir(parents=True, exist_ok=True)
+        conf_file = lab_dir / "nginx.conf"
+        conf_file.write_text("events {}\n", encoding="utf-8")
+        dummy_pid_file = lab_dir / "nginx.pid"
+        dummy_pid_file.write_text(f"{os.getpid()}\n", encoding="utf-8")
+
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as cm:
+            priv_helper.stop_nginx_privileged(
+                repo_root=self.temp_dir,
+                config_file=conf_file,
+                lock_file=self.lock_file,
+                is_test_fixture=True
+            )
+        self.assertIn("cmdline mismatch", str(cm.exception).lower())
+
+
+class TestPidfdProcessSignalingAndRaceElimination(unittest.TestCase):
+    """
+    Rigorously verifies PID lifecycle and race elimination across process signaling:
+    1. Process exits after initial PID-file read.
+    2. PID identity changes before signalling.
+    3. Stale PID file.
+    4. Malformed PID file.
+    5. Wrong executable.
+    6. Wrong network namespace.
+    7. Already terminated process.
+    8. Repeated stop operation (idempotence).
+    9. Unsupported pidfd operation (fallback handling).
+    """
+    def setUp(self):
+        self.temp_dir = Path(tempfile.mkdtemp(prefix="ps028_pidfd_test_"))
+        self.lock_file = self.temp_dir / ".lab.lock"
+        self.lock_file.touch()
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_pidfd_open_and_send_signal_live(self):
+        """Verifies real pidfd_open and pidfd_send_signal on isolated child process."""
+        proc = subprocess.Popen(["sleep", "5"])
+        try:
+            # Allow brief moment for kernel execve to complete
+            ok, msg = False, ""
+            for _ in range(20):
+                ok, msg = priv_helper.safe_signal_process(
+                    proc.pid,
+                    signal.SIGTERM,
+                    expected_cmd_substring="sleep"
+                )
+                if ok:
+                    break
+                time.sleep(0.01)
+            self.assertTrue(ok, f"safe_signal_process failed: {msg}")
+            self.assertEqual(msg, "OK")
+            proc.wait(timeout=2.0)
+            self.assertIsNotNone(proc.returncode)
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+            try:
+                proc.wait(timeout=2.0)
+            except Exception:
+                pass
+
+    def test_pidfd_process_exits_after_initial_pid_read(self):
+        """If process exits immediately after PID read, pidfd_open or signal handles it safely."""
+        proc = subprocess.Popen(["sleep", "0.01"])
+        pid = proc.pid
+        proc.wait(timeout=1.0)
+        ok, msg = priv_helper.safe_signal_process(
+            pid,
+            signal.SIGTERM,
+            expected_cmd_substring="sleep"
+        )
+        self.assertFalse(ok)
+        self.assertTrue("terminated" in msg.lower() or "not alive" in msg.lower())
+
+    def test_pidfd_wrong_executable_rejected_before_signal(self):
+        """Refuses to signal process when cmdline does not match expected_cmd_substring."""
+        ok, msg = priv_helper.safe_signal_process(
+            os.getpid(),
+            signal.SIGTERM,
+            expected_cmd_substring="dns_server.py"
+        )
+        self.assertFalse(ok)
+        self.assertIn("mismatch", msg.lower())
+
+    def test_pidfd_wrong_network_namespace_rejected(self):
+        """Refuses to signal process when netns does not match expected_netns."""
+        proc = subprocess.Popen(["sleep", "5"])
+        try:
+            ok, msg = priv_helper.safe_signal_process(
+                proc.pid,
+                signal.SIGTERM,
+                expected_cmd_substring="sleep",
+                expected_netns="ps028-rt"
+            )
+            self.assertFalse(ok)
+            self.assertTrue("does not exist" in msg.lower() or "netns mismatch" in msg.lower())
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+            try:
+                proc.wait(timeout=2.0)
+            except Exception:
+                pass
+
+    def test_pidfd_unsupported_fails_closed_without_signaling_numeric_pid(self):
+        """When pidfd is unsupported (or force_fallback=True), safe_signal_process fails closed without signaling."""
+        proc = subprocess.Popen(["sleep", "10"])
+        try:
+            ok, msg = priv_helper.safe_signal_process(
+                proc.pid,
+                signal.SIGTERM,
+                expected_cmd_substring="sleep",
+                force_fallback=True
+            )
+            self.assertFalse(ok)
+            self.assertIn("prohibited", msg.lower())
+            self.assertIn("requires linux pidfd", msg.lower())
+            # Crucial verification: the child process must NOT have received any signal and must still be alive!
+            self.assertIsNone(proc.poll())
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+            try:
+                proc.wait(timeout=2.0)
+            except Exception:
+                pass
+                proc.wait()
+
+    def test_repeated_stop_dns_operation_is_idempotent(self):
+        """Repeated stop-dns on non-existent or unlinked PID file returns stopped: True idempotently."""
+        pid_file = self.temp_dir / "dns.pid"
+        res1 = priv_helper.stop_dns_privileged(pid_file=pid_file, lock_file=self.lock_file, is_test_fixture=True)
+        self.assertTrue(res1["stopped"])
+        self.assertIn("No PID file present", res1["message"])
+        res2 = priv_helper.stop_dns_privileged(pid_file=pid_file, lock_file=self.lock_file, is_test_fixture=True)
+        self.assertTrue(res2["stopped"])
+
+
+class TestDedicatedNginxWorkerIdentity(unittest.TestCase):
+    """
+    Rigorously verifies Nginx dedicated service identity ps028-sv:
+    1. Production mode strictly requires ps028-sv and fails closed if missing.
+    2. Production mode rejects unauthorized worker_user arguments.
+    3. Test fixture mode allows unprivileged override or nobody fallback.
+    """
+    def setUp(self):
+        self.temp_dir = Path(tempfile.mkdtemp(prefix="ps028_nginx_id_test_"))
+        self.lock_file = self.temp_dir / ".lab.lock"
+        self.lock_file.touch()
+        self.lab_dir = self.temp_dir / "lab"
+        self.lab_dir.mkdir(parents=True, exist_ok=True)
+        self.conf = self.lab_dir / "nginx.conf"
+        self.conf.write_text("events {}\n", encoding="utf-8")
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_production_start_nginx_fails_closed_if_ps028_sv_missing(self):
+        """In production, start_nginx_privileged strictly requires dedicated user ps028-sv."""
+        with patch("pwd.getpwnam", side_effect=KeyError("ps028-sv")):
+            with self.assertRaises(priv_helper.PrivilegedHelperError) as cm:
+                priv_helper.start_nginx_privileged(
+                    repo_root=self.temp_dir,
+                    config_file=self.conf,
+                    lock_file=self.lock_file,
+                    is_test_fixture=False
+                )
+            self.assertIn("ps028-sv", str(cm.exception))
+            self.assertIn("dedicated nginx service identity", str(cm.exception).lower())
+
+    def test_production_start_nginx_rejects_unauthorized_worker_user(self):
+        """In production, passing an unauthorized worker_user (like operator account) is rejected."""
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as cm:
+            priv_helper.start_nginx_privileged(
+                repo_root=self.temp_dir,
+                config_file=self.conf,
+                worker_user="indrani",
+                lock_file=self.lock_file,
+                is_test_fixture=False
+            )
+        self.assertIn("refusing unauthorized worker_user", str(cm.exception).lower())
+
+    def test_test_fixture_mode_allows_worker_user_override(self):
+        """Test fixture mode permits worker_user override or fallback to nobody."""
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="ps028-sv\n")
+            with patch("time.time", side_effect=[0.0, 0.1, 5.0]):
+                with self.assertRaises(priv_helper.PrivilegedHelperError):
+                    priv_helper.start_nginx_privileged(
+                        repo_root=self.temp_dir,
+                        config_file=self.conf,
+                        worker_user="test_worker",
+                        lock_file=self.lock_file,
+                        is_test_fixture=True
+                    )
+            found_cmd = any("user test_worker;" in str(call_args) for call_args in mock_run.call_args_list)
+            self.assertTrue(found_cmd)
+
+    def test_production_start_nginx_fails_closed_if_ps028_sv_has_uid_0(self):
+        """Production start_nginx_privileged rejects ps028-sv account if it has root UID 0."""
+        fake_entry = MagicMock(pw_name="ps028-sv", pw_uid=0, pw_shell="/usr/sbin/nologin")
+        with patch("pwd.getpwnam", return_value=fake_entry):
+            with self.assertRaises(priv_helper.PrivilegedHelperError) as cm:
+                priv_helper.start_nginx_privileged(
+                    repo_root=self.temp_dir,
+                    config_file=self.conf,
+                    lock_file=self.lock_file,
+                    is_test_fixture=False
+                )
+            self.assertIn("cannot have root uid 0", str(cm.exception).lower())
+
+    def test_production_start_nginx_fails_closed_if_ps028_sv_has_interactive_shell(self):
+        """Production start_nginx_privileged rejects ps028-sv account if it has an interactive shell."""
+        fake_entry = MagicMock(pw_name="ps028-sv", pw_uid=998, pw_shell="/bin/bash")
+        with patch("pwd.getpwnam", return_value=fake_entry):
+            with self.assertRaises(priv_helper.PrivilegedHelperError) as cm:
+                priv_helper.start_nginx_privileged(
+                    repo_root=self.temp_dir,
+                    config_file=self.conf,
+                    lock_file=self.lock_file,
+                    is_test_fixture=False
+                )
+            self.assertIn("non-interactive shell", str(cm.exception).lower())
+
+    def test_production_start_nginx_fails_closed_if_ps028_sv_matches_operator_user(self):
+        """Production start_nginx_privileged rejects ps028-sv account if it matches the operator username."""
+        fake_entry = MagicMock(pw_name="indrani", pw_uid=1000, pw_shell="/usr/sbin/nologin")
+        with patch("pwd.getpwnam", return_value=fake_entry), patch.dict(os.environ, {"SUDO_USER": "indrani"}):
+            with self.assertRaises(priv_helper.PrivilegedHelperError) as cm:
+                priv_helper.start_nginx_privileged(
+                    repo_root=self.temp_dir,
+                    config_file=self.conf,
+                    lock_file=self.lock_file,
+                    is_test_fixture=False
+                )
+            self.assertIn("cannot be the operator account", str(cm.exception).lower())
+
+
+class TestBrowserExecutableHardening(unittest.TestCase):
+    """
+    Adversarial verification of validate_browser_executable across:
+    1. Executable in temporary writable directory (/tmp/google-chrome).
+    2. Symlinked directory.
+    3. Symlink to unexpected executable (/bin/bash).
+    4. Directory with unsafe ownership or permissions.
+    5. Approved path whose executable has been replaced / missing.
+    """
+    def setUp(self):
+        self.temp_dir = Path(tempfile.mkdtemp(prefix="ps028_browser_sec_test_"))
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_rejects_fake_executable_in_temp_writable_directory(self):
+        """Rejects executable placed in temporary writable directory."""
+        fake_chrome = self.temp_dir / "google-chrome"
+        fake_chrome.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        fake_chrome.chmod(0o755)
+
+        with self.assertRaises(priv_helper.BrowserValidationError) as cm:
+            priv_helper.validate_browser_executable(fake_chrome, is_test_fixture=False)
+        self.assertIn("unauthorized browser executable path", str(cm.exception).lower())
+
+    def test_rejects_symlink_to_prohibited_executable(self):
+        """Rejects symlink pointing to prohibited executable (e.g. /bin/bash)."""
+        fake_chrome = self.temp_dir / "google-chrome"
+        fake_chrome.symlink_to("/bin/bash")
+
+        with self.assertRaises(priv_helper.BrowserValidationError) as cm:
+            priv_helper.validate_browser_executable(
+                fake_chrome,
+                allowed_canonical_paths={str(fake_chrome)},
+                is_test_fixture=True
+            )
+        self.assertIn("prohibited executable name", str(cm.exception).lower())
+
+    def test_rejects_world_writable_executable(self):
+        """Rejects executable with world-writable permissions."""
+        fake_chrome = self.temp_dir / "google-chrome"
+        fake_chrome.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        fake_chrome.chmod(0o777)
+
+        with self.assertRaises(priv_helper.BrowserValidationError) as cm:
+            priv_helper.validate_browser_executable(
+                fake_chrome,
+                allowed_canonical_paths={str(fake_chrome)},
+                is_test_fixture=True
+            )
+        self.assertIn("must not be world-writable", str(cm.exception).lower())
+
+    def test_rejects_missing_executable(self):
+        """Rejects non-existent browser executable path."""
+        missing = self.temp_dir / "nonexistent-chrome"
+        with self.assertRaises(priv_helper.BrowserValidationError) as cm:
+            priv_helper.validate_browser_executable(missing, is_test_fixture=True)
+        self.assertIn("does not exist", str(cm.exception).lower())
+
+    def test_launch_snap_browser_main_rejects_adversarial_binary_with_exit_72(self):
+        """launch_snap_browser_main exits with code 72 on unapproved browser path."""
+        fake_chrome = self.temp_dir / "google-chrome"
+        fake_chrome.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        fake_chrome.chmod(0o755)
+
+        args = argparse.Namespace(
+            reuid=1000,
+            regid=1000,
+            cmd=[str(fake_chrome)],
+            is_test_fixture=False
+        )
+        with self.assertRaises(SystemExit) as cm:
+            priv_helper.launch_snap_browser_main(args)
+        self.assertEqual(cm.exception.code, 72)
+
+    def test_launch_snap_browser_main_rejects_inode_modification_before_exec(self):
+        """launch_snap_browser_main detects and exits 72 if the executable inode changes before exec."""
+        fake_chrome = self.temp_dir / "google-chrome"
+        fake_chrome.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        fake_chrome.chmod(0o755)
+
+        args = argparse.Namespace(
+            reuid=1000,
+            regid=1000,
+            mounts_file=None,
+            cmd=[str(fake_chrome)],
+            is_test_fixture=True
+        )
+
+        # Simulate inode changing between initial validation and pre-exec check
+        stat1 = MagicMock(st_dev=1, st_ino=10001)
+        stat2 = MagicMock(st_dev=1, st_ino=10002)
+        stat_iter = iter([stat1, stat2])
+
+        with patch("lab.privileged_helper.validate_browser_executable", return_value=fake_chrome), \
+             patch("lab.run_trial.get_browser_env", return_value={"HOME": "/home/test", "USER": "test"}), \
+             patch("pathlib.Path.stat", side_effect=lambda *a, **kw: next(stat_iter, stat2)), \
+             patch("lab.privileged_helper.setup_snap_mounts"), \
+             patch("lab.privileged_helper.setup_snap_isolated_dns"), \
+             patch("os.execvp"):
+            with self.assertRaises(SystemExit) as cm:
+                priv_helper.launch_snap_browser_main(args)
+            self.assertEqual(cm.exception.code, 72)
+
+    def test_validate_browser_executable_rejects_unapproved_resolved_target(self):
+        """validate_browser_executable rejects when resolved realpath is not in approved paths."""
+        fake_bin = self.temp_dir / "google-chrome"
+        fake_bin.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        fake_bin.chmod(0o755)
+
+        with patch.object(Path, "resolve", return_value=fake_bin):
+            with self.assertRaises(priv_helper.BrowserValidationError) as cm:
+                priv_helper.validate_browser_executable("/usr/bin/google-chrome", is_test_fixture=False)
+            self.assertIn("unauthorized", str(cm.exception).lower())
+
+    def test_validate_browser_executable_rejects_unapproved_raw_symlink(self):
+        """validate_browser_executable rejects when raw symlink path is not in approved paths."""
+        unapproved_link = self.temp_dir / "my-browser"
+        unapproved_link.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        unapproved_link.chmod(0o755)
+
+        with patch.object(Path, "resolve", return_value=Path("/opt/google/chrome/google-chrome")):
+            with self.assertRaises(priv_helper.BrowserValidationError) as cm:
+                priv_helper.validate_browser_executable(unapproved_link, is_test_fixture=False)
+            self.assertIn("unauthorized", str(cm.exception).lower())
+
+
+class TestStatusNonDestructiveObservation(unittest.TestCase):
+    """
+    Rigorously verifies that status-dns and status-nginx are strictly non-destructive:
+    1. Missing PID file: reported as MISSING without error.
+    2. Malformed PID file: reported as MALFORMED, file preserved intact on disk.
+    3. Stale PID file: reported as STALE, file preserved intact on disk.
+    4. Mismatched PID file: reported as MISMATCHED, file preserved intact on disk.
+    """
+    def setUp(self):
+        self.temp_dir = Path(tempfile.mkdtemp(prefix="ps028_status_test_"))
+        self.lock_file = self.temp_dir / ".lab.lock"
+        self.lock_file.touch()
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_status_dns_missing_pid_file(self):
+        """status-dns reports MISSING when PID file is absent."""
+        pid_file = self.temp_dir / "dns.pid"
+        res = priv_helper.status_dns_privileged(pid_file=pid_file, lock_file=self.lock_file, is_test_fixture=True)
+        self.assertFalse(res["running"])
+        self.assertEqual(res["pid_state"], "MISSING")
+        self.assertFalse(pid_file.exists())
+
+    def test_status_dns_malformed_pid_file_preserved(self):
+        """status-dns reports MALFORMED and preserves malformed file on disk."""
+        pid_file = self.temp_dir / "dns.pid"
+        pid_file.write_text("not_a_number\n", encoding="utf-8")
+
+        res = priv_helper.status_dns_privileged(pid_file=pid_file, lock_file=self.lock_file, is_test_fixture=True)
+        self.assertFalse(res["running"])
+        self.assertEqual(res["pid_state"], "MALFORMED")
+        self.assertTrue(pid_file.is_file(), "status-dns must NOT delete malformed PID files")
+        self.assertEqual(pid_file.read_text(encoding="utf-8"), "not_a_number\n")
+
+    def test_status_dns_stale_pid_file_preserved(self):
+        """status-dns reports STALE and preserves stale PID file on disk."""
+        pid_file = self.temp_dir / "dns.pid"
+        pid_file.write_text("999999\n", encoding="utf-8")
+
+        res = priv_helper.status_dns_privileged(pid_file=pid_file, lock_file=self.lock_file, is_test_fixture=True)
+        self.assertFalse(res["running"])
+        self.assertEqual(res["pid_state"], "STALE")
+        self.assertTrue(pid_file.is_file(), "status-dns must NOT delete stale PID files")
+
+    def test_status_dns_mismatched_pid_file_preserved(self):
+        """status-dns reports MISMATCHED and preserves file when PID belongs to wrong process."""
+        pid_file = self.temp_dir / "dns.pid"
+        pid_file.write_text(f"{os.getpid()}\n", encoding="utf-8")
+
+        res = priv_helper.status_dns_privileged(pid_file=pid_file, lock_file=self.lock_file, is_test_fixture=True)
+        self.assertFalse(res["running"])
+        self.assertEqual(res["pid_state"], "MISMATCHED")
+        self.assertTrue(pid_file.is_file(), "status-dns must NOT delete mismatched PID files")
+
+    def test_status_nginx_malformed_pid_file_preserved(self):
+        """status-nginx reports MALFORMED and preserves malformed file on disk."""
+        lab_dir = self.temp_dir / "lab"
+        lab_dir.mkdir(parents=True, exist_ok=True)
+        pid_file = lab_dir / "nginx.pid"
+        pid_file.write_text("invalid_pid\n", encoding="utf-8")
+
+        res = priv_helper.status_nginx_privileged(repo_root=self.temp_dir, lock_file=self.lock_file, is_test_fixture=True)
+        self.assertFalse(res["running"])
+        self.assertEqual(res["pid_state"], "MALFORMED")
+        self.assertTrue(pid_file.is_file(), "status-nginx must NOT delete malformed PID files")
+
+    def test_status_nginx_stale_pid_file_preserved(self):
+        """status-nginx reports STALE and preserves stale PID file on disk."""
+        lab_dir = self.temp_dir / "lab"
+        lab_dir.mkdir(parents=True, exist_ok=True)
+        pid_file = lab_dir / "nginx.pid"
+        pid_file.write_text("999999\n", encoding="utf-8")
+
+        res = priv_helper.status_nginx_privileged(repo_root=self.temp_dir, lock_file=self.lock_file, is_test_fixture=True)
+        self.assertFalse(res["running"])
+        self.assertEqual(res["pid_state"], "STALE")
+        self.assertTrue(pid_file.is_file(), "status-nginx must NOT delete stale PID files")
+
+
+class TestProcessLifecycleAndSignalingSecurity(unittest.TestCase):
+    """
+    Rigorously verifies process lifecycle invariants, pidfd signaling, and cleanup races:
+    1. Child creation and fork during cleanup.
+    2. Process exit race between discovery and signaling (ESRCH handling without failure).
+    3. Surviving descendant detection and escalation.
+    4. Strict fail-closed behavior when pidfd is unsupported.
+    """
+
+    def setUp(self):
+        self.temp_dir = Path(tempfile.mkdtemp(prefix="ps028_proc_test_"))
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_process_exit_race_between_discovery_and_signaling(self):
+        """safe_signal_process safely handles process exiting between discovery and pidfd open."""
+        with patch("os.pidfd_open", side_effect=ProcessLookupError):
+            ok, msg = priv_helper.safe_signal_process(99999, signal.SIGTERM)
+            self.assertFalse(ok)
+            self.assertIn("already terminated", msg.lower())
+
+    def test_process_exit_race_between_pidfd_open_and_send_signal(self):
+        """safe_signal_process safely handles process exiting after pidfd_open but before send_signal."""
+        mock_pfd = 99
+        with patch("os.pidfd_open", return_value=mock_pfd), \
+             patch("signal.pidfd_send_signal", side_effect=ProcessLookupError), \
+             patch("os.close") as mock_close:
+            ok, msg = priv_helper.safe_signal_process(99998, signal.SIGTERM)
+            self.assertFalse(ok)
+            self.assertIn("terminated before signal delivery", msg.lower())
+            mock_close.assert_called_once_with(mock_pfd)
+
+    def test_safe_signal_process_fails_closed_when_pidfd_unsupported(self):
+        """safe_signal_process fails closed without sending any numeric PID signal when pidfd is disabled."""
+        mock_child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(10)"])
+        try:
+            ok, msg = priv_helper.safe_signal_process(mock_child.pid, signal.SIGTERM, force_fallback=True)
+            self.assertFalse(ok)
+            self.assertIn("prohibited", msg.lower())
+            # Child process must still be running (no signal was sent to numeric PID)
+            self.assertIsNone(mock_child.poll())
+        finally:
+            mock_child.terminate()
+            mock_child.wait()
+
+    def test_capture_process_group_descendant_escalation(self):
+        """_reap_capture_on_startup_failure reaps parent and signals child tcpdump PID."""
+        mock_parent = MagicMock(pid=12345)
+        mock_parent.poll.return_value = None
+        mock_parent.wait.return_value = 0
+
+        alive_state = {12345: True, 12346: True}
+        def mock_alive(p):
+            res = alive_state.get(p, False)
+            alive_state[p] = False
+            return res
+
+        with patch("lab.run_trial.find_tcpdump_pid", return_value=12346), \
+             patch("lab.run_trial._is_pid_alive", side_effect=mock_alive), \
+             patch("lab.privileged_helper.safe_signal_process") as mock_sig:
+            priv_helper._reap_capture_on_startup_failure(mock_parent, tcpdump_pid=12346)
+            self.assertTrue(mock_sig.called)
+
+    def test_parent_exits_before_child(self):
+        """stop_capture_privileged handles parent (ip netns) exiting before child tcpdump."""
+        parent_pid = 20001
+        child_pid = 20002
+        pcap_file = self.temp_dir / "capture.pcap"
+        pcap_file.write_bytes(b"\xd4\xc3\xb2\xa1\x02\x00\x04\x00" + b"\x00" * 16)
+        pid_file = self.temp_dir / "capture.pid"
+        pid_file.write_text(f"{parent_pid}:{child_pid}\n", encoding="utf-8")
+
+        alive_map = {parent_pid: False, child_pid: True}
+        def mock_alive(p, proc_dir=None):
+            return alive_map.get(p, False)
+
+        def mock_sig(p, sig, *args, **kwargs):
+            if p == child_pid and sig == signal.SIGINT:
+                alive_map[child_pid] = False
+                return True, "Signaled via pidfd"
+            return True, "Signaled"
+
+        with patch("lab.run_trial.is_safe_capture_process", return_value=True), \
+             patch("lab.privileged_helper._is_alive_proc", side_effect=mock_alive), \
+             patch("lab.privileged_helper.safe_signal_process", side_effect=mock_sig) as sig_mock:
+            res = priv_helper.stop_capture_privileged(
+                pid=parent_pid,
+                pcap_path=pcap_file,
+                timeout=0.5,
+                verify_pcap=True,
+                is_test_fixture=True
+            )
+            self.assertEqual(res["status"], "OK")
+            self.assertIn(child_pid, [call[0][0] for call in sig_mock.call_args_list])
+
+    def test_surviving_descendant_escalation_to_sigkill(self):
+        """stop_capture_privileged escalates to SIGKILL if child ignores SIGINT and SIGTERM."""
+        parent_pid = 21001
+        child_pid = 21002
+        pcap_file = self.temp_dir / "capture.pcap"
+        pcap_file.write_bytes(b"\xd4\xc3\xb2\xa1\x02\x00\x04\x00" + b"\x00" * 16)
+        pid_file = self.temp_dir / "capture.pid"
+        pid_file.write_text(f"{parent_pid}:{child_pid}\n", encoding="utf-8")
+
+        signals_sent = []
+        alive_map = {parent_pid: False, child_pid: True}
+
+        def mock_alive(p, proc_dir=None):
+            return alive_map.get(p, False)
+
+        def mock_sig(p, sig, *args, **kwargs):
+            signals_sent.append((p, sig))
+            if sig == signal.SIGKILL:
+                alive_map[child_pid] = False
+            return True, "Signaled"
+
+        with patch("lab.run_trial.is_safe_capture_process", return_value=True), \
+             patch("lab.privileged_helper._is_alive_proc", side_effect=mock_alive), \
+             patch("lab.privileged_helper.safe_signal_process", side_effect=mock_sig), \
+             patch("time.sleep", return_value=None):
+            res = priv_helper.stop_capture_privileged(
+                pid=parent_pid,
+                pcap_path=pcap_file,
+                timeout=0.01,
+                verify_pcap=True,
+                is_test_fixture=True
+            )
+            self.assertEqual(res["status"], "OK")
+            self.assertIn((child_pid, signal.SIGKILL), signals_sent)
+
+    def test_refuses_to_signal_unrelated_process_in_another_session(self):
+        """stop_capture_privileged refuses to signal unrelated or unverified process."""
+        pcap_file = self.temp_dir / "capture.pcap"
+        pcap_file.write_bytes(b"\xd4\xc3\xb2\xa1\x02\x00\x04\x00" + b"\x00" * 16)
+
+        with patch("lab.run_trial.is_safe_capture_process", return_value=False), \
+             patch("lab.privileged_helper._is_alive_proc", return_value=True), \
+             patch("lab.privileged_helper.safe_signal_process") as mock_sig:
+            with self.assertRaises(run_trial.CaptureShutdownError) as ctx:
+                priv_helper.stop_capture_privileged(
+                    pid=22001,
+                    pcap_path=pcap_file,
+                    timeout=0.5,
+                    is_test_fixture=True
+                )
+            self.assertIn("unrelated", str(ctx.exception).lower())
+            mock_sig.assert_not_called()
+
+    def test_rejects_group_writable_executable(self):
+        """validate_browser_executable rejects group-writable executable."""
+        raw_path = "/usr/bin/google-chrome"
+        with patch("pathlib.Path.is_file", return_value=True), \
+             patch("pathlib.Path.resolve", return_value=Path(raw_path)), \
+             patch("os.access", return_value=True), \
+             patch("pathlib.Path.stat") as mock_stat:
+            mock_stat.return_value = os.stat_result((0o100775, 1, 1, 1, 0, 0, 100, 0, 0, 0))
+            with self.assertRaises(priv_helper.BrowserValidationError) as ctx:
+                priv_helper.validate_browser_executable(raw_path, is_test_fixture=False)
+            self.assertIn("group-writable", str(ctx.exception).lower())
+
+    def test_rejects_group_writable_ancestor_directory(self):
+        """validate_browser_executable rejects executable if ancestor directory is group-writable."""
+        raw_path = "/usr/bin/google-chrome"
+        with patch("pathlib.Path.is_file", return_value=True), \
+             patch("pathlib.Path.resolve", return_value=Path(raw_path)), \
+             patch("os.access", return_value=True):
+            def mock_stat_side_effect(self_path, *args, **kwargs):
+                if str(self_path) == raw_path:
+                    return os.stat_result((0o100755, 1, 1, 1, 0, 0, 100, 0, 0, 0))
+                elif str(self_path) == "/usr/bin":
+                    return os.stat_result((0o040775, 1, 1, 1, 0, 0, 100, 0, 0, 0))
+                else:
+                    return os.stat_result((0o040755, 1, 1, 1, 0, 0, 100, 0, 0, 0))
+            with patch.object(Path, "stat", autospec=True, side_effect=mock_stat_side_effect):
+                with self.assertRaises(priv_helper.BrowserValidationError) as ctx:
+                    priv_helper.validate_browser_executable(raw_path, is_test_fixture=False)
+                self.assertIn("group-writable", str(ctx.exception).lower())
+
+    def test_verify_caller_holds_lock_rejects_unrelated_lock_holder(self):
+        """verify_caller_holds_lock fails closed when lock is held by an unrelated process."""
+        lock_file = self.temp_dir / ".lab.lock"
+        lock_file.touch()
+
+        st = lock_file.stat()
+        dev_ino = f"{os.major(st.st_dev):02x}:{os.minor(st.st_dev):02x}:{st.st_ino}"
+        mock_proc_locks = self.temp_dir / "proc_locks"
+        mock_proc_locks.write_text(f"1: FLOCK  ADVISORY  WRITE 99999 {dev_ino} 0 EOF\n", encoding="utf-8")
+
+        with patch("fcntl.flock", side_effect=BlockingIOError), \
+             patch("lab.privileged_helper.get_process_ancestors", return_value={os.getpid(), 1}):
+            with self.assertRaises(concurrency.LabLockError) as ctx:
+                priv_helper.verify_caller_holds_lock(lock_file, proc_locks_path=mock_proc_locks)
+            self.assertIn("unrelated", str(ctx.exception).lower())
+
+    def test_run_helper_action_rejects_unprivileged_measure_s5_worker(self):
+        """run_helper_action rejects direct unprivileged invocation of measure-s5-worker."""
+        with patch("os.geteuid", return_value=1000):
+            with self.assertRaises(priv_helper.PrivilegedHelperError) as ctx:
+                priv_helper.run_helper_action("measure-s5-worker", is_test_fixture=True)
+            self.assertIn("prohibited", str(ctx.exception).lower())
+
+    def test_stop_capture_rejects_invocation_without_pcap(self):
+        """stop-capture CLI subparser strictly requires --pcap."""
+        parser = priv_helper.build_parser()
+        with self.assertRaises(SystemExit):
+            parser.parse_args(["stop-capture", "--pid", "12345"])
+
+    def test_single_pid_capture_model_in_place_lifecycle(self):
+        """Single PID model: Popen child PID == ip PID == tcpdump PID."""
+        mock_proc = MagicMock(pid=33333, returncode=None)
+        mock_proc.poll.return_value = None
+        mock_proc.wait.return_value = 0
+
+        pcap_file = self.temp_dir / "test.pcap"
+        log_file = self.temp_dir / "test.log"
+        pid_file = self.temp_dir / "test.pid"
+
+        def _mock_popen(*args, **kwargs):
+            log_file.write_text("listening on ps028-cl-rt\n", encoding="utf-8")
+            return mock_proc
+
+        with patch("subprocess.Popen", side_effect=_mock_popen), \
+             patch("lab.privileged_helper.safe_write_pid_file") as mock_pid_write:
+            res = priv_helper.start_capture_privileged(
+                output_pcap=pcap_file,
+                log_file=log_file,
+                netns="ps028-cl",
+                interface="ps028-cl-rt",
+                readiness_timeout=0.5,
+                is_test_fixture=True
+            )
+            self.assertEqual(res["parent_pid"], 33333)
+            self.assertEqual(res["tcpdump_pid"], 33333)
+            # Verify single PID format written
+            mock_pid_write.assert_called_once_with(
+                pid_file, "33333\n", owner_user=mock_pid_write.call_args[1]["owner_user"],
+                owner_group=mock_pid_write.call_args[1]["owner_group"], is_test_fixture=True
+            )
+
+    def test_stop_capture_pidfd_pins_process_and_prevents_recycled_pid_signaling(self):
+        """stop_capture_process_pinned acquires pidfd first, pins process, and never signals recycled PID."""
+        # 1. Pinned stop of real process
+        proc = subprocess.Popen(["sleep", "10"])
+        pid = proc.pid
+        pcap_file = self.temp_dir / "test_pinned.pcap"
+        pcap_file.write_bytes(b"\xd4\xc3\xb2\xa1\x02\x00\x04\x00" + b"\x00" * 16)
+
+        try:
+            with patch("lab.run_trial.is_safe_capture_process", return_value=True):
+                success = priv_helper.stop_capture_process_pinned(
+                    pid=pid,
+                    expected_pcap=pcap_file,
+                    timeout=2.0
+                )
+                self.assertTrue(success)
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+            try:
+                proc.wait(timeout=2.0)
+            except Exception:
+                pass
+
+        # 2. Process exits during validation: pidfd detects exit and returns safely without signaling
+        fake_pid = 98765
+        with patch("os.pidfd_open", return_value=99), \
+             patch("lab.run_trial.is_safe_capture_process", return_value=False), \
+             patch("signal.pidfd_send_signal", side_effect=ProcessLookupError), \
+             patch("os.close"):
+            # Process terminated during validation -> returns True safely without error
+            res = priv_helper.stop_capture_process_pinned(
+                pid=fake_pid,
+                expected_pcap=pcap_file,
+                timeout=1.0
+            )
+            self.assertTrue(res)
+
+    def test_launch_snap_browser_rejects_unauthorized_reuid(self):
+        """launch_snap_browser_main rejects --reuid mismatching invoking identity with code 74."""
+        args = argparse.Namespace(
+            reuid=99999,
+            regid=1000,
+            cmd=["--", "/snap/bin/chromium", "http://10.0.1.10/test"],
+            is_test_fixture=False
+        )
+        with self.assertRaises(SystemExit) as cm:
+            priv_helper.launch_snap_browser_main(args)
+        self.assertEqual(cm.exception.code, 74)
+
+    def test_launch_snap_browser_rejects_unauthorized_regid(self):
+        """launch_snap_browser_main rejects --regid not in permitted groups with code 74."""
+        inv_user = identity.resolve_invoking_identity()
+        args = argparse.Namespace(
+            reuid=inv_user.uid,
+            regid=88888,
+            cmd=["--", "/snap/bin/chromium", "http://10.0.1.10/test"],
+            is_test_fixture=False
+        )
+        with self.assertRaises(SystemExit) as cm:
+            priv_helper.launch_snap_browser_main(args)
+        self.assertEqual(cm.exception.code, 74)
+
+    def test_launch_snap_browser_rejects_root_direct_invocation(self):
+        """launch_snap_browser_main rejects direct root invocation to prevent arbitrary UID drop."""
+        with patch("lab.identity.resolve_invoking_identity", side_effect=identity.IdentityResolutionError("Root UID 0 prohibited")):
+            args = argparse.Namespace(
+                reuid=1000,
+                regid=1000,
+                cmd=["--", "/snap/bin/chromium", "http://10.0.1.10/test"],
+                is_test_fixture=False
+            )
+            with self.assertRaises(SystemExit) as cm:
+                priv_helper.launch_snap_browser_main(args)
+            self.assertEqual(cm.exception.code, 74)
+
+    def test_launch_snap_browser_rejects_traversal_profile_dir(self):
+        """launch_snap_browser_main rejects profile-dir outside permitted directory boundaries."""
+        inv_user = identity.resolve_invoking_identity()
+        args = argparse.Namespace(
+            reuid=inv_user.uid,
+            regid=inv_user.gid,
+            cmd=["--", "/snap/bin/chromium", "--user-data-dir=/etc/ps028_evil", "http://10.0.1.10/test"],
+            is_test_fixture=False
+        )
+        with self.assertRaises(SystemExit) as cm:
+            priv_helper.launch_snap_browser_main(args)
+        self.assertEqual(cm.exception.code, 74)
+
+    def test_launch_snap_browser_rejects_url_with_shell_metacharacters(self):
+        """launch_snap_browser_main rejects URLs containing shell metacharacters with code 75."""
+        inv_user = identity.resolve_invoking_identity()
+        bad_urls = [
+            "http://10.0.1.10/test;rm -rf /",
+            "http://10.0.1.10/test`whoami`",
+            "http://10.0.1.10/test$(id)",
+            "http://10.0.1.10/test|cat /etc/passwd",
+            "http://10.0.1.10/test>evil.txt",
+        ]
+        for bad_url in bad_urls:
+            args = argparse.Namespace(
+                reuid=inv_user.uid,
+                regid=inv_user.gid,
+                cmd=["--", "/snap/bin/chromium", bad_url],
+                is_test_fixture=False
+            )
+            with self.assertRaises(SystemExit) as cm:
+                priv_helper.launch_snap_browser_main(args)
+            self.assertEqual(cm.exception.code, 75)
+
+    def test_setup_snap_isolated_dns_rejects_tampered_host_proc_root(self):
+        """setup_snap_isolated_dns strictly requires /proc/1/root in production mode."""
+        with self.assertRaises(priv_helper.SnapMountError) as cm:
+            priv_helper.setup_snap_isolated_dns(
+                snap_name="chromium",
+                snap_ns_dir="/run/snapd/ns",
+                host_proc_root="/var/tmp/tampered_proc",
+                is_test_fixture=False
+            )
+        self.assertIn("strictly '/proc/1/root'", str(cm.exception))
+
+    def test_start_nginx_rejects_unexpected_supplementary_groups(self):
+        """start_nginx_privileged fails closed if ps028-sv has unexpected supplementary groups."""
+        conf = self.temp_dir / "nginx.conf"
+        conf.write_text("events {}\n", encoding="utf-8")
+        lock_file = self.temp_dir / "nginx.lock"
+        fake_entry = MagicMock(pw_name="ps028-sv", pw_uid=998, pw_gid=998, pw_shell="/usr/sbin/nologin")
+        fake_grp = MagicMock(gr_name="ps028-sv", gr_gid=998)
+        with patch("pwd.getpwnam", return_value=fake_entry), \
+             patch("grp.getgrgid", return_value=fake_grp), \
+             patch("os.getgrouplist", return_value=[998, 27]):  # User is in group 27 (sudo)
+            with self.assertRaises(priv_helper.PrivilegedHelperError) as cm:
+                priv_helper.start_nginx_privileged(
+                    repo_root=self.temp_dir,
+                    config_file=conf,
+                    lock_file=lock_file,
+                    is_test_fixture=False
+                )
+            self.assertIn("unexpected supplementary groups", str(cm.exception).lower())
+
+    def test_start_nginx_rejects_root_primary_gid(self):
+        """start_nginx_privileged fails closed if ps028-sv has root primary GID 0."""
+        conf = self.temp_dir / "nginx.conf"
+        conf.write_text("events {}\n", encoding="utf-8")
+        lock_file = self.temp_dir / "nginx.lock"
+        fake_entry = MagicMock(pw_name="ps028-sv", pw_uid=998, pw_gid=0, pw_shell="/usr/sbin/nologin")
+        with patch("pwd.getpwnam", return_value=fake_entry):
+            with self.assertRaises(priv_helper.PrivilegedHelperError) as cm:
+                priv_helper.start_nginx_privileged(
+                    repo_root=self.temp_dir,
+                    config_file=conf,
+                    lock_file=lock_file,
+                    is_test_fixture=False
+                )
+            self.assertIn("primary gid 0", str(cm.exception).lower())
+
+    def test_start_nginx_rejects_sudo_primary_gid(self):
+        """start_nginx_privileged fails closed if ps028-sv has administrative primary GID 27."""
+        conf = self.temp_dir / "nginx.conf"
+        conf.write_text("events {}\n", encoding="utf-8")
+        lock_file = self.temp_dir / "nginx.lock"
+        fake_entry = MagicMock(pw_name="ps028-sv", pw_uid=998, pw_gid=27, pw_shell="/usr/sbin/nologin")
+        with patch("pwd.getpwnam", return_value=fake_entry):
+            with self.assertRaises(priv_helper.PrivilegedHelperError) as cm:
+                priv_helper.start_nginx_privileged(
+                    repo_root=self.temp_dir,
+                    config_file=conf,
+                    lock_file=lock_file,
+                    is_test_fixture=False
+                )
+            self.assertIn("primary gid 27", str(cm.exception).lower())
+
+    def test_start_nginx_rejects_docker_primary_group(self):
+        """start_nginx_privileged fails closed if ps028-sv has privileged primary group 'docker'."""
+        conf = self.temp_dir / "nginx.conf"
+        conf.write_text("events {}\n", encoding="utf-8")
+        lock_file = self.temp_dir / "nginx.lock"
+        fake_entry = MagicMock(pw_name="ps028-sv", pw_uid=998, pw_gid=999, pw_shell="/usr/sbin/nologin")
+        fake_grp = MagicMock(gr_name="docker", gr_gid=999)
+        with patch("pwd.getpwnam", return_value=fake_entry), \
+             patch("grp.getgrgid", return_value=fake_grp):
+            with self.assertRaises(priv_helper.PrivilegedHelperError) as cm:
+                priv_helper.start_nginx_privileged(
+                    repo_root=self.temp_dir,
+                    config_file=conf,
+                    lock_file=lock_file,
+                    is_test_fixture=False
+                )
+            self.assertIn("cannot belong to privileged primary group 'docker'", str(cm.exception).lower())
+
+    def test_start_nginx_rejects_unrelated_non_privileged_primary_group(self):
+        """start_nginx_privileged fails closed if ps028-sv has non-privileged non-dedicated primary group."""
+        conf = self.temp_dir / "nginx.conf"
+        conf.write_text("events {}\n", encoding="utf-8")
+        lock_file = self.temp_dir / "nginx.lock"
+        fake_entry = MagicMock(pw_name="ps028-sv", pw_uid=998, pw_gid=1001, pw_shell="/usr/sbin/nologin")
+        fake_grp = MagicMock(gr_name="nogroup", gr_gid=1001)
+        with patch("pwd.getpwnam", return_value=fake_entry), \
+             patch("grp.getgrgid", return_value=fake_grp):
+            with self.assertRaises(priv_helper.PrivilegedHelperError) as cm:
+                priv_helper.start_nginx_privileged(
+                    repo_root=self.temp_dir,
+                    config_file=conf,
+                    lock_file=lock_file,
+                    is_test_fixture=False
+                )
+            self.assertIn("must have dedicated primary group 'ps028-sv', got 'nogroup'", str(cm.exception).lower())
+
+    def test_start_nginx_accepts_correct_dedicated_ps028_sv_group(self):
+        """start_nginx_privileged accepts ps028-sv with dedicated primary group ps028-sv and zero supplementary groups."""
+        conf = self.temp_dir / "nginx.conf"
+        conf.write_text("events {}\n", encoding="utf-8")
+        lock_file = self.temp_dir / "nginx.lock"
+        fake_entry = MagicMock(pw_name="ps028-sv", pw_uid=998, pw_gid=998, pw_shell="/usr/sbin/nologin")
+        fake_grp = MagicMock(gr_name="ps028-sv", gr_gid=998)
+        with patch("pwd.getpwnam", return_value=fake_entry), \
+             patch("grp.getgrgid", return_value=fake_grp), \
+             patch("os.getgrouplist", return_value=[998]), \
+             patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="ps028-sv\n")
+            with patch("time.time", side_effect=[0.0, 0.1, 5.0]):
+                try:
+                    priv_helper.start_nginx_privileged(
+                        repo_root=self.temp_dir,
+                        config_file=conf,
+                        lock_file=lock_file,
+                        is_test_fixture=False
+                    )
+                except priv_helper.PrivilegedHelperError as exc:
+                    # Identity checks pass; failure is strictly on daemon timeout
+                    self.assertNotIn("dedicated worker user", str(exc).lower())
+                    self.assertNotIn("primary group", str(exc).lower())
+                    self.assertNotIn("supplementary groups", str(exc).lower())
+
+
+class TestStrictArgumentSecurityAndAuthentication(unittest.TestCase):
+    """
+    Test suite for:
+    1. Pidfd signal error distinction (ESRCH vs EPERM, EBADF, EINVAL).
+    2. Authentication boundary for measure-s5-worker (direct execution rejection, cryptographic pipe handoff).
+    3. Strict duplicate argument rejection across all subcommands and scalar/boolean options.
+    """
+
+    def setUp(self):
+        self.temp_dir = Path(tempfile.mkdtemp(prefix="ps028_test_auth_"))
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_pidfd_signal_error_distinction(self):
+        """_send_pidfd_signal treats ESRCH as exit but raises CaptureShutdownError on EPERM, EBADF, EINVAL."""
+        with patch("signal.pidfd_send_signal", side_effect=ProcessLookupError()):
+            self.assertFalse(priv_helper._send_pidfd_signal(1, signal.SIGINT, 123))
+
+        with patch("signal.pidfd_send_signal", side_effect=OSError(errno.ESRCH, "No such process")):
+            self.assertFalse(priv_helper._send_pidfd_signal(1, signal.SIGINT, 123))
+
+        for err_code in (errno.EPERM, errno.EBADF, errno.EINVAL):
+            with patch("signal.pidfd_send_signal", side_effect=OSError(err_code, os.strerror(err_code))):
+                with self.assertRaises(run_trial.CaptureShutdownError) as cm:
+                    priv_helper._send_pidfd_signal(1, signal.SIGINT, 123)
+                self.assertIn(f"errno={err_code}", str(cm.exception))
+
+    def test_measure_s5_worker_authentication(self):
+        """authenticate_measure_s5_worker rejects unauthenticated or corrupted invocations."""
+        # 1. Missing arguments fail closed
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as cm:
+            priv_helper.authenticate_measure_s5_worker(None, None)
+        self.assertIn("Authentication failed", str(cm.exception))
+
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as cm:
+            priv_helper.authenticate_measure_s5_worker(10, None)
+        self.assertIn("Authentication failed", str(cm.exception))
+
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as cm:
+            priv_helper.authenticate_measure_s5_worker(None, "a" * 64)
+        self.assertIn("Authentication failed", str(cm.exception))
+
+        # 2. Invalid FD fails closed
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as cm:
+            priv_helper.authenticate_measure_s5_worker(99999, "a" * 64)
+        self.assertIn("Authentication failed", str(cm.exception))
+
+        # 3. Invalid hex hash fails closed
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as cm:
+            priv_helper.authenticate_measure_s5_worker(0, "not_a_valid_hex_hash_string_of_length_64_characters_xxxxxxxxxxxxxx")
+        self.assertIn("Authentication failed", str(cm.exception))
+
+        # 4. Cryptographic token mismatch fails closed
+        r_fd, w_fd = os.pipe()
+        os.write(w_fd, b"coordinator_secret_token")
+        os.close(w_fd)
+        wrong_hash = hashlib.sha256(b"wrong_secret_token").hexdigest()
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as cm:
+            priv_helper.authenticate_measure_s5_worker(r_fd, wrong_hash, is_test_fixture=True)
+        self.assertIn("verification failed", str(cm.exception).lower())
+
+        # 5. Matching token succeeds under test fixture
+        r_fd, w_fd = os.pipe()
+        secret_bytes = secrets.token_bytes(32)
+        os.write(w_fd, secret_bytes)
+        os.close(w_fd)
+        valid_hash = hashlib.sha256(secret_bytes).hexdigest()
+        # Should not raise
+        priv_helper.authenticate_measure_s5_worker(r_fd, valid_hash, is_test_fixture=True)
+
+        # 6. Non-fixture execution rejects runner process because parent PID is not measure-s5 coordinator
+        r_fd, w_fd = os.pipe()
+        os.write(w_fd, secret_bytes)
+        os.close(w_fd)
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as cm:
+            priv_helper.authenticate_measure_s5_worker(r_fd, valid_hash, is_test_fixture=False)
+        self.assertIn("Authentication failed", str(cm.exception))
+
+        # 6a. Negative test: Substring injection in parent cmdline fails closed
+        r_fd, w_fd = os.pipe()
+        os.write(w_fd, secret_bytes)
+        os.close(w_fd)
+        fake_cmd_substring = ["python3", "evil.py", "--arg=measure-s5"]
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as cm:
+            priv_helper.authenticate_measure_s5_worker(
+                r_fd, valid_hash, parent_cmdline=fake_cmd_substring, is_test_fixture=True
+            )
+        self.assertIn("executable is not the privileged helper", str(cm.exception))
+
+        # 6b. Negative test: Worker spawning another worker fails closed
+        r_fd, w_fd = os.pipe()
+        os.write(w_fd, secret_bytes)
+        os.close(w_fd)
+        fake_cmd_worker = ["python3", "/usr/local/libexec/ps028/privileged_helper.py", "measure-s5-worker"]
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as cm:
+            priv_helper.authenticate_measure_s5_worker(
+                r_fd, valid_hash, parent_cmdline=fake_cmd_worker, is_test_fixture=True
+            )
+        self.assertIn("unauthorized worker invocation", str(cm.exception))
+
+        # 6c. Negative test: Reparented to PID 1 fails closed
+        r_fd, w_fd = os.pipe()
+        os.write(w_fd, secret_bytes)
+        os.close(w_fd)
+        with self.assertRaises(priv_helper.PrivilegedHelperError) as cm:
+            priv_helper.authenticate_measure_s5_worker(
+                r_fd, valid_hash, parent_pid=1, is_test_fixture=True
+            )
+        self.assertIn("invalid parent PID", str(cm.exception))
+
+        # 7. Positive test: Authentic coordinator parent cmdline succeeds under test fixture
+        r_fd, w_fd = os.pipe()
+        os.write(w_fd, secret_bytes)
+        os.close(w_fd)
+        genuine_cmd = [
+            "/usr/bin/python3", "-I", "/usr/local/libexec/ps028/privileged_helper.py",
+            "measure-s5", "--target-ip", "2001:db8:2::10", "--port", "80"
+        ]
+        priv_helper.authenticate_measure_s5_worker(
+            r_fd, valid_hash, parent_pid=42, parent_cmdline=genuine_cmd, is_test_fixture=True
+        )
+
+        # 8. Sudoers policy verification: worker action remains strictly absent
+        deploy_script = (REPO_ROOT / "lab" / "deploy_privileged_helper.sh").read_text(encoding="utf-8")
+        self.assertNotIn("measure-s5-worker", deploy_script)
+        sudoers_doc = (REPO_ROOT / "docs" / "phase-cd" / "sudoers_configuration.md").read_text(encoding="utf-8")
+        self.assertNotIn("measure-s5-worker", sudoers_doc)
+
+        # 9. Direct user invocation via run_helper_action is prohibited both as root and non-root
+        with patch("os.geteuid", return_value=0):
+            with self.assertRaises(priv_helper.PrivilegedHelperError) as cm:
+                priv_helper.run_helper_action("measure-s5-worker")
+            self.assertIn("prohibited", str(cm.exception).lower())
+
+        with patch("os.geteuid", return_value=1000):
+            with self.assertRaises(priv_helper.PrivilegedHelperError) as cm:
+                priv_helper.run_helper_action("measure-s5-worker")
+            self.assertIn("prohibited", str(cm.exception).lower())
+
+    def test_duplicate_argument_rejection_across_subcommands(self):
+        """StrictArgumentParser rejects duplicate scalar options, boolean flags, and option aliases."""
+        parser = priv_helper.build_parser()
+
+        duplicate_test_cases = [
+            # Repeated scalar options
+            (["apply-scenario", "--scenario", "S0", "--scenario", "S1"], "--scenario"),
+            (["apply-scenario", "--scenario", "S0", "--scenarios-path", "/a", "--scenarios-path", "/b"], "--scenarios-path"),
+            (["start-capture", "--netns", "ps028-cl", "--netns", "ps028-cl"], "--netns"),
+            (["stop-capture", "--pid", "100", "--pid", "200", "--pcap", "/tmp/t.pcap"], "--pid"),
+            (["stop-capture", "--pid", "100", "--pcap", "/tmp/a.pcap", "--pcap", "/tmp/b.pcap"], "--pcap"),
+            (["start-dns", "--bind", "10.0.1.1", "--bind", "10.0.1.2"], "--bind"),
+            (["start-dns", "--port", "53", "--port", "5353"], "--port"),
+            (["start-nginx", "--repo-root", "/tmp", "--repo-root", "/var/tmp"], "--repo-root"),
+            (["launch-snap-browser", "--reuid", "1000", "--reuid", "1001", "--regid", "1000", "/usr/bin/google-chrome"], "--reuid"),
+            (["launch-snap-browser", "--reuid", "1000", "--regid", "1000", "--regid", "1001", "/usr/bin/google-chrome"], "--regid"),
+            (["launch-snap-browser", "--reuid", "1000", "--regid", "1000", "--resolver-ip", "10.0.1.1", "--resolver-ip", "10.0.1.2", "/usr/bin/google-chrome"], "--resolver-ip"),
+            (["measure-s5", "--target-ip", "2001:db8:2::10", "--target-ip", "2001:db8:2::10"], "--target-ip"),
+            (["measure-s5", "--port", "80", "--port", "8080"], "--port"),
+            # Repeated boolean flags
+            (["apply-scenario", "--scenario", "S0", "--caller-holds-lock", "--caller-holds-lock"], "--caller-holds-lock"),
+            (["restore-baseline", "--caller-holds-lock", "--caller-holds-lock"], "--caller-holds-lock"),
+            (["verify-baseline", "--caller-holds-lock", "--caller-holds-lock"], "--caller-holds-lock"),
+            (["start-capture", "--caller-holds-lock", "--caller-holds-lock"], "--caller-holds-lock"),
+            (["stop-capture", "--pid", "100", "--pcap", "/tmp/t.pcap", "--caller-holds-lock", "--caller-holds-lock"], "--caller-holds-lock"),
+            # Option alias duplication (--probe-count vs --probes)
+            (["measure-s5", "--probe-count", "10", "--probes", "20"], "--probes"),
+        ]
+
+        for argv, expected_dup in duplicate_test_cases:
+            with self.subTest(argv=argv, expected_dup=expected_dup):
+                with self.assertRaises(SystemExit):
+                    with patch("sys.stderr"):
+                        parser.parse_args(argv)
+
+        # Confirm valid invocations without duplicates parse cleanly
+        valid_argv = ["apply-scenario", "--scenario", "S0", "--caller-holds-lock"]
+        res = parser.parse_args(valid_argv)
+        self.assertEqual(res.scenario, "S0")
+        self.assertTrue(res.caller_holds_lock)
 
 
 if __name__ == "__main__":

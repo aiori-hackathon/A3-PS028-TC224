@@ -34,4 +34,4 @@ fi
 # ------------------------------------------------------------------------------
 # Delegate to Python Teardown Controller
 # ------------------------------------------------------------------------------
-exec python3 "${SCRIPT_DIR}/teardown.py" "$@"
+exec /usr/bin/python3 -I "${SCRIPT_DIR}/teardown.py" "$@"

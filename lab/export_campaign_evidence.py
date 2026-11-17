@@ -392,12 +392,16 @@ def export_attempts_ledger(
     campaign_dir: Path = DEFAULT_CAMPAIGN_DIR,
     output_dir: Path = DEFAULT_OUTPUT_DIR,
     manifest_path: Optional[Path] = None,
-    rederived_dir: Optional[Path] = DEFAULT_REDERIVED_DIR,
+    rederived_dir: Optional[Path] = None,
 ) -> Tuple[Path, Path]:
     """
     Reconciles campaign manifest, rederived results, and failed attempt records
     into deterministic attempts.csv and attempts.csv.provenance.json (282 rows).
     """
+    is_historical = (campaign_dir.resolve() == DEFAULT_CAMPAIGN_DIR.resolve())
+    if rederived_dir is None and is_historical:
+        rederived_dir = DEFAULT_REDERIVED_DIR
+
     if manifest_path is None:
         manifest_path = campaign_dir / "campaign_manifest.json"
 
@@ -527,9 +531,11 @@ def export_attempts_ledger(
                 "end_time": end_time,
             })
 
-    # Fail-closed assertion: exactly 282 attempts
-    if len(rows) != 282:
+    # Fail-closed assertion: exactly 282 attempts for historical campaign
+    if is_historical and len(rows) != 282:
         raise ValueError(f"Reconciliation error: expected exactly 282 attempts, got {len(rows)}")
+    elif not is_historical and len(rows) < len(slots):
+        raise ValueError(f"Reconciliation error: expected at least {len(slots)} attempts, got {len(rows)}")
 
     # Deterministic sort: (slot_index, attempt_number)
     rows.sort(key=lambda r: (int(r["slot_index"]), int(r["attempt_number"])))
@@ -1566,8 +1572,8 @@ def main() -> int:
     parser.add_argument(
         "--rederived-dir",
         type=Path,
-        default=DEFAULT_REDERIVED_DIR,
-        help="Directory containing rederived 1.1.0 trial JSONs",
+        default=None,
+        help="Directory containing rederived 1.1.0 trial JSONs (defaults to historical rederived dir only for historical campaign)",
     )
     parser.add_argument(
         "--target",
@@ -1577,6 +1583,11 @@ def main() -> int:
     )
 
     args = parser.parse_args()
+
+    # Avoid stale historical record cross-contamination: only default rederived_dir for historical campaign
+    is_historical = (args.campaign_dir.resolve() == DEFAULT_CAMPAIGN_DIR.resolve())
+    if args.rederived_dir is None and is_historical:
+        args.rederived_dir = DEFAULT_REDERIVED_DIR
 
     manifest_path = args.manifest or (args.campaign_dir / "campaign_manifest.json")
     if not manifest_path.is_file():

@@ -238,6 +238,11 @@ class TestLiveDNSQueries(unittest.TestCase):
                 time.sleep(0.05)
         if not ready:
             cls.proc.terminate()
+            try:
+                cls.proc.wait(timeout=1.0)
+            except subprocess.TimeoutExpired:
+                cls.proc.kill()
+                cls.proc.wait()
             raise RuntimeError(f"ControlledDNSServer failed to start on port {cls.port}")
 
     @classmethod
@@ -248,6 +253,7 @@ class TestLiveDNSQueries(unittest.TestCase):
                 cls.proc.wait(timeout=2.0)
             except subprocess.TimeoutExpired:
                 cls.proc.kill()
+                cls.proc.wait()
         shutil.rmtree(cls.temp_dir, ignore_errors=True)
 
     def test_live_resolution_and_log_preservation(self):

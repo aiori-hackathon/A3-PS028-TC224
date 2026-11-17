@@ -31,11 +31,11 @@
     }
   ],
   "required_scenarios": [
-    {"scenario_id": "S0", "description": "Dual-stack healthy baseline (10ms RTT per link)", "repetitions": 20},
+    {"scenario_id": "S0", "description": "Dual-stack healthy baseline (20ms total RTT, 10ms per link)", "repetitions": 20},
     {"scenario_id": "S1", "description": "IPv6 SYN blackhole (unresponsive primary path)", "repetitions": 20},
     {"scenario_id": "S2", "description": "IPv6 TCP RST rejection (active failure)", "repetitions": 20},
-    {"scenario_id": "S3", "description": "Symmetric link delay (100ms RTT)", "repetitions": 20},
-    {"scenario_id": "S4", "description": "Asymmetric link delay (IPv6 600ms, IPv4 10ms)", "repetitions": 20},
+    {"scenario_id": "S3", "description": "Symmetric link delay (150ms RTT, 75ms per link, IPv4 20ms RTT)", "repetitions": 20},
+    {"scenario_id": "S4", "description": "Asymmetric link delay (IPv6 600ms RTT, IPv4 20ms RTT)", "repetitions": 20},
     {"scenario_id": "S5", "description": "50% stochastic IPv6 SYN loss (exact binomial acceptance)", "repetitions": 20},
     {"scenario_id": "S6", "description": "Delayed AAAA DNS resolution (500ms delay on AAAA)", "repetitions": 20}
   ],

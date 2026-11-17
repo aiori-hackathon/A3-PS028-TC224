@@ -42,7 +42,7 @@ The partner replication manifest references historical project amendments. Their
 
 The partner host MUST run a Linux-based operating system (bare-metal Ubuntu 24.04 LTS or WSL2 with systemd) with kernel `iproute2`, `tc-netem`, and `nftables` support.
 
-### 3.1 Verify Host Capabilities
+### 3.1 Verify Host Capabilities & Service Identity
 ```bash
 # Verify Python version >= 3.10
 python3 --version
@@ -53,14 +53,26 @@ which ip tc nft tshark nginx
 # Verify browser binaries match exact pinned versions
 /usr/bin/google-chrome --version  # Expected: Google Chrome 156.0.8078.73
 /usr/bin/firefox --version        # Expected: Mozilla Firefox 159.0
+
+# Verify or provision dedicated Nginx service user 'ps028-sv'
+# For privilege isolation, Nginx worker processes run strictly under ps028-sv (never the operator account)
+id -u ps028-sv || sudo useradd --system --no-create-home -s /usr/sbin/nologin ps028-sv
+
+# Verify pre-topology host network baseline snapshot
+# Expected baseline digest: 523ae7224a35323e87ff362058418da9873e0c64849ebfd88dad7cae6b62c0e9
+sha256sum /home/indrani/.local/state/ps028/host-network-before-topology.txt
 ```
 
-### 3.2 Configure Non-Interactive Sudoers
-To execute network shaping and namespace operations without interactive password prompts, install the bounded helper rule per `docs/phase-cd/sudoers_configuration.md`:
+### 3.2 Configure Non-Interactive Sudoers & Runtime Environment
+To execute network shaping, packet captures, and namespace operations without interactive password prompts, deploy the hardened privileged helper and sudoers rule using the verified deployment script (see `docs/phase-cd/sudoers_configuration.md` for complete architecture and manual audit procedures):
 ```bash
-sudo cp docs/phase-cd/sudoers.d/ps028_partner /etc/sudoers.d/ps028_partner
-sudo chmod 0440 /etc/sudoers.d/ps028_partner
+# 1. Inspect proposed changes in dry-run mode
+./lab/deploy_privileged_helper.sh --dry-run
+
+# 2. Deploy trusted helper under /usr/local/libexec/ps028/ and install sudoers drop-in
+sudo ./lab/deploy_privileged_helper.sh --user indrani
 ```
+The script installs `/usr/local/libexec/ps028/privileged_helper.py` (and companion configs), provisions dedicated runtime state directories (`/run/ps028`, `/var/log/ps028`, `/var/lib/ps028` owned by `root:root` mode `0755`), installs `/etc/sudoers.d/ps028-helper` (mode `0440`), and verifies syntax with `visudo -cf`.
 
 ---
 
@@ -92,25 +104,19 @@ python3 lab/self_test_scenarios.py --bundle --output-dir lab/derived/partner-rep
 Verify that all preflight baseline checks report `[OK]`.
 
 ### Step 2: Initialize Partner Campaign
-Create an independent campaign directory dedicated to the partner replication:
+Create an independent campaign directory dedicated to the partner replication. Note that `--browsers` and `--scenarios` require comma-separated values:
 ```bash
 PARTNER_CAMPAIGN="ps028-partner-$(hostname)-$(date +%Y%m%d)"
 python3 lab/run_campaign.py \
   --output-dir "lab/campaigns/${PARTNER_CAMPAIGN}" \
   --repetitions 20 \
-  --browsers google-chrome firefox \
-  --scenarios S0 S1 S2 S3 S4 S5 S6
+  --browsers "google-chrome,firefox" \
+  --scenarios "S0,S1,S2,S3,S4,S5,S6"
 ```
 
 ### Step 3: Run Deterministic Post-Campaign Dissection & Evidence Export
-Upon completion of all 280 planned trials, execute the deterministic analysis and evidence exporter:
+Upon completion of all 280 planned trials, execute the deterministic analysis and evidence exporter. Partner trials natively generate Schema 1.1.0 JSONs; do NOT run the historical rederivation script (`lab/rederive_historical_campaign.py` is reserved exclusively for historical Phase C campaign data):
 ```bash
-# 1. Rederive metrics under Schema 1.1.0
-python3 lab/rederive_historical_campaign.py \
-  --campaign-dir "lab/campaigns/${PARTNER_CAMPAIGN}" \
-  --output-dir "lab/derived/partner-replication/rederived"
-
-# 2. Export standardized ledgers and Amendment A13 provenance sidecars
 python3 lab/export_campaign_evidence.py \
   --campaign-dir "lab/campaigns/${PARTNER_CAMPAIGN}" \
   --output-dir "lab/derived/partner-replication" \
@@ -118,11 +124,18 @@ python3 lab/export_campaign_evidence.py \
 ```
 
 ### Step 4: Cryptographic Package & Handover
-Compute the cryptographic integrity manifest and package the campaign evidence:
+Compute the cryptographic integrity manifest and package the campaign evidence outside the campaign directory:
 ```bash
+# 1. Compute checksums of campaign contents (excluding checksum manifests and archives)
 cd "lab/campaigns/${PARTNER_CAMPAIGN}"
-find . -type f ! -name "*.sha256" -exec sha256sum {} + | sort -k2 > partner_evidence.sha256
-tar -czvf "${PARTNER_CAMPAIGN}.tar.gz" .
+find . -type f ! -name "*.sha256" ! -name "*.tar.gz" -exec sha256sum {} + | sort -k2 > partner_evidence.sha256
+
+# 2. Package archive from parent directory to avoid recursive inclusion
+cd ..
+tar -czvf "${PARTNER_CAMPAIGN}.tar.gz" "${PARTNER_CAMPAIGN}"
+
+# 3. Compute SHA-256 digest of the final handover archive
+sha256sum "${PARTNER_CAMPAIGN}.tar.gz" > "${PARTNER_CAMPAIGN}.tar.gz.sha256"
 ```
 
-Submit the archive and SHA-256 digest to the lead repository maintainer. The maintainer will inspect the authentic cryptographic evidence and update `docs/phase-cd/partner_replication_manifest.json` from `PENDING_AUTHENTIC_PARTNER_EVIDENCE` to `VERIFIED`.
+Submit the archive (`${PARTNER_CAMPAIGN}.tar.gz`) and SHA-256 digest (`${PARTNER_CAMPAIGN}.tar.gz.sha256`) to the lead repository maintainer. The maintainer will inspect the authentic cryptographic evidence and update `docs/phase-cd/partner_replication_manifest.json` from `PENDING_AUTHENTIC_PARTNER_EVIDENCE` to `VERIFIED`.

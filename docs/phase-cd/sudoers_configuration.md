@@ -75,6 +75,11 @@ PS028_OPERATOR ALL=(root) NOPASSWD: /usr/bin/python3 -I /usr/local/libexec/ps028
 PS028_OPERATOR ALL=(root) NOPASSWD: /usr/bin/python3 -I /usr/local/libexec/ps028/privileged_helper.py launch-snap-browser *
 PS028_OPERATOR ALL=(root) NOPASSWD: /usr/bin/python3 -I /usr/local/libexec/ps028/privileged_helper.py start-nginx *
 PS028_OPERATOR ALL=(root) NOPASSWD: /usr/bin/python3 -I /usr/local/libexec/ps028/privileged_helper.py stop-nginx *
+PS028_OPERATOR ALL=(root) NOPASSWD: /usr/bin/python3 -I /usr/local/libexec/ps028/privileged_helper.py status-nginx *
+PS028_OPERATOR ALL=(root) NOPASSWD: /usr/bin/python3 -I /usr/local/libexec/ps028/privileged_helper.py start-dns *
+PS028_OPERATOR ALL=(root) NOPASSWD: /usr/bin/python3 -I /usr/local/libexec/ps028/privileged_helper.py stop-dns *
+PS028_OPERATOR ALL=(root) NOPASSWD: /usr/bin/python3 -I /usr/local/libexec/ps028/privileged_helper.py status-dns *
+PS028_OPERATOR ALL=(root) NOPASSWD: /usr/bin/python3 -I /usr/local/libexec/ps028/privileged_helper.py reload-dns *
 ```
 
 ### Parameterized Template for Multi-User or Alternative Environments
@@ -97,6 +102,11 @@ If the repository is checked out by a different user or into an alternative work
 %USER% ALL=(root) NOPASSWD: %PYTHON_BIN% -I %DEPLOY_ROOT%/privileged_helper.py launch-snap-browser *
 %USER% ALL=(root) NOPASSWD: %PYTHON_BIN% -I %DEPLOY_ROOT%/privileged_helper.py start-nginx *
 %USER% ALL=(root) NOPASSWD: %PYTHON_BIN% -I %DEPLOY_ROOT%/privileged_helper.py stop-nginx *
+%USER% ALL=(root) NOPASSWD: %PYTHON_BIN% -I %DEPLOY_ROOT%/privileged_helper.py status-nginx *
+%USER% ALL=(root) NOPASSWD: %PYTHON_BIN% -I %DEPLOY_ROOT%/privileged_helper.py start-dns *
+%USER% ALL=(root) NOPASSWD: %PYTHON_BIN% -I %DEPLOY_ROOT%/privileged_helper.py stop-dns *
+%USER% ALL=(root) NOPASSWD: %PYTHON_BIN% -I %DEPLOY_ROOT%/privileged_helper.py status-dns *
+%USER% ALL=(root) NOPASSWD: %PYTHON_BIN% -I %DEPLOY_ROOT%/privileged_helper.py reload-dns *
 ```
 
 ---
@@ -106,7 +116,7 @@ If the repository is checked out by a different user or into an alternative work
 The sudoers configuration delegates permissions exclusively to `lab/privileged_helper.py`. Inside `privileged_helper.py`, strict defense-in-depth mechanisms prevent privilege escalation or unintended system state modification:
 
 1. **Strict Subcommand Validation**:
-   - Only explicitly registered argparse subcommands (`apply-scenario`, `restore-baseline`, `apply-dns`, `restore-dns`, `verify-baseline`, `start-capture`, `stop-capture`, `check-auth`, `setup-s5-counters`, `read-s5-counters`, `measure-s5`, `launch-snap-browser`) are accepted.
+   - Only explicitly registered argparse subcommands (`apply-scenario`, `restore-baseline`, `apply-dns`, `restore-dns`, `verify-baseline`, `start-capture`, `stop-capture`, `check-auth`, `setup-s5-counters`, `read-s5-counters`, `measure-s5`, `launch-snap-browser`, `start-nginx`, `stop-nginx`, `status-nginx`, `start-dns`, `stop-dns`, `status-dns`, `reload-dns`) are accepted.
    - Any unlisted command line argument causes `argparse` to immediately exit with status code 2 without executing any privileged operations.
 
 2. **No Shell Execution (`shell=True` Prohibited)**:
@@ -133,15 +143,52 @@ The sudoers configuration delegates permissions exclusively to `lab/privileged_h
    - `--oifname`: strictly restricted to allowlist `{"ps028-rt-sv6", "ps028-rt-sv4"}`.
    - `--netns`: strictly restricted to allowlist `{"ps028-cl"}` for probes.
 
-6. **Privilege Dropping for Unprivileged Operations**:
+6. **Privilege Dropping for Unprivileged Evidence**:
    - S5 TCP probe sockets inside `ps028-cl` run with unprivileged user permissions (UID 1000).
-   - Packet capture files (`.pcap`) and JSONL log files are chowned back to the invoking user (`UserIdentity.uid, gid`) immediately upon creation.
+   - Packet capture files (`.pcap`) and capture logs are opened via descriptor validation with `O_CREAT | O_EXCL | O_NOFOLLOW`, verified `st_nlink == 1`, ownership transferred to the invoking user (`UserIdentity.uid, gid`), and written by unprivileged subprocesses (`tcpdump -Z target_user -w -`).
+
+7. **Three-Tier Path Separation Architecture**:
+   - **Tier 1 (Trusted Executable Root)**: `/usr/local/libexec/ps028/` (owned by `root:root`, mode `0755`/`0750`/`0644`).
+   - **Tier 2 (Dedicated Privileged Runtime State)**: `/run/ps028` (PIDs, lock files, resolver markers), `/var/log/ps028` (daemon service logs), and `/var/lib/ps028` (persistent state). All owned by `root:root`, mode `0755`. Privileged daemons and helpers are strictly forbidden from writing runtime state into user workspaces.
+   - **Tier 3 (Unprivileged Evidence Output)**: User workspace (`lab/campaigns/...` or `results/...`) where all data files are written with unprivileged user ownership under dropped privileges.
+
+8. **Dedicated Nginx Worker Identity (`ps028-sv`)**:
+   - Master process runs with root privileges strictly to bind ports 80 and 443 inside network namespace `ps028-sv`.
+   - Worker processes drop privileges immediately to dedicated system service user `ps028-sv` via directive `user ps028-sv;`.
+   - The worker process has read-only access to `/usr/local/libexec/ps028/lab/www/index.html` (mode `0644`).
+   - The worker process is strictly prohibited from running under the operator account (`indrani`) and has zero write access to helper binaries, checkout directories, or host filesystems.
+
+9. **Browser Executable Confinement & Ancestor Verification**:
+   - `launch-snap-browser` strictly enforces approved canonical paths (`/usr/bin/google-chrome`, `/usr/bin/firefox`, `/snap/bin/chromium`, etc.).
+   - All symlinks are resolved prior to validation.
+   - Executables and all ancestor directories must be root-owned and not world-writable.
+   - Basenames are matched against `ALLOWED_BROWSER_BINARIES` and reject all shells, interpreters, and utilities (`PROHIBITED_BROWSER_EXECUTABLES`).
+
+10. **Race-Free Process Signalling via `pidfd`**:
+    - All process signaling (`SIGTERM`, `SIGHUP`, `SIGQUIT`, `SIGKILL`) utilizes Linux `pidfd_open` and `pidfd_send_signal`.
+    - Identity, command line, and network namespace are validated while holding the open kernel file descriptor.
+    - Prevents PID reuse attacks and eliminates validation-to-signal race conditions.
+
+11. **Genuinely Non-Destructive Status Inspection**:
+    - `status-dns` and `status-nginx` perform read-only inspection of process state and socket bindings.
+    - Status reporting never deletes or alters PID files on disk (reporting states `MISSING`, `MALFORMED`, `STALE`, `MISMATCHED`, or `VALID`).
 
 ---
 
 ## 5. Step-by-Step Installation Runbook
 
 System administrators should execute the following sequence to install and verify the configuration:
+
+### Preferred Method: Automated Deployment Script
+```bash
+# 1. Validate in dry-run mode
+./lab/deploy_privileged_helper.sh --dry-run
+
+# 2. Deploy helper and configure sudoers
+sudo ./lab/deploy_privileged_helper.sh --user promotheshchatterjee
+```
+
+### Alternative Method: Manual Configuration
 
 ### Step 1: Create the Sudoers Drop-in File
 Use `visudo` to create the drop-in file safely:
@@ -174,7 +221,7 @@ As the unprivileged operator user, test non-interactive authentication:
 sudo -k
 
 # Verify non-interactive execution via check-auth
-sudo -n /usr/bin/python3 <repo_root>/lab/privileged_helper.py check-auth
+sudo -n /usr/bin/python3 -I /usr/local/libexec/ps028/privileged_helper.py check-auth
 ```
 Expected output:
 ```json
@@ -188,13 +235,18 @@ Expected output:
 To remove the privileged helper authorization upon lab decommissioning or project completion:
 
 ```bash
+# Automated uninstallation via deployment script:
+sudo ./lab/deploy_privileged_helper.sh --uninstall
+
+# Or manual removal:
 sudo rm -f /etc/sudoers.d/ps028-helper
+sudo rm -rf /usr/local/libexec/ps028 /run/ps028 /var/log/ps028 /var/lib/ps028
 sudo visudo -c
 ```
 Verify that `sudo -n` no longer allows passwordless execution of the helper script:
 ```bash
 sudo -k
-sudo -n /usr/bin/python3 <repo_root>/lab/privileged_helper.py check-auth
+sudo -n /usr/bin/python3 -I /usr/local/libexec/ps028/privileged_helper.py check-auth
 ```
 Expected output:
 ```text

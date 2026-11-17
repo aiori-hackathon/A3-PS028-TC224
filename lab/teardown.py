@@ -40,9 +40,13 @@ if str(REPO_ROOT) not in sys.path:
 import lab.concurrency as concurrency
 import lab.impair as impair
 
-DNS_PID_FILE = SCRIPT_DIR / "dns.pid"
-NGINX_PID_FILE = SCRIPT_DIR / "nginx.pid"
-RESOLV_MARKER = SCRIPT_DIR / ".resolv_installed_by_ps028"
+DEFAULT_DNS_PID_FILE = Path("/run/ps028/dns.pid")
+DEFAULT_NGINX_PID_FILE = Path("/run/ps028/nginx.pid")
+DEFAULT_RESOLV_MARKER = Path("/run/ps028/.resolv_installed_by_ps028")
+
+DNS_PID_FILE = DEFAULT_DNS_PID_FILE
+NGINX_PID_FILE = DEFAULT_NGINX_PID_FILE
+RESOLV_MARKER = DEFAULT_RESOLV_MARKER
 NETNS_RESOLV_FILE = Path("/etc/netns/ps028-cl/resolv.conf")
 NETNS_RESOLV_DIR = Path("/etc/netns/ps028-cl")
 RESOLV_SOURCE = SCRIPT_DIR / "cl_resolv.conf"
@@ -195,14 +199,29 @@ def stop_process_by_pid_file(
             pid_file.unlink(missing_ok=True)
             return True, None
 
-    # Send SIGTERM
+    # Send SIGTERM via race-free pidfd signaling
     try:
-        os.kill(pid, signal.SIGTERM)
+        from lab.privileged_helper import safe_signal_process
+        cmd_sub = "dns_server.py" if "dns" in process_name.lower() else "nginx"
+        netns_val = "ps028-rt" if "dns" in process_name.lower() else "ps028-sv"
+        sig_ok, sig_reason = safe_signal_process(
+            pid,
+            signal.SIGTERM,
+            expected_cmd_substring=cmd_sub,
+            expected_netns=netns_val
+        )
+        if not sig_ok and "already terminated" not in sig_reason and "terminated before" not in sig_reason:
+            impair.log_warn(f"Safe signaling failed for PID {pid}: {sig_reason}")
         time.sleep(0.2)
         try:
-            os.kill(pid, 0)
-            time.sleep(0.3)
-            os.kill(pid, signal.SIGKILL)
+            if _is_process_alive(pid):
+                time.sleep(0.3)
+                safe_signal_process(
+                    pid,
+                    signal.SIGKILL,
+                    expected_cmd_substring=cmd_sub,
+                    expected_netns=netns_val
+                )
         except OSError:
             pass
     except ProcessLookupError:
@@ -399,6 +418,8 @@ def teardown_lab(
     interfaces: Optional[List[str]] = None,
     existing_namespaces: Optional[List[str]] = None,
     process_verifier: Optional[Callable[[int, str], Tuple[bool, Optional[str]]]] = None,
+    dns_pid_file: Optional[Path] = None,
+    nginx_pid_file: Optional[Path] = None,
 ) -> Dict[str, Any]:
     """
     Execute complete safe teardown under exclusive lab-wide lock.
@@ -510,8 +531,8 @@ def teardown_lab(
         # Stage 2: Stop Lab-Managed Services
         if topo_status != "ABSENT":
             impair.log_info("Teardown Stage 2: Stopping verified lab-managed services...")
-            dns_pid_path = SCRIPT_DIR / "dns.pid"
-            nginx_pid_path = SCRIPT_DIR / "nginx.pid"
+            dns_pid_path = dns_pid_file or DEFAULT_DNS_PID_FILE
+            nginx_pid_path = nginx_pid_file or DEFAULT_NGINX_PID_FILE
             dns_ok, dns_err = stop_process_by_pid_file(
                 dns_pid_path, "Controlled DNS Server", dry_run=dry_run, verifier=process_verifier
             )

@@ -478,25 +478,52 @@ class TestEvidenceSeparationRigor(unittest.TestCase):
     def test_ephemeral_port_0_prebinding_timeout(self):
         """
         Challenge 2.6: Socket pre-binding to ephemeral port 0 on TIMEOUT.
-        Verifies local ephemeral port is preserved when target packet is dropped.
+        Deterministic unit test: verifies real socket binding to port 0, kernel
+        ephemeral port allocation, and exception mapping to TIMEOUT when connect()
+        times out, using a narrow connect double to ensure deterministic unit semantics.
+        NOTE: This is a unit test of timeout-result handling, not live TCP timeout evidence.
         """
-        res = priv_helper.probe_single_socket(
-            probe_id=103,
-            target_ip="192.0.2.1",  # TEST-NET-1 (non-routable/blackhole)
-            target_port=80,
-            timeout=0.1,
-            af=socket.AF_INET
-        )
+        def _timeout_connect(sock_self, addr):
+            raise socket.timeout("timed out")
+
+        with patch.object(socket.socket, "connect", _timeout_connect):
+            res = priv_helper.probe_single_socket(
+                probe_id=103,
+                target_ip="192.0.2.1",
+                target_port=80,
+                timeout=0.1,
+                af=socket.AF_INET
+            )
         self.assertEqual(res["probe_id"], 103)
         self.assertEqual(res["connect_outcome"], "TIMEOUT")
         self.assertEqual(res["outcome"], "TIMEOUT")
         self.assertEqual(res["errno"], errno.ETIMEDOUT)
         self.assertIn("timed out", res["error_message"].lower())
 
-        # Local endpoint was captured before timeout occurred
+        # Local endpoint was captured via real kernel bind(0) before timeout occurred
         local_ep = res["local_endpoint"]
         self.assertIsInstance(local_ep["port"], int)
-        self.assertGreater(local_ep["port"], 0, "Ephemeral port must be allocated even on TIMEOUT")
+        self.assertGreater(local_ep["port"], 0, "Ephemeral port must be allocated (> 0) even on TIMEOUT")
+
+    @unittest.skipUnless(
+        os.environ.get("PS028_LIVE_TOPOLOGY_READY") == "1",
+        "Authentic TCP timeout validation requires explicitly controlled packet-drop topology environment"
+    )
+    def test_live_network_ephemeral_port_0_prebinding_timeout_integration(self):
+        """
+        Network-integration acceptance test: verifies authentic TCP timeout under controlled packet drop.
+        Gated on an authorized topology stage; does not rely on documentation IP assumptions.
+        """
+        res = priv_helper.probe_single_socket(
+            probe_id=103,
+            target_ip="2001:db8:2::10",
+            target_port=80,
+            timeout=0.1,
+            af=socket.AF_INET6
+        )
+        self.assertEqual(res["connect_outcome"], "TIMEOUT")
+        self.assertEqual(res["errno"], errno.ETIMEDOUT)
+        self.assertGreater(res["local_endpoint"]["port"], 0)
 
     def test_ephemeral_port_0_prebinding_ipv6(self):
         """

@@ -74,8 +74,10 @@ SCHEMA_VERSION = "1.1.0"
 SUPPORTED_SCHEMA_VERSIONS = frozenset({"1.0.0", "1.1.0"})
 DEFAULT_SCENARIOS_PATH = SCRIPT_DIR / "scenarios.yaml"
 DEFAULT_TRIALS_DIR = SCRIPT_DIR / "trials"
-DNS_PID_FILE = SCRIPT_DIR / "dns.pid"
-NGINX_PID_FILE = SCRIPT_DIR / "nginx.pid"
+DEFAULT_DNS_PID_FILE = Path("/run/ps028/dns.pid")
+DEFAULT_NGINX_PID_FILE = Path("/run/ps028/nginx.pid")
+DNS_PID_FILE = DEFAULT_DNS_PID_FILE
+NGINX_PID_FILE = DEFAULT_NGINX_PID_FILE
 CLIENT_NETNS = "ps028-cl"
 ROUTER_NETNS = "ps028-rt"
 SERVER_NETNS = "ps028-sv"
@@ -306,7 +308,9 @@ def _query_browser_version(executable_path: str) -> str:
 def validate_lab_readiness(
     is_simulation: bool = False,
     skip_baseline: bool = False,
-    browser_pref: Optional[str] = None
+    browser_pref: Optional[str] = None,
+    dns_pid_file: Optional[Path] = None,
+    nginx_pid_file: Optional[Path] = None
 ) -> Dict[str, Any]:
     """
     Validates that the lab environment is ready for a measurement trial.
@@ -373,31 +377,41 @@ def validate_lab_readiness(
                 "Recreate topology and start services before running live measurement."
             )
 
+        # Check runtime directory
+        if not Path("/run/ps028").is_dir():
+            report["status"] = "FAIL"
+            report["errors"].append(
+                "Production runtime directory /run/ps028 is missing. "
+                "Execute 'sudo ./lab/deploy_privileged_helper.sh' to initialize runtime directories before running trials."
+            )
+
         # 4. Check DNS Server
         dns_running = False
-        if DNS_PID_FILE.is_file():
+        target_dns_pid = dns_pid_file or DEFAULT_DNS_PID_FILE
+        if target_dns_pid.is_file():
             try:
-                pid = int(DNS_PID_FILE.read_text(encoding="utf-8").strip())
+                pid = int(target_dns_pid.read_text(encoding="utf-8").strip())
                 dns_running = _is_pid_alive(pid)
             except (OSError, ValueError):
                 dns_running = False
         report["checks"]["dns_server"] = {"running": dns_running}
         if not dns_running:
             report["status"] = "FAIL"
-            report["errors"].append("Controlled DNS server is not running (dns.pid inactive or missing)")
+            report["errors"].append(f"Controlled DNS server is not running ({target_dns_pid} inactive or missing)")
 
         # 5. Check Nginx Server
         nginx_running = False
-        if NGINX_PID_FILE.is_file():
+        target_nginx_pid = nginx_pid_file or DEFAULT_NGINX_PID_FILE
+        if target_nginx_pid.is_file():
             try:
-                pid = int(NGINX_PID_FILE.read_text(encoding="utf-8").strip())
+                pid = int(target_nginx_pid.read_text(encoding="utf-8").strip())
                 nginx_running = _is_pid_alive(pid)
             except (OSError, ValueError):
                 nginx_running = False
         report["checks"]["nginx"] = {"running": nginx_running}
         if not nginx_running:
             report["status"] = "FAIL"
-            report["errors"].append("Measurement Nginx server is not running (nginx.pid inactive or missing)")
+            report["errors"].append(f"Measurement Nginx server is not running ({target_nginx_pid} inactive or missing)")
 
         # 6. Check sudo authorization for live operations
         import lab.preflight as preflight
@@ -807,14 +821,18 @@ class CaptureProcess:
         raise subprocess.TimeoutExpired(cmd=["tcpdump"], timeout=timeout or 0)
 
     def send_signal(self, sig: int) -> None:
+        import lab.privileged_helper as priv_helper
         target = self._ps028_tcpdump_pid or self.pid
         if is_safe_capture_process(target, is_parent=(target == self.pid), expected_pcap=self._ps028_pcap_path):
-            try:
-                os.kill(target, sig)
-            except PermissionError:
-                subprocess.run(["sudo", "-n", "kill", f"-{sig}", str(target)], capture_output=True, check=False)
-            except OSError:
-                pass
+            sig_ok, sig_msg = priv_helper.safe_signal_process(
+                target,
+                sig,
+                is_capture=True,
+                is_parent=(target == self.pid),
+                expected_pcap=self._ps028_pcap_path
+            )
+            if not sig_ok:
+                impair.log_warn(f"Safe signal delivery failed for capture PID {target}: {sig_msg}")
 
     def terminate(self) -> None:
         self.send_signal(signal.SIGTERM)
@@ -993,6 +1011,7 @@ def stop_packet_capture(
     7. Confirms that tcpdump has fully exited and PCAP file is finalized.
     Returns True on confirmed successful shutdown, or raises CaptureShutdownError.
     """
+    import lab.privileged_helper as priv_helper
     if proc is None:
         return True
 
@@ -1017,11 +1036,9 @@ def stop_packet_capture(
     # Route through privileged helper when running unprivileged with CaptureProcess or capture handle dict
     if os.geteuid() != 0 and isinstance(proc, (CaptureProcess, dict)):
         import lab.privileged_helper as priv_helper
-        stop_args = ["--pid", str(target_pid), "--timeout", str(timeout)]
-        if pcap_path:
-            stop_args.extend(["--pcap", str(pcap_path)])
-        if not verify_pcap:
-            stop_args.append("--no-verify-pcap")
+        if not pcap_path:
+            raise CaptureShutdownError("pcap_path is required to stop privileged capture")
+        stop_args = ["--pid", str(target_pid), "--pcap", str(pcap_path), "--timeout", str(timeout)]
         ident = identity.resolve_invoking_identity()
         stop_args.extend(["--owner-user", ident.username])
 
@@ -1086,17 +1103,19 @@ def stop_packet_capture(
         signaled = False
         if isinstance(tcpdump_pid, int):
             if is_safe_capture_process(tcpdump_pid, is_parent=(tcpdump_pid == proc_pid), expected_pcap=pcap_path):
-                try:
-                    os.kill(tcpdump_pid, signal.SIGINT)
+                sig_ok, sig_msg = priv_helper.safe_signal_process(
+                    tcpdump_pid,
+                    signal.SIGINT,
+                    is_capture=True,
+                    is_parent=(tcpdump_pid == proc_pid),
+                    expected_pcap=pcap_path
+                )
+                if sig_ok:
                     signaled = True
-                except PermissionError:
-                    try:
-                        subprocess.run(["sudo", "-n", "kill", "-INT", str(tcpdump_pid)], capture_output=True, check=False)
-                        signaled = True
-                    except Exception:
-                        pass
-                except (ProcessLookupError, OSError):
-                    pass
+                elif "terminated before" in sig_msg or "already terminated" in sig_msg:
+                    tcpdump_done = True
+                else:
+                    impair.log_warn(f"Safe signal delivery failed for tcpdump PID {tcpdump_pid}: {sig_msg}")
             elif _is_pid_alive(tcpdump_pid):
                 unrelated_detected = True
                 impair.log_warn(
@@ -1165,15 +1184,13 @@ def stop_packet_capture(
             for p in (tcpdump_pid, proc_pid):
                 if isinstance(p, int):
                     if is_safe_capture_process(p, is_parent=(p == proc_pid), expected_pcap=pcap_path):
-                        try:
-                            os.kill(p, signal.SIGTERM)
-                        except PermissionError:
-                            try:
-                                subprocess.run(["sudo", "-n", "kill", "-TERM", str(p)], capture_output=True, check=False)
-                            except Exception:
-                                pass
-                        except (ProcessLookupError, OSError):
-                            pass
+                        priv_helper.safe_signal_process(
+                            p,
+                            signal.SIGTERM,
+                            is_capture=True,
+                            is_parent=(p == proc_pid),
+                            expected_pcap=pcap_path
+                        )
                     elif _is_pid_alive(p):
                         unrelated_detected = True
                         impair.log_warn(f"Refusing to signal PID {p} with SIGTERM: unrelated process")
@@ -1213,15 +1230,13 @@ def stop_packet_capture(
                 for p in (tcpdump_pid, proc_pid):
                     if isinstance(p, int):
                         if is_safe_capture_process(p, is_parent=(p == proc_pid), expected_pcap=pcap_path):
-                            try:
-                                os.kill(p, signal.SIGKILL)
-                            except PermissionError:
-                                try:
-                                    subprocess.run(["sudo", "-n", "kill", "-KILL", str(p)], capture_output=True, check=False)
-                                except Exception:
-                                    pass
-                            except (ProcessLookupError, OSError):
-                                pass
+                            priv_helper.safe_signal_process(
+                                p,
+                                signal.SIGKILL,
+                                is_capture=True,
+                                is_parent=(p == proc_pid),
+                                expected_pcap=pcap_path
+                            )
                         elif _is_pid_alive(p):
                             unrelated_detected = True
                             impair.log_warn(f"Refusing to signal PID {p} with SIGKILL: unrelated process")

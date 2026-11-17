@@ -9,14 +9,29 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-DNS_SERVER_SCRIPT="${SCRIPT_DIR}/dns_server.py"
-CONFIG_FILE="${SCRIPT_DIR}/dns_config.json"
-CONFIG_BAK="${SCRIPT_DIR}/dns_config.json.bak"
-LOG_FILE="${SCRIPT_DIR}/dns.log"
-STDERR_LOG="${SCRIPT_DIR}/dns_stderr.log"
-PID_FILE="${SCRIPT_DIR}/dns.pid"
+PYTHON_BIN="python3"
+if [[ -x "/usr/bin/python3" ]]; then
+    PYTHON_BIN="/usr/bin/python3"
+fi
+
+INSTALLED_LIBEXEC="/usr/local/libexec/ps028"
+RUN_DIR="/run/ps028"
+LOG_DIR="/var/log/ps028"
+
+DNS_SERVER_SCRIPT="${INSTALLED_LIBEXEC}/lab/dns_server.py"
+PID_FILE="${RUN_DIR}/dns.pid"
+RESOLV_MARKER="${RUN_DIR}/.resolv_installed_by_ps028"
+LOG_FILE="${LOG_DIR}/dns.log"
+STDERR_LOG="${LOG_DIR}/dns_stderr.log"
+
+if [[ -f "${INSTALLED_LIBEXEC}/lab/dns_config.json" ]]; then
+    CONFIG_FILE="${INSTALLED_LIBEXEC}/lab/dns_config.json"
+else
+    CONFIG_FILE="${SCRIPT_DIR}/dns_config.json"
+fi
+CONFIG_BAK="${CONFIG_FILE}.bak"
+
 RESOLV_CONF_SOURCE="${SCRIPT_DIR}/cl_resolv.conf"
-RESOLV_MARKER="${SCRIPT_DIR}/.resolv_installed_by_ps028"
 LOCK_FILE="${SCRIPT_DIR}/.verify_dns.lock"
 
 NS_RT="ps028-rt"
@@ -51,7 +66,7 @@ validate_config_schema() {
         return 1
     fi
 
-    python3 -c '
+    "$PYTHON_BIN" -I -c '
 import sys, json, ipaddress
 
 filepath = sys.argv[1]
@@ -176,7 +191,7 @@ verify_process_identity() {
     local resolved_script
     resolved_script="$(realpath "$DNS_SERVER_SCRIPT")"
 
-    python3 -c '
+    "$PYTHON_BIN" -I -c '
 import os, sys
 
 pid = int(sys.argv[1])
@@ -187,7 +202,7 @@ ns_name = sys.argv[3]
 try:
     with open(f"/proc/{pid}/cmdline", "rb") as f:
         args = [a.decode("utf-8", errors="replace") for a in f.read().split(b"\x00") if a]
-    if expected_script not in args:
+    if not any(expected_script in a or "dns_server.py" in a for a in args):
         sys.stderr.write("cmdline_mismatch\n")
         sys.exit(3)
 except (FileNotFoundError, ProcessLookupError):
@@ -225,7 +240,7 @@ send_verified_signal() {
     local resolved_script
     resolved_script="$(realpath "$DNS_SERVER_SCRIPT")"
 
-    python3 -c '
+    "$PYTHON_BIN" -I -c '
 import os, sys, signal, errno
 
 pid = int(sys.argv[1])
@@ -235,35 +250,27 @@ sig = getattr(signal, sig_name)
 
 # 1. Attempt pidfd acquisition
 has_pidfd_support = hasattr(os, "pidfd_open") and hasattr(signal, "pidfd_send_signal")
-pfd = None
-fallback_to_kill = False
+if not has_pidfd_support:
+    sys.stderr.write("pidfd_unsupported\n")
+    sys.exit(7)
 
-if has_pidfd_support:
-    try:
-        pfd = os.pidfd_open(pid, 0)
-    except ProcessLookupError:
-        sys.stderr.write("stale\n")
-        sys.exit(1)
-    except PermissionError:
-        sys.stderr.write("permission_denied\n")
-        sys.exit(2)
-    except OSError as e:
-        if e.errno == errno.ENOSYS:
-            fallback_to_kill = True
-        elif e.errno in (errno.EMFILE, errno.ENFILE):
-            sys.stderr.write("fd_exhaustion\n")
-            sys.exit(5)
-        else:
-            sys.stderr.write(f"oserror_{e.errno}\n")
-            sys.exit(6)
-else:
-    fallback_to_kill = True
+try:
+    pfd = os.pidfd_open(pid, 0)
+except ProcessLookupError:
+    sys.stderr.write("stale\n")
+    sys.exit(1)
+except PermissionError:
+    sys.stderr.write("permission_denied\n")
+    sys.exit(2)
+except OSError as e:
+    sys.stderr.write(f"pidfd_failed_{e.errno}\n")
+    sys.exit(5)
 
 # 2. Revalidate exact NUL-separated cmdline argument
 try:
     with open(f"/proc/{pid}/cmdline", "rb") as f:
         args = [a.decode("utf-8", errors="replace") for a in f.read().split(b"\x00") if a]
-    if expected_script not in args:
+    if not any(expected_script in a or "dns_server.py" in a for a in args):
         sys.stderr.write("cmdline_mismatch\n")
         if pfd is not None: os.close(pfd)
         sys.exit(3)
@@ -293,13 +300,10 @@ except PermissionError:
     if pfd is not None: os.close(pfd)
     sys.exit(2)
 
-# 4. Deliver signal
+# 4. Deliver signal strictly via pidfd
 try:
-    if pfd is not None:
-        signal.pidfd_send_signal(pfd, sig)
-        os.close(pfd)
-    elif fallback_to_kill:
-        os.kill(pid, sig)
+    signal.pidfd_send_signal(pfd, sig)
+    os.close(pfd)
     sys.stdout.write("signaled\n")
     sys.exit(0)
 except ProcessLookupError:
@@ -350,14 +354,14 @@ cleanup_resolver() {
             rm -f "$NETNS_RESOLV_FILE"
             rmdir "$NETNS_RESOLV_DIR" 2>/dev/null || true
             rmdir "/etc/netns" 2>/dev/null || true
-            rm -f "$RESOLV_MARKER"
+            rm -f "$RESOLV_MARKER" 2>/dev/null || true
             log_ok "Client resolver configuration cleaned up successfully."
         else
             log_warn "$NETNS_RESOLV_FILE was modified externally after installation. Leaving in place."
-            rm -f "$RESOLV_MARKER"
+            rm -f "$RESOLV_MARKER" 2>/dev/null || true
         fi
     else
-        rm -f "$RESOLV_MARKER"
+        rm -f "$RESOLV_MARKER" 2>/dev/null || true
     fi
 }
 
@@ -459,6 +463,18 @@ start_dns() {
     check_root
     log_info "Starting Controlled DNS Server inside namespace $NS_RT..."
 
+    if [[ ! -d "$RUN_DIR" || ! -d "$LOG_DIR" ]]; then
+        log_error "Production runtime directory ${RUN_DIR} or ${LOG_DIR} does not exist."
+        log_error "Execute 'sudo ./lab/deploy_privileged_helper.sh' to create runtime directories before starting DNS."
+        return 1
+    fi
+
+    if [[ ! -f "$DNS_SERVER_SCRIPT" ]]; then
+        log_error "Installed DNS server script ${DNS_SERVER_SCRIPT} not found."
+        log_error "Execute 'sudo ./lab/deploy_privileged_helper.sh' to install the privileged helper before starting DNS."
+        return 1
+    fi
+
     if [[ ! -f "$CONFIG_FILE" ]]; then
         log_error "Configuration file $CONFIG_FILE not found."
         return 1
@@ -497,7 +513,7 @@ start_dns() {
 
     # Launch daemon
     log_info "Launching $DNS_SERVER_SCRIPT on $BIND_IP:$BIND_PORT..."
-    ip netns exec "$NS_RT" python3 "$DNS_SERVER_SCRIPT" \
+    ip netns exec "$NS_RT" "$PYTHON_BIN" -I "$DNS_SERVER_SCRIPT" \
         --bind "$BIND_IP" \
         --port "$BIND_PORT" \
         --config "$CONFIG_FILE" \
@@ -534,6 +550,14 @@ start_dns() {
 stop_dns() {
     check_root
     log_info "Stopping Controlled DNS Server..."
+
+    if [[ ! -f "$PID_FILE" ]]; then
+        if [[ -f "/run/ps028/dns.pid" ]]; then
+            PID_FILE="/run/ps028/dns.pid"
+        elif [[ -f "${SCRIPT_DIR}/dns.pid" ]]; then
+            PID_FILE="${SCRIPT_DIR}/dns.pid"
+        fi
+    fi
 
     if [[ ! -f "$PID_FILE" ]]; then
         log_info "DNS server not running (no PID file found)."
@@ -634,6 +658,14 @@ reload_dns() {
     log_info "Reloading Controlled DNS Server configuration via SIGHUP..."
 
     if [[ ! -f "$PID_FILE" ]]; then
+        if [[ -f "/run/ps028/dns.pid" ]]; then
+            PID_FILE="/run/ps028/dns.pid"
+        elif [[ -f "${SCRIPT_DIR}/dns.pid" ]]; then
+            PID_FILE="${SCRIPT_DIR}/dns.pid"
+        fi
+    fi
+
+    if [[ ! -f "$PID_FILE" ]]; then
         log_error "Cannot reload: DNS server PID file does not exist."
         return 1
     fi
@@ -659,6 +691,14 @@ reload_dns() {
 
 status_dns() {
     log_info "Checking Controlled DNS Server status..."
+
+    if [[ ! -f "$PID_FILE" ]]; then
+        if [[ -f "/run/ps028/dns.pid" ]]; then
+            PID_FILE="/run/ps028/dns.pid"
+        elif [[ -f "${SCRIPT_DIR}/dns.pid" ]]; then
+            PID_FILE="${SCRIPT_DIR}/dns.pid"
+        fi
+    fi
 
     if [[ ! -f "$PID_FILE" ]]; then
         echo "Status: STOPPED (no PID file)."
