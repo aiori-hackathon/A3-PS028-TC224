@@ -54,11 +54,12 @@ jobs:
         run: |
           python3 -m pip install --upgrade pip
           python3 -m pip install --require-hashes -r requirements.lock
+          sudo chmod -R o-w /opt/google/chrome /usr/bin/google-chrome* 2>/dev/null || true
 
       - name: Python environment and dependency diagnostics
         run: |
           python3 -c "
-          import sys, subprocess, shutil
+          import sys, subprocess, shutil, pathlib
           print(f'[DIAGNOSTIC] sys.executable: {sys.executable}')
           print(f'[DIAGNOSTIC] Python version: {sys.version}')
           pip_proc = subprocess.run([sys.executable, '-m', 'pip', '--version'], capture_output=True, text=True, check=True)
@@ -80,6 +81,8 @@ jobs:
           if chrome_path:
               c_proc = subprocess.run([chrome_path, '--version'], capture_output=True, text=True)
               print(f'[DIAGNOSTIC] Browser found at {chrome_path}: {c_proc.stdout.strip()}')
+              cp = pathlib.Path(chrome_path).resolve()
+              print(f'[DIAGNOSTIC] Resolved browser path: {cp} (mode {oct(cp.stat().st_mode)})')
           else:
               print('[DIAGNOSTIC] google-chrome not found in PATH')
           "
