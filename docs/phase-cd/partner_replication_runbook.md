@@ -138,7 +138,11 @@ python3 lab/run_campaign.py \
   --browsers "google-chrome,firefox" \
   --scenarios "S0,S1,S2,S3,S4,S5,S6"
 ```
-Verify that all 280 trials complete with status `PASS`.
+Verify that the campaign finishes with status `COMPLETED` and execution mode `LIVE`:
+- The output manifest `lab/campaigns/${PARTNER_CAMPAIGN}/campaign_manifest.json` tracks exactly 280 unique matrix slots (`matrix_slots`).
+- Every planned matrix slot records status `COMPLETED` and contains a successful attempt with validity `VALID_LIVE`.
+- If any retry occurred due to transient measurement or cleanup anomalies, failed-attempt history is preserved (`status: "FAILED"`, validity `MEASUREMENT_FAILURE` or `CLEANUP_FAILURE`) with its corresponding `failed_attempt_record.json` preserved under `trials/<trial_id>/`.
+- Live trial outputs are structured under `trials/<trial_id>/result.json` and `trials/<trial_id>/capture.pcap`.
 
 ### Step 3: Run Deterministic Post-Campaign Dissection & Evidence Export
 Upon completion of all 280 planned trials, execute the deterministic analysis and evidence exporter. Partner trials natively generate Schema 1.1.0 JSONs:
@@ -170,7 +174,7 @@ find . -type f ! -name "*.sha256" ! -name "*.tar.gz" -exec sha256sum {} + | sort
 cd ..
 tar -czvf "${PARTNER_CAMPAIGN}.tar.gz" "${PARTNER_CAMPAIGN}"
 
-# 3. Compute SHA-256 digest of the final handover archive
+# 3. Compute mandatory SHA-256 digest sidecar of the final handover archive
 sha256sum "${PARTNER_CAMPAIGN}.tar.gz" > "${PARTNER_CAMPAIGN}.tar.gz.sha256"
 cd ../..
 
@@ -179,5 +183,14 @@ python3 lab/verify_partner_handover.py \
   --archive "lab/campaigns/${PARTNER_CAMPAIGN}.tar.gz" \
   --derived-dir "lab/derived/partner-replication"
 ```
+
+**Portable Verification & Architecture Guarantees:**
+1. **Manifest Schema Compliance**: Verifies `campaign_manifest.json` schema version `1.0.0` or `1.1.0`, `execution_mode: "LIVE"`, `is_simulation: false`, and campaign status `COMPLETED`.
+2. **Matrix Rigor**: Strictly verifies all 280 canonical slots ($7 \times 2 \times 20$), requiring every slot to contain a valid live attempt.
+3. **Physical Evidence Layout**: Resolves trial evidence portably under `trials/<trial_id>/result.json` and `trials/<trial_id>/capture.pcap`, never relying on original host absolute paths.
+4. **Authenticity & Integrity**: Validates PCAP header magics, packet counts ($> 0$), SHA-256 digests, and cleanup restoration.
+5. **Preserved History**: Ingests and verifies preserved failed attempts (`failed_attempt_record.json`) without silent relabeling.
+6. **Provenance & Derived Ledgers**: Validates `.provenance.json` sidecars (`provenance_status: "VERIFIED"`, `git_dirty: false`, `git_status: "VERIFIED"`) across `attempts.csv`, `connection_attempts.csv`, and `trial_timeline.csv`.
+7. **Fail-Closed Archive Extraction**: Prevents directory traversal attacks, rejecting path escaping, device nodes, or absolute paths during archive extraction. Requires companion `.sha256` checksum sidecar.
 
 Submit the verified archive (`${PARTNER_CAMPAIGN}.tar.gz`) and SHA-256 digest (`${PARTNER_CAMPAIGN}.tar.gz.sha256`) to the lead repository maintainer. The maintainer will inspect the authentic cryptographic evidence and update `docs/phase-cd/partner_replication_manifest.json` from `PENDING_AUTHENTIC_PARTNER_EVIDENCE` to `VERIFIED`.
