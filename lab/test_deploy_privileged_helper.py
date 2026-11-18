@@ -141,6 +141,16 @@ class TestDeployPrivilegedHelperTransactional(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
+    def _create_browser_executable_fixture(self, name: str = "google-chrome") -> Path:
+        """Create a private, deterministic test fixture executable matching allowed browser names."""
+        bin_dir = self.temp_dir / "browser-bin"
+        bin_dir.mkdir(parents=True, exist_ok=True)
+        bin_dir.chmod(0o700)
+        exe_path = bin_dir / name
+        exe_path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        exe_path.chmod(0o755)
+        return exe_path.resolve()
+
     def _run_deploy(self, extra_args=None, custom_env=None):
         cmd = [str(DEPLOY_SCRIPT)]
         if extra_args:
@@ -1256,10 +1266,11 @@ wait $CHILD_PID
         helper_bin = self.target_dir / "privileged_helper.py"
         current_uid = str(os.getuid() if os.getuid() != 0 else 1000)
         current_gid = str(os.getgid() if os.getgid() != 0 else 1000)
+        fixture_chrome = str(self._create_browser_executable_fixture("google-chrome"))
 
         # 1. Root UID or GID request is rejected (exit code 74)
         res = subprocess.run(
-            ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", "0", "--regid", "0", "google-chrome"],
+            ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", "0", "--regid", "0", fixture_chrome],
             capture_output=True, text=True, env=self.env
         )
         self.assertEqual(res.returncode, 74, f"Expected 74 for root identity. Stderr: {res.stderr}")
@@ -1284,7 +1295,7 @@ wait $CHILD_PID
         # 4. Shell metacharacters in browser arguments (exit code 75)
         for bad_arg in ["; rm -rf /", "$(whoami)", "`id`", "http://test|cat", "http://test>out"]:
             res = subprocess.run(
-                ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", current_uid, "--regid", current_gid, "google-chrome", bad_arg],
+                ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", current_uid, "--regid", current_gid, fixture_chrome, bad_arg],
                 capture_output=True, text=True, env=self.env
             )
             self.assertEqual(res.returncode, 75, f"Failed to reject metacharacter arg: {bad_arg}. Stderr: {res.stderr}")
@@ -1292,7 +1303,7 @@ wait $CHILD_PID
 
         # 5. Profile path traversal outside allowed directories (exit code 74)
         res = subprocess.run(
-            ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", current_uid, "--regid", current_gid, "google-chrome", "--user-data-dir=/etc"],
+            ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", current_uid, "--regid", current_gid, fixture_chrome, "--user-data-dir=/etc"],
             capture_output=True, text=True, env=self.env
         )
         self.assertEqual(res.returncode, 74, f"Expected 74 for /etc profile dir. Stderr: {res.stderr}")
@@ -1300,7 +1311,7 @@ wait $CHILD_PID
 
         # 6. Malformed URL: forbidden scheme file:// (exit code 75)
         res = subprocess.run(
-            ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", current_uid, "--regid", current_gid, "google-chrome", "file:///etc/passwd"],
+            ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", current_uid, "--regid", current_gid, fixture_chrome, "file:///etc/passwd"],
             capture_output=True, text=True, env=self.env
         )
         self.assertEqual(res.returncode, 75, f"Expected 75 for file:// scheme. Stderr: {res.stderr}")
@@ -1308,7 +1319,7 @@ wait $CHILD_PID
 
         # 7. Malformed URL: forbidden scheme ftp:// (exit code 75)
         res = subprocess.run(
-            ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", current_uid, "--regid", current_gid, "google-chrome", "ftp://example.invalid/"],
+            ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", current_uid, "--regid", current_gid, fixture_chrome, "ftp://example.invalid/"],
             capture_output=True, text=True, env=self.env
         )
         self.assertEqual(res.returncode, 75, f"Expected 75 for ftp:// scheme. Stderr: {res.stderr}")
@@ -1316,7 +1327,7 @@ wait $CHILD_PID
 
         # 8. Malformed URL: forbidden scheme javascript: (exit code 75)
         res = subprocess.run(
-            ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", current_uid, "--regid", current_gid, "google-chrome", "javascript:alert(1)"],
+            ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", current_uid, "--regid", current_gid, fixture_chrome, "javascript:alert(1)"],
             capture_output=True, text=True, env=self.env
         )
         self.assertEqual(res.returncode, 75, f"Expected 75 for javascript: scheme. Stderr: {res.stderr}")
@@ -1324,7 +1335,7 @@ wait $CHILD_PID
 
         # 9. Malformed URL: forbidden scheme data: (exit code 75)
         res = subprocess.run(
-            ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", current_uid, "--regid", current_gid, "google-chrome", "data:text/html,evil"],
+            ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", current_uid, "--regid", current_gid, fixture_chrome, "data:text/html,evil"],
             capture_output=True, text=True, env=self.env
         )
         self.assertEqual(res.returncode, 75, f"Expected 75 for data: scheme. Stderr: {res.stderr}")
@@ -1332,7 +1343,7 @@ wait $CHILD_PID
 
         # 10. Malformed URL: missing hostname (exit code 75)
         res = subprocess.run(
-            ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", current_uid, "--regid", current_gid, "google-chrome", "http://"],
+            ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", current_uid, "--regid", current_gid, fixture_chrome, "http://"],
             capture_output=True, text=True, env=self.env
         )
         self.assertEqual(res.returncode, 75, f"Expected 75 for missing hostname. Stderr: {res.stderr}")
@@ -1340,7 +1351,7 @@ wait $CHILD_PID
 
         # 11. Valid HTTP URL and legitimate browser options pass URL validation (reach mount stage: exit code 71)
         res = subprocess.run(
-            ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", current_uid, "--regid", current_gid, "google-chrome",
+            ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", current_uid, "--regid", current_gid, fixture_chrome,
              "--user-data-dir=/tmp/ps028_prof_valid", "--headless", "--no-sandbox", "http://127.0.0.1:80/"],
             capture_output=True, text=True, env=self.env
         )
@@ -1463,11 +1474,12 @@ TIMESTAMP={int(time.time())}
         helper_bin = self.target_dir / "privileged_helper.py"
         current_uid = str(os.getuid() if os.getuid() != 0 else 1000)
         current_gid = str(os.getgid() if os.getgid() != 0 else 1000)
+        fixture_chrome = str(self._create_browser_executable_fixture("google-chrome"))
 
         # 1. Missing hostname rejection (exit code 75)
         for bad_url in ["http://", "http://:80", "http://user@"]:
             r = subprocess.run(
-                ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", current_uid, "--regid", current_gid, "google-chrome", bad_url],
+                ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", current_uid, "--regid", current_gid, fixture_chrome, bad_url],
                 capture_output=True, text=True, env=self.env
             )
             self.assertEqual(r.returncode, 75, f"Expected 75 for missing hostname URL: {bad_url}. Stderr: {r.stderr}")
@@ -1476,7 +1488,7 @@ TIMESTAMP={int(time.time())}
         # 2. Invalid port rejection: out-of-range, port 0, port > 65535 (exit code 75)
         for bad_port_url in ["http://example.invalid:99999", "http://[::1]:0", "http://[::1]:65536"]:
             r = subprocess.run(
-                ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", current_uid, "--regid", current_gid, "google-chrome", bad_port_url],
+                ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", current_uid, "--regid", current_gid, fixture_chrome, bad_port_url],
                 capture_output=True, text=True, env=self.env
             )
             self.assertEqual(r.returncode, 75, f"Expected 75 for invalid port URL: {bad_port_url}. Stderr: {r.stderr}")
@@ -1490,7 +1502,7 @@ TIMESTAMP={int(time.time())}
             "http://2001:db8::1/"
         ]:
             r = subprocess.run(
-                ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", current_uid, "--regid", current_gid, "google-chrome", bad_ipv6_url],
+                ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", current_uid, "--regid", current_gid, fixture_chrome, bad_ipv6_url],
                 capture_output=True, text=True, env=self.env
             )
             self.assertEqual(r.returncode, 75, f"Expected 75 for bad IPv6 URL: {bad_ipv6_url}. Stderr: {r.stderr}")
@@ -1507,7 +1519,7 @@ TIMESTAMP={int(time.time())}
             "data:text/html,example"
         ]:
             r = subprocess.run(
-                ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", current_uid, "--regid", current_gid, "google-chrome", bad_scheme],
+                ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", current_uid, "--regid", current_gid, fixture_chrome, bad_scheme],
                 capture_output=True, text=True, env=self.env
             )
             self.assertEqual(r.returncode, 75, f"Expected 75 for bad scheme: {bad_scheme}. Stderr: {r.stderr}")
@@ -1525,7 +1537,7 @@ TIMESTAMP={int(time.time())}
         ]
         for cmd_args in valid_cases:
             r = subprocess.run(
-                ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", current_uid, "--regid", current_gid, "google-chrome"] + cmd_args,
+                ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", current_uid, "--regid", current_gid, fixture_chrome] + cmd_args,
                 capture_output=True, text=True, env=self.env
             )
             self.assertEqual(r.returncode, 71, f"Expected 71 (SnapMountError) for valid arguments {cmd_args}, got {r.returncode}: {r.stderr}")
@@ -1533,14 +1545,14 @@ TIMESTAMP={int(time.time())}
         # 6. Malformed URL inside --app= argument is rejected with 75 before mount setup
         for bad_app in ["--app=http://", "--app=file:///etc/passwd", "--app=http://[invalid_ipv6]/"]:
             r = subprocess.run(
-                ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", current_uid, "--regid", current_gid, "google-chrome", bad_app],
+                ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", current_uid, "--regid", current_gid, fixture_chrome, bad_app],
                 capture_output=True, text=True, env=self.env
             )
             self.assertEqual(r.returncode, 75, f"Expected 75 for bad app argument: {bad_app}. Stderr: {r.stderr}")
 
         # 7. URL-valued browser flags (e.g. --proxy-server=http://proxy:8080) are options, not navigation targets (Blocker 7)
         r = subprocess.run(
-            ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", current_uid, "--regid", current_gid, "google-chrome",
+            ["python3", "-I", str(helper_bin), "launch-snap-browser", "--reuid", current_uid, "--regid", current_gid, fixture_chrome,
              "--proxy-server=http://proxy.example:8080", "https://example.com/"],
             capture_output=True, text=True, env=self.env
         )
@@ -2795,6 +2807,47 @@ TIMESTAMP=1794900000
         # Repeat run is idempotent
         rec2 = self._run_deploy()
         self.assertEqual(rec2.returncode, 0)
+
+    def test_84_fixture_mode_rejects_insecure_ancestor_directory(self):
+        """84. validate_browser_executable in fixture mode still rejects world-writable ancestor without sticky bit."""
+        import sys
+        if str(REPO_ROOT) not in sys.path:
+            sys.path.insert(0, str(REPO_ROOT))
+        from lab.privileged_helper import validate_browser_executable, BrowserValidationError
+
+        # 1. Insecure fixture directory: world-writable without sticky bit (mode 0777)
+        insecure_parent = self.temp_dir / "insecure_ancestor"
+        insecure_parent.mkdir(parents=True, exist_ok=True)
+        insecure_parent.chmod(0o777)
+        try:
+            insecure_exe = insecure_parent / "google-chrome"
+            insecure_exe.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            insecure_exe.chmod(0o755)
+
+            # Fixture mode must reject insecure ancestor directory
+            with self.assertRaises(BrowserValidationError) as ctx:
+                validate_browser_executable(insecure_exe, is_test_fixture=True)
+            self.assertIn("world-writable without sticky bit", str(ctx.exception))
+            self.assertIn(str(insecure_parent), str(ctx.exception))
+        finally:
+            insecure_parent.chmod(0o700)
+
+        # 2. Secure fixture directory: non-world-writable fixture passes in test_fixture mode
+        secure_exe = self._create_browser_executable_fixture("google-chrome")
+        resolved = validate_browser_executable(secure_exe, is_test_fixture=True)
+        self.assertEqual(resolved, secure_exe.resolve())
+
+        # 3. Production executable validation: retains allowlisted path, root ownership, and ancestor checks
+        with self.assertRaises(BrowserValidationError) as ctx_prod:
+            validate_browser_executable(secure_exe, is_test_fixture=False)
+        self.assertTrue(
+            any(k in str(ctx_prod.exception) for k in ["Must reside in approved locations", "must be owned by root", "Ancestor directory"]),
+            f"Expected production security check failure, got: {ctx_prod.exception}"
+        )
+
+    # Alias to support direct invocation by alternative name from Section 6
+    test_56_fixture_mode_rejects_insecure_ancestor_directory = test_84_fixture_mode_rejects_insecure_ancestor_directory
+
 
 
 if __name__ == "__main__":

@@ -54,8 +54,6 @@ jobs:
         run: |
           python3 -m pip install --upgrade pip
           python3 -m pip install --require-hashes -r requirements.lock
-          sudo chmod o-w /opt 2>/dev/null || true
-          sudo chmod -R o-w /opt/google /usr/bin/google-chrome* 2>/dev/null || true
 
       - name: Python environment and dependency diagnostics
         run: |
