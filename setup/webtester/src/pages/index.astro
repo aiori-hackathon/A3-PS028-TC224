@@ -48,51 +48,5 @@ import TestCard from "@/components/test-card.astro";
       </span>
     </TestCard>
 
-    <TestCard title="Resolution Delay Test" href="tests/resolution-delay">
-      <span class="text-black">
-      Happy Eyeballs version 2 defines the racing of A vs AAAA DNS queries and
-      uses the term Resolution Delay (RD) to describe the configured accepted
-      delay between A and AAAA responses. We test this behavior of your client
-      by artificially adding latency to A or AAAA queries. In this test, not
-      only your client but also the configured resolver and any forwarder in the
-      resolution chain can impact the result.
-      </span>
-    </TestCard>
-
-    <TestCard
-      title="Happy Eyeballs v3 QUIC vs. TLS/TCP Test"
-      href="tests/hev3-quic-tls"
-    >
-      <span class="text-black">
-      Happy Eyeballs version 3 extends connection racing to the application
-      layer, specifically racing QUIC against TLS/TCP. Browsers implementing
-      this version should fall back to the alternative protocol if one is
-      unresponsive to avoid blocking. We test this by varying the handshake
-      delay to determine if and when your client decides to switch protocols.
-      </span>
-    </TestCard>
-
-    <TestCard
-      title="Happy Eyeballs v3 Combined Test (QUIC vs. TLS/TCP & IPv4 vs. IPv6)"
-      href="tests/hev3-combined"
-    >
-      <span class="text-black">
-      Happy Eyeballs version 3 extends connection racing to the application
-      layer. Browsers implementing this version should fall back between IP
-      versions and protocols to avoid blocking if one is unresponsive. We test
-      this by varying the handshake delay and IP version-specific delay to
-      determine if and when your client decides to switch protocols and IP
-      versions.
-      </span>
-    </TestCard>
-
-    <TestCard title="HTTP/3 Availability Test" href="tests/http3-availability">
-      <span class="text-black">
-      The test checks how your browser establishes connections when HTTP/3 is
-      available. We simulate various scenarios where HTTP/3 can be discovered
-      via Alt-Svc headers or HTTPS DNS records.
-      </span>
-    </TestCard>
-
   </div>
 </PageLayout>

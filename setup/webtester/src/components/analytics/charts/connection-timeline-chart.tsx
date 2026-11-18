@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import type { HistoricalTrial, TimelineEvent } from '@/lib/historical-evidence';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import type { BrowserFilterId } from '@/lib/analytics/analytics-types';
@@ -17,6 +17,7 @@ export const ConnectionTimelineChart: React.FC<ConnectionTimelineChartProps> = (
   const [selectedTrialId, setSelectedTrialId] = useState<string | null>(null);
   const [sourceFilter, setSourceFilter] = useState<'ALL' | 'HARNESS' | 'PCAP' | 'BROWSER_TELEMETRY'>('ALL');
   const [hoveredEvent, setHoveredEvent] = useState<TimelineEvent | null>(null);
+  const [selectedEvent, setSelectedEvent] = useState<TimelineEvent | null>(null);
 
   // Filter available trials by selected scenarios & browser
   const availableTrials = trials.filter(
@@ -31,15 +32,32 @@ export const ConnectionTimelineChart: React.FC<ConnectionTimelineChartProps> = (
     availableTrials[0] ||
     null;
 
+  // Filter events of the selected trial
+  const rawEvents = activeTrial?.timeline_events || [];
+  const filteredEvents = rawEvents.filter(
+    (e) => sourceFilter === 'ALL' || e.source === sourceFilter
+  );
+
+  // Clear or reconcile selection when trial or source filter changes
+  useEffect(() => {
+    if (!selectedEvent) return;
+    const exists = filteredEvents.some(
+      (e) => e.timestamp === selectedEvent.timestamp && e.event_type === selectedEvent.event_type
+    );
+    if (!exists) {
+      setSelectedEvent(null);
+    }
+  }, [activeTrial?.trial_id, sourceFilter, globalScenarios, globalBrowser]);
+
   if (availableTrials.length === 0 || !activeTrial) {
     return (
       <Card className="shadow-xs">
         <CardHeader>
-          <CardTitle className="text-base font-semibold">Graph 7 — TCP Connection Event Timeline</CardTitle>
-          <CardDescription>Select at least one scenario to inspect protocol-level timeline events.</CardDescription>
+          <CardTitle className="text-base font-semibold text-black">Graph 7 — TCP Connection Event Timeline</CardTitle>
+          <CardDescription className="text-xs text-black">Select at least one scenario to inspect protocol-level timeline events.</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="h-64 flex items-center justify-center text-xs text-muted-foreground border border-dashed rounded-lg">
+          <div className="h-64 flex items-center justify-center text-xs text-black border border-dashed rounded-lg">
             No valid trials available for current selection
           </div>
         </CardContent>
@@ -47,11 +65,18 @@ export const ConnectionTimelineChart: React.FC<ConnectionTimelineChartProps> = (
     );
   }
 
-  // Filter events of the selected trial
-  const rawEvents = activeTrial.timeline_events || [];
-  const filteredEvents = rawEvents.filter(
-    (e) => sourceFilter === 'ALL' || e.source === sourceFilter
-  );
+  const handleEventSelect = (ev: TimelineEvent) => {
+    if (
+      selectedEvent &&
+      selectedEvent.timestamp === ev.timestamp &&
+      selectedEvent.event_type === ev.event_type &&
+      selectedEvent.frame_number === ev.frame_number
+    ) {
+      setSelectedEvent(null);
+    } else {
+      setSelectedEvent(ev);
+    }
+  };
 
   // Calculate synchronized start and end timestamps
   const timestamps = rawEvents
@@ -98,16 +123,17 @@ export const ConnectionTimelineChart: React.FC<ConnectionTimelineChartProps> = (
     }
   };
 
+  const hasSelection = selectedEvent !== null;
 
   return (
     <Card className="shadow-xs overflow-hidden">
       <CardHeader className="pb-3 border-b bg-muted/15">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <CardTitle className="text-base font-semibold text-foreground">
+            <CardTitle className="text-base font-semibold text-black">
               Graph 7 — TCP Connection Event Timeline
             </CardTitle>
-            <CardDescription className="text-xs text-muted-foreground mt-0.5">
+            <CardDescription className="text-xs text-black mt-0.5">
               Protocol-level Gantt view with synchronized HARNESS, PCAP, and BROWSER_TELEMETRY event markers.
             </CardDescription>
           </div>
@@ -116,11 +142,11 @@ export const ConnectionTimelineChart: React.FC<ConnectionTimelineChartProps> = (
           <div className="flex flex-wrap items-center gap-2 text-xs">
             {/* Trial Selector */}
             <div className="flex items-center gap-1">
-              <span className="text-muted-foreground font-medium">Trial:</span>
+              <span className="text-black font-medium">Trial:</span>
               <select
                 value={activeTrial.trial_id}
                 onChange={(e) => setSelectedTrialId(e.target.value)}
-                className="px-2 py-0.5 text-[11px] rounded border bg-background text-foreground font-mono"
+                className="px-2 py-0.5 text-[11px] rounded border bg-background text-black font-mono"
                 aria-label="Select trial for timeline inspection"
               >
                 {availableTrials.slice(0, 40).map((t) => (
@@ -135,7 +161,7 @@ export const ConnectionTimelineChart: React.FC<ConnectionTimelineChartProps> = (
             <select
               value={sourceFilter}
               onChange={(e) => setSourceFilter(e.target.value as any)}
-              className="px-2 py-0.5 text-[11px] rounded border bg-background text-foreground"
+              className="px-2 py-0.5 text-[11px] rounded border bg-background text-black"
               aria-label="Filter timeline sources"
             >
               <option value="ALL">All Event Sources</option>
@@ -174,7 +200,7 @@ export const ConnectionTimelineChart: React.FC<ConnectionTimelineChartProps> = (
                     x={x}
                     y={height - margin.bottom + 18}
                     textAnchor="middle"
-                    className="text-[10px] fill-muted-foreground font-mono"
+                    className="text-[10px] fill-black text-black font-mono"
                   >
                     +{offsetMs.toFixed(1)} ms
                   </text>
@@ -201,7 +227,7 @@ export const ConnectionTimelineChart: React.FC<ConnectionTimelineChartProps> = (
                   x={margin.left - 12}
                   y={lane.y + 4}
                   textAnchor="end"
-                  className="text-xs font-semibold fill-foreground"
+                  className="text-xs font-semibold fill-black text-black"
                 >
                   {lane.label}
                 </text>
@@ -210,32 +236,50 @@ export const ConnectionTimelineChart: React.FC<ConnectionTimelineChartProps> = (
                 {lane.events.map((ev, idx) => {
                   const evX = getEventX(ev.timestamp);
                   const isHovered = hoveredEvent === ev;
+                  const isSelected =
+                    selectedEvent?.timestamp === ev.timestamp &&
+                    selectedEvent?.event_type === ev.event_type &&
+                    selectedEvent?.frame_number === ev.frame_number;
 
                   return (
                     <g
                       key={idx}
-                      className="cursor-pointer"
+                      className="cursor-pointer outline-none transition-all"
+                      opacity={isSelected ? 1 : hasSelection ? 0.45 : 1}
                       onMouseEnter={() => setHoveredEvent(ev)}
                       onMouseLeave={() => setHoveredEvent(null)}
                     >
                       {/* Vertical Pin Line */}
                       <line
                         x1={evX}
-                        y1={lane.y - 12}
+                        y1={lane.y - (isSelected ? 16 : 12)}
                         x2={evX}
-                        y2={lane.y + 12}
-                        stroke="currentColor"
-                        strokeWidth={isHovered ? 2 : 1}
-                        className={isHovered ? 'text-primary' : 'text-border'}
+                        y2={lane.y + (isSelected ? 16 : 12)}
+                        stroke={isSelected ? '#000000' : isHovered ? 'currentColor' : 'currentColor'}
+                        strokeWidth={isSelected ? 2.5 : isHovered ? 2 : 1}
+                        className={isSelected ? '' : isHovered ? 'text-primary' : 'text-border'}
+                        onClick={() => handleEventSelect(ev)}
                       />
 
                       {/* Event Dot */}
                       <circle
                         cx={evX}
                         cy={lane.y}
-                        r={isHovered ? 6 : 4}
-                        className={`${getSourceColor(ev.source)} transition-all`}
-                        strokeWidth={1.5}
+                        r={isSelected ? 7 : isHovered ? 6 : 4}
+                        role="button"
+                        tabIndex={0}
+                        aria-pressed={isSelected}
+                        aria-label={`Select event: ${ev.event_type} at +${((ev.timestamp - minTs) * 1000).toFixed(1)} ms`}
+                        stroke={isSelected ? '#000000' : undefined}
+                        strokeWidth={isSelected ? 2.5 : 1.5}
+                        className={`${getSourceColor(ev.source)} cursor-pointer transition-all outline-none focus-visible:stroke-black focus-visible:stroke-[2.5px]`}
+                        onClick={() => handleEventSelect(ev)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            handleEventSelect(ev);
+                          }
+                        }}
                       />
                     </g>
                   );
@@ -245,44 +289,106 @@ export const ConnectionTimelineChart: React.FC<ConnectionTimelineChartProps> = (
           </svg>
         </div>
 
+        {/* Selected Entry Detail Panel */}
+        {selectedEvent && (
+          <div
+            data-testid="graph-7-selected-panel"
+            className="mt-3 p-3 rounded-lg border-2 border-black/30 bg-muted/30 text-black text-xs space-y-2 animate-fade-in"
+          >
+            <div className="flex items-center justify-between border-b border-black/15 pb-1.5">
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-black text-white">
+                  Active Selection
+                </span>
+                <span className="font-bold text-black text-sm">
+                  {selectedEvent.event_type} {selectedEvent.family ? `(${selectedEvent.family})` : ''} &bull;{' '}
+                  <span className="font-mono text-xs">{selectedEvent.source}</span>
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedEvent(null)}
+                className="text-black hover:text-black/70 p-1 rounded hover:bg-black/10 cursor-pointer flex items-center gap-1 text-[11px] font-medium"
+                aria-label="Dismiss selection"
+                title="Dismiss selection"
+              >
+                <span>Dismiss</span>
+                <span className="text-base font-bold leading-none">&times;</span>
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-black pt-1">
+              <div>
+                <span className="font-semibold block text-[11px] text-black">Trial Cohort:</span>
+                <span className="font-mono text-black">
+                  {activeTrial.scenario_id} &bull; {activeTrial.browser === 'google-chrome' ? 'Chrome' : 'Firefox'} (Rep {activeTrial.repetition})
+                </span>
+              </div>
+              <div>
+                <span className="font-semibold block text-[11px] text-black">Relative Offset:</span>
+                <span className="font-mono font-bold text-black text-sm">
+                  +{((selectedEvent.timestamp - minTs) * 1000).toFixed(2)} ms
+                </span>
+              </div>
+              <div>
+                <span className="font-semibold block text-[11px] text-black">Absolute Timestamp:</span>
+                <span className="font-mono text-black text-[11px]">
+                  {selectedEvent.timestamp.toFixed(6)}s
+                </span>
+              </div>
+              <div>
+                <span className="font-semibold block text-[11px] text-black">Frame / Stream:</span>
+                <span className="font-mono text-black">
+                  Frame #{selectedEvent.frame_number ?? '—'} &bull; Stream: {selectedEvent.stream_id ?? 'N/A'}
+                </span>
+              </div>
+            </div>
+
+            <div className="pt-1.5 border-t border-black/10 text-black text-[11px]">
+              <span className="font-semibold text-black">Event Details:</span>{' '}
+              <span className="text-black">{selectedEvent.details}</span>
+            </div>
+          </div>
+        )}
+
         {/* Legend */}
-        <div className="flex flex-wrap items-center justify-between gap-2 mt-2 pt-2 border-t text-xs text-muted-foreground">
+        <div className="flex flex-wrap items-center justify-between gap-2 mt-2 pt-2 border-t text-xs text-black">
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-1.5">
               <span className="size-2.5 rounded-full bg-emerald-600 dark:bg-emerald-500" />
-              <span>PCAP Frame Event</span>
+              <span className="text-black font-medium">PCAP Frame Event</span>
             </div>
             <div className="flex items-center gap-1.5">
               <span className="size-2.5 rounded-full bg-blue-600 dark:bg-blue-500" />
-              <span>Browser Telemetry Event</span>
+              <span className="text-black font-medium">Browser Telemetry Event</span>
             </div>
             <div className="flex items-center gap-1.5">
               <span className="size-2.5 rounded-full bg-amber-600 dark:bg-amber-500" />
-              <span>Harness Lifecycle Event</span>
+              <span className="text-black font-medium">Harness Lifecycle Event</span>
             </div>
           </div>
 
-          <div className="font-mono text-[11px] text-foreground">
+          <div className="font-mono text-[11px] text-black">
             Total span: {durationMs.toFixed(2)} ms &bull; {filteredEvents.length} events
           </div>
         </div>
 
         {/* Floating Tooltip */}
         {hoveredEvent && (
-          <div className="p-2.5 rounded bg-popover text-popover-foreground border text-xs shadow-md mt-2 space-y-1">
-            <div className="font-semibold flex items-center justify-between border-b pb-1">
-              <span className="flex items-center gap-1.5">
-                <span className="px-1.5 py-0.2 rounded bg-primary/20 text-primary font-mono text-[10px]">
+          <div className="p-2.5 rounded bg-popover text-black border text-xs shadow-md mt-2 space-y-1">
+            <div className="font-semibold flex items-center justify-between border-b pb-1 text-black">
+              <span className="flex items-center gap-1.5 text-black">
+                <span className="px-1.5 py-0.2 rounded bg-primary/20 text-black font-mono text-[10px]">
                   {hoveredEvent.source}
                 </span>
                 {hoveredEvent.event_type} {hoveredEvent.family ? `(${hoveredEvent.family})` : ''}
               </span>
-              <span className="font-mono text-muted-foreground text-[10px]">
+              <span className="font-mono text-black text-[10px]">
                 Frame #{hoveredEvent.frame_number ?? '—'}
               </span>
             </div>
-            <div className="text-foreground text-[11px]">{hoveredEvent.details}</div>
-            <div className="text-[10px] text-muted-foreground font-mono flex items-center justify-between pt-0.5">
+            <div className="text-black text-[11px]">{hoveredEvent.details}</div>
+            <div className="text-[10px] text-black font-mono flex items-center justify-between pt-0.5">
               <span>Epoch: {hoveredEvent.timestamp.toFixed(6)}s</span>
               <span>Stream ID: {hoveredEvent.stream_id ?? 'N/A'}</span>
             </div>
