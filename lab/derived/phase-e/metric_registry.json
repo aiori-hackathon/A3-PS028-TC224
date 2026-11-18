@@ -1,0 +1,131 @@
+{
+  "governing_specification": "docs/phase-c-metric-contract.md",
+  "metrics": {
+    "connection_attempt_delay_ms": {
+      "applicability": "Dual-stack connection racing where both IPv6 and IPv4 were initiated",
+      "canonical_name": "connection_attempt_delay_ms",
+      "category": "PRIMARY",
+      "definition": "Observed interval between initial IPv6 SYN and subsequent initial IPv4 SYN (RFC 8305 \u00a75)",
+      "display_label": "Connection Attempt Delay (CAD)",
+      "limitations": "Defined only when IPv6 precedes IPv4; null when primary IPv6 wins without race.",
+      "mathematical_formula": "(t_first_syn,IPv4 - t_first_syn,IPv6) * 1000",
+      "null_reasons": [
+        "NOT_APPLICABLE_HEALTHY_PATH",
+        "INVALID_FAMILY_CHRONOLOGY",
+        "INDETERMINATE_NO_SYN"
+      ],
+      "unit": "ms"
+    },
+    "dns_last_positive_response_to_first_payload_ms": {
+      "applicability": "Trials with positive DNS responses and server application payload",
+      "canonical_name": "dns_last_positive_response_to_first_payload_ms",
+      "category": "DIAGNOSTIC",
+      "definition": "Elapsed time from latest positive DNS response to first server payload byte",
+      "display_label": "Last DNS Response to First Payload",
+      "limitations": "Measures connection establishment and HTTP turnaround excluding resolution wait.",
+      "mathematical_formula": "(t_first_payload,primary - max(t_resp,A, t_resp,AAAA)) * 1000",
+      "null_reasons": [
+        "INDETERMINATE_UNPAIRABLE_DNS",
+        "INDETERMINATE_NO_PAYLOAD"
+      ],
+      "unit": "ms"
+    },
+    "dns_latency_a_ms": {
+      "applicability": "Paired IPv4 A DNS queries",
+      "canonical_name": "dns_latency_a_ms",
+      "category": "DIAGNOSTIC",
+      "definition": "Elapsed duration for IPv4 A query/response transaction",
+      "display_label": "IPv4 (A) Resolution Latency",
+      "limitations": "Single-family resolution time.",
+      "mathematical_formula": "(t_resp,A - t_query,A) * 1000",
+      "null_reasons": [
+        "INDETERMINATE_UNPAIRABLE_DNS"
+      ],
+      "unit": "ms"
+    },
+    "dns_latency_aaaa_ms": {
+      "applicability": "Paired IPv6 AAAA DNS queries",
+      "canonical_name": "dns_latency_aaaa_ms",
+      "category": "DIAGNOSTIC",
+      "definition": "Elapsed duration for IPv6 AAAA query/response transaction",
+      "display_label": "IPv6 (AAAA) Resolution Latency",
+      "limitations": "Reflects configured S6 DNS impairment delay.",
+      "mathematical_formula": "(t_resp,AAAA - t_query,AAAA) * 1000",
+      "null_reasons": [
+        "INDETERMINATE_UNPAIRABLE_DNS"
+      ],
+      "unit": "ms"
+    },
+    "dns_query_to_first_payload_ms": {
+      "applicability": "Trials with paired DNS and server application payload",
+      "canonical_name": "dns_query_to_first_payload_ms",
+      "category": "DIAGNOSTIC",
+      "definition": "Elapsed time from earliest DNS query (A or AAAA) to first server payload byte on primary stream",
+      "display_label": "DNS Query to First Payload",
+      "limitations": "Covers full application readiness from name resolution start.",
+      "mathematical_formula": "(t_first_payload,primary - min(t_query,A, t_query,AAAA)) * 1000",
+      "null_reasons": [
+        "INDETERMINATE_UNPAIRABLE_DNS",
+        "INDETERMINATE_NO_PAYLOAD"
+      ],
+      "unit": "ms"
+    },
+    "dns_resolution_time_ms": {
+      "applicability": "Paired DNS transactions",
+      "canonical_name": "dns_resolution_time_ms",
+      "category": "DIAGNOSTIC",
+      "definition": "Total elapsed time across DNS transactions from earliest query to latest response",
+      "display_label": "Composite DNS Resolution Time",
+      "limitations": "Encompasses both A and AAAA query/response windows.",
+      "mathematical_formula": "(max(t_resp,A, t_resp,AAAA) - min(t_query,A, t_query,AAAA)) * 1000",
+      "null_reasons": [
+        "INDETERMINATE_UNPAIRABLE_DNS"
+      ],
+      "unit": "ms"
+    },
+    "syn_to_synack_ms": {
+      "applicability": "Primary stream where server returned SYN/ACK",
+      "canonical_name": "syn_to_synack_ms",
+      "category": "DIAGNOSTIC",
+      "definition": "Elapsed time from primary initial SYN to matching server SYN/ACK segment",
+      "display_label": "Diagnostic SYN-to-SYN/ACK Interval",
+      "limitations": "Diagnostic proxy for network path RTT; historical legacy connection setup metric.",
+      "mathematical_formula": "(t_synack,primary - t_initial_syn,primary) * 1000",
+      "null_reasons": [
+        "INDETERMINATE_NO_SYNACK"
+      ],
+      "unit": "ms"
+    },
+    "t_connect_ms": {
+      "applicability": "All valid primary HTTP flows",
+      "canonical_name": "t_connect_ms",
+      "category": "PRIMARY",
+      "definition": "Elapsed time from initial SYN to matching client final ACK on primary stream (RFC 9293 \u00a73.5)",
+      "display_label": "Primary TCP Connect Time",
+      "limitations": "Measures transport handshake only; does not include application request/response transfer.",
+      "mathematical_formula": "(t_final_ack,primary - t_initial_syn,primary) * 1000",
+      "null_reasons": [
+        "INDETERMINATE_NO_SYN",
+        "INDETERMINATE_NO_SYNACK",
+        "INDETERMINATE_NO_FINAL_ACK",
+        "INDETERMINATE_NO_PRIMARY_FLOW"
+      ],
+      "unit": "ms"
+    },
+    "t_setup_total_ms": {
+      "applicability": "All trials with completed primary HTTP flow",
+      "canonical_name": "t_setup_total_ms",
+      "category": "PRIMARY",
+      "definition": "Elapsed time from first target-host SYN of any family to matching final ACK of primary stream",
+      "display_label": "Total Connection Setup Time",
+      "limitations": "Headline metric for user-visible fallback latency cost; includes CAD stall.",
+      "mathematical_formula": "(t_final_ack,primary - min(t_first_syn,IPv4, t_first_syn,IPv6)) * 1000",
+      "null_reasons": [
+        "INDETERMINATE_NO_PRIMARY_FLOW"
+      ],
+      "unit": "ms"
+    }
+  },
+  "schema_version": "1.1.0",
+  "vantage_point": "ps028-cl:ps028-cl-rt"
+}

@@ -11,7 +11,8 @@ The current tested environment is WSL2 Ubuntu 24.04 with Chrome (`google-chrome`
 Before beginning, make sure the repository is up to date and that you are in its root:
 
 ```bash
-cd ~/projects/he-webtester
+# Run this from anywhere inside your local clone:
+cd "$(git rev-parse --show-toplevel)"
 git status -sb
 ```
 
@@ -143,6 +144,8 @@ All seven recorded browser trials above had HTTP 200, a valid PCAP, and cleanup 
 
 ## 6. Evidence checklist for a handoff
 
+Newly generated `result.json` and campaign-manifest evidence paths are serialized relative to the repository root when the referenced file is inside the checkout. Paths intentionally located outside the repository remain absolute. Campaign resume/validation resolves repository-relative values against the current checkout root and can remap historical absolute paths from the former `he-webtester` checkout when the matching file exists in the current checkout. This resolution is read-only: existing historical campaign records and checksums are not rewritten.
+
 For each trial that is included in a report, preserve:
 
 1. Trial ID, scenario ID, browser name/version, date/time, and environment details.
@@ -208,12 +211,12 @@ The analyzer enforces strict A7/A8 validity rules:
 ### RFC 8305 standards conformance assessment
 
 The analyzer evaluates Happy Eyeballs v2 requirements strictly from observable network evidence, distinguishing **`OBSERVED_CONFORMANCE`**, **`OBSERVED_DEVIATION`**, and **`INDETERMINATE`** results without inferring general browser conformance from individual trials. The assessment explicitly separates mandatory requirements (MUST/MUST NOT) from recommended parameters (SHOULD/SHOULD NOT) via `mandatory_status` and `recommended_status`:
-- **RFC 8305 §3 (IPv6 Preference)**: Verifies whether initial connection attempts prefer IPv6 on dual-stack baseline (S0). In tested live trials, IPv6 was attempted first and won (`OBSERVED_CONFORMANCE`).
-- **RFC 8305 §5 (Immediate Reset Fallback & 10 ms Inter-Attempt Floor)**: Evaluates TCP RST rejection (S2). RFC 8305 §5 distinguishes mandatory requirements (*"subsequent connection attempts MUST NOT start within 10 milliseconds of the previous attempt"*) from recommended parameters (minimum CAD timer of 100 ms, maximum CAD of 2 seconds). When an attempt actively fails (TCP RST), Section 5 recommends starting immediately without waiting for the CAD timer to expire, provided the 10 ms mandatory floor is respected. Because the recorded S2 Chrome trial launched its subsequent IPv4 attempt at 2.65 ms (< 10 ms interval between attempt starts), this is classified as an **`OBSERVED_DEVIATION`** specifically for **mandatory-floor violation** (`mandatory_status=OBSERVED_DEVIATION`) scoped to the recorded trial. Delays between 10 ms and 100 ms meet mandatory MUST requirements (`mandatory_status=OBSERVED_CONFORMANCE`) while falling outside recommended parameters (`recommended_status=OBSERVED_DEVIATION`), and are explained as recommended-range deviations without being labeled as MUST violations.
+- **RFC 8305 §2 (Overview & IPv6 Preference per RFC 6724)**: Verifies whether initial connection attempts prefer IPv6 on dual-stack baseline (S0). RFC 8305 §2 assumes host destination-address preference favors IPv6 (RFC 6724 §2.1 policy table, §6 Rule 6 prefer higher precedence, §10.3). In tested live trials, IPv6 was attempted first and connected directly without fallback (`OBSERVED_BEHAVIOR`).
+- **RFC 8305 §5 (Active Failure RST Inter-Attempt Delay & 10 ms Inter-Attempt Floor)**: Evaluates TCP RST rejection (S2). RFC 8305 §5 specifies that subsequent connection attempts MUST NOT start within 10 milliseconds of the previous attempt (recommended CAD: 100 ms to 2000 ms, default 250 ms). Neither RFC 8305 nor draft HEv3 contains language mandating immediate alternate-family retry upon receiving a TCP RST. Furthermore, because connection attempt delay measurements are derived from family-wide first-SYN timestamps across independent flows without establishing verified attempt pairing, socket transaction causality, or chronological attempt correlation, S2 cannot be validly assessed against the 10 ms mandatory floor and remains classified as **`NOT_ASSESSED`**.
 - **RFC 8305 §5 (CAD SYN Timeout)**: Verifies whether unacknowledged IPv6 SYNs (S1) schedule IPv4 fallback within the 100–2000 ms window (target: 250 ms). In the recorded S1 trial, CAD was 301.19 ms, satisfying both mandatory floor and recommended bounds (`OBSERVED_CONFORMANCE`).
 - **RFC 8305 §5 (High Latency Fallback)**: Verifies whether 600 ms IPv6 latency (S4) allows IPv4 to complete handshake first. In the recorded S4 trial, IPv4 won with CAD 294.87 ms (`OBSERVED_CONFORMANCE`).
-- **RFC 8305 §4 (Resolution Delay)**: Evaluates delayed AAAA behavior (S6). In the recorded Chrome trial (`trial-20261028171417-b2d83f2f`), Chrome waited ~515 ms for late AAAA and connected over IPv6 rather than initiating IPv4 fallback after the RFC 8305 §4 recommended 50 ms Resolution Delay. This is classified as an **`OBSERVED_DEVIATION`** strictly scoped to the recorded trial, without inferring general browser non-conformance.
-- **Unsupported Checks**: Features not testable under isolated single-trial protocol (e.g., cross-session cache statefulness in §7) or out of testbed scope (e.g., QUIC/SCTP in §8) are strictly marked **`INDETERMINATE`**.
+- **RFC 8305 §3 (Resolution Delay)**: Evaluates delayed AAAA behavior (S6). In the recorded Chrome trial (`trial-20261028171417-b2d83f2f`), Chrome waited ~515 ms for late AAAA and connected over IPv6 rather than initiating IPv4 fallback after the RFC 8305 §3 recommended 50 ms Resolution Delay. This is classified as an **`OBSERVED_DEVIATION`** strictly scoped to the recorded trial, without inferring general browser non-conformance.
+- **Unsupported Checks**: Features not testable under isolated single-trial protocol (e.g., cross-session cache statefulness in §4 Sorting Addresses; Section 7 is dedicated to NAT64 and DNS64 on IPv6-only networks) or out of testbed scope (e.g., QUIC/SCTP in §8) are strictly marked **`NOT_ASSESSED`** / **`INDETERMINATE`**.
 
 ## 8. Useful commands
 
@@ -236,10 +239,14 @@ python3 lab/run_campaign.py --help
 python3 lab/analyze.py --help
 
 # Run automated tests (simulation/unit tests; not a replacement for live trials)
+python3 -m unittest lab.test_campaign_pcap_regression  # authentic October 29 S0-S5 PCAPs; requires TShark and the recorded captures
 python3 lab/test_analyze.py
 python3 lab/test_run_campaign.py
 python3 lab/test_run_trial.py
-python3 -m unittest discover lab
+# Run all 725 offline unit tests in lab/
+python3 -m unittest discover -s lab -p "test_*.py"
+# Run all 93 offline E2E and adversarial synthetic tests in tests/
+python3 -m unittest discover -s tests -p "test_*.py"
 ```
 
 A successful automated test suite does not, by itself, prove a live network experiment worked. Use the matching trial JSON, PCAP, and baseline verification as evidence for live claims.

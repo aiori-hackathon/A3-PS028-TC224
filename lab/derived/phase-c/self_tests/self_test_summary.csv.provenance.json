@@ -1,0 +1,12 @@
+{
+  "target_file": "self_test_summary.csv",
+  "sha256": "14ca9fdb666abf38bd9d65763c28125660fdfa660ee52090c4380b5a5647775e",
+  "row_count": 7,
+  "generated_by_command": "lab/self_test_scenarios.py --dry-run --bundle",
+  "git_commit": "7c6ab23c2a378bbc8556fcc15f5911f626502576",
+  "git_branch": "regional/ps028-phase-cd",
+  "python_version": "3.12.3",
+  "platform": "Linux-6.18.58.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+  "run_id": "st-20261112T065243Z-ce0f3c97",
+  "execution_mode": "SIMULATION"
+}

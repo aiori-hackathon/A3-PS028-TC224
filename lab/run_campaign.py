@@ -29,6 +29,7 @@ Coordinates systematic, reproducible Happy Eyeballs measurement campaigns:
 import argparse
 import contextlib
 import datetime
+import errno
 import fcntl
 import hashlib
 import json
@@ -40,7 +41,7 @@ import signal
 import sys
 import threading
 import time
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
@@ -51,11 +52,13 @@ import lab.concurrency as concurrency
 import lab.impair as impair
 import lab.run_trial as run_trial
 
-SCHEMA_VERSION = "1.0.0"
+SCHEMA_VERSION = "1.1.0"
+SUPPORTED_SCHEMA_VERSIONS = frozenset({"1.0.0", "1.1.0"})
 DEFAULT_SCENARIOS = ["S0", "S1", "S2", "S3", "S4", "S5", "S6"]
 DEFAULT_CAMPAIGNS_DIR = SCRIPT_DIR / "campaigns"
 MANIFEST_FILENAME = "campaign_manifest.json"
 LOCK_FILENAME = ".campaign.lock"
+FAILURE_RECORD_FILENAME = "failed_attempt_record.json"
 
 # Documented mismatch between initial README text and canonical lab/scenarios.yaml
 # Per PS-028 specification, canonical scenarios are NEVER silently modified and evidence is not relabeled.
@@ -73,6 +76,45 @@ DOCUMENTED_SCENARIO_MISMATCHES: Dict[str, Dict[str, str]] = {
         "policy": "Canonical lab/scenarios.yaml configuration preserved per PS-028 specification; evidence not relabeled."
     }
 }
+
+
+def _resolve_repo_relative_path(path: Union[str, Path]) -> Path:
+    """Resolve portable and legacy evidence paths against the current checkout.
+
+    New result JSON and campaign manifests use repository-relative paths for
+    project-owned evidence. Absolute paths from a previous checkout (including
+    the former ``he-webtester`` directory name) are remapped only when the
+    corresponding repository-relative file exists in this checkout. Absolute
+    paths outside a recognized checkout remain unchanged.
+    """
+    candidate = Path(path).expanduser()
+    if not candidate.is_absolute():
+        return (REPO_ROOT / candidate).resolve()
+
+    resolved = candidate.resolve(strict=False)
+    try:
+        resolved.relative_to(REPO_ROOT)
+        return resolved
+    except ValueError:
+        pass
+
+    recognized_checkout_names = {REPO_ROOT.name, "he-webtester"}
+    parts = resolved.parts
+    is_recognized_home_checkout = (
+        len(parts) >= 6
+        and parts[0] == "/"
+        and parts[1] == "home"
+        and bool(parts[2])
+        and parts[3] == "projects"
+        and parts[4] in recognized_checkout_names
+    )
+    if is_recognized_home_checkout:
+        suffix = Path(*parts[5:])
+        relocated = (REPO_ROOT / suffix).resolve()
+        if relocated.is_file() or relocated.is_dir():
+            return relocated
+
+    return resolved
 
 
 # ==============================================================================
@@ -193,6 +235,56 @@ def generate_campaign_id(prefix: str = "campaign") -> str:
     return f"{prefix}-{ts}-{rand_suffix}"
 
 
+def fsync_directory(dir_path: Union[str, Path]) -> None:
+    """
+    Durably flushes directory metadata changes to disk on POSIX systems so file additions,
+    unlinks, or atomic renames (os.replace) are committed to the directory table.
+
+    Fail-closed semantics:
+    - On POSIX, opens the directory with O_RDONLY | O_DIRECTORY and calls os.fsync(fd).
+    - Retries on EINTR (interrupted system call).
+    - Always ensures the directory file descriptor is closed in a finally block.
+    - Propagates genuine OSErrors (e.g. EIO, EROFS, EPERM, ENOSPC) to caller rather than silently ignoring.
+    - On non-POSIX platforms where directory fsync is unsupported, raises an explicit OSError(errno.ENOSYS).
+    """
+    path_str = str(dir_path)
+    if os.name != "posix":
+        raise OSError(errno.ENOSYS, f"Directory fsync is not supported on non-POSIX platform: {os.name}")
+
+    flags = os.O_RDONLY
+    if hasattr(os, "O_DIRECTORY"):
+        flags |= os.O_DIRECTORY
+
+    fd = -1
+    while True:
+        try:
+            fd = os.open(path_str, flags)
+            break
+        except InterruptedError:
+            continue
+        except OSError as err:
+            raise OSError(err.errno, f"Failed to open directory '{path_str}' for fsync: {err.strerror}") from err
+
+    try:
+        while True:
+            try:
+                os.fsync(fd)
+                break
+            except InterruptedError:
+                continue
+            except OSError as err:
+                raise OSError(err.errno, f"Failed to fsync directory '{path_str}': {err.strerror}") from err
+    finally:
+        while True:
+            try:
+                os.close(fd)
+                break
+            except InterruptedError:
+                continue
+            except OSError:
+                break
+
+
 class ExecutionAttempt:
     """
     Represents a concrete execution attempt for a matrix slot.
@@ -212,7 +304,13 @@ class ExecutionAttempt:
         http_outcome: Dict[str, Any],
         network_observations: Dict[str, Any],
         cleanup_status: Dict[str, Any],
-        error_message: Optional[str] = None
+        error_message: Optional[str] = None,
+        slot_id: Optional[str] = None,
+        scenario_id: Optional[str] = None,
+        browser: Optional[str] = None,
+        repetition: Optional[int] = None,
+        campaign_id: Optional[str] = None,
+        interruption: Optional[Dict[str, Any]] = None
     ):
         self.attempt_number = attempt_number
         self.trial_id = trial_id
@@ -227,9 +325,15 @@ class ExecutionAttempt:
         self.network_observations = network_observations
         self.cleanup_status = cleanup_status
         self.error_message = error_message
+        self.slot_id = slot_id
+        self.scenario_id = scenario_id
+        self.browser = browser
+        self.repetition = repetition
+        self.campaign_id = campaign_id
+        self.interruption = interruption
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        res = {
             "attempt_number": self.attempt_number,
             "trial_id": self.trial_id,
             "execution_mode": self.execution_mode,
@@ -244,6 +348,19 @@ class ExecutionAttempt:
             "cleanup_status": self.cleanup_status,
             "error_message": self.error_message,
         }
+        if self.slot_id:
+            res["slot_id"] = self.slot_id
+        if self.scenario_id:
+            res["scenario_id"] = self.scenario_id
+        if self.browser:
+            res["browser"] = self.browser
+        if self.repetition is not None:
+            res["repetition"] = self.repetition
+        if self.campaign_id:
+            res["campaign_id"] = self.campaign_id
+        if self.interruption:
+            res["interruption"] = self.interruption
+        return res
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ExecutionAttempt":
@@ -260,8 +377,44 @@ class ExecutionAttempt:
             http_outcome=data.get("http_outcome", {}),
             network_observations=data.get("network_observations", {}),
             cleanup_status=data.get("cleanup_status", {}),
-            error_message=data.get("error_message")
+            error_message=data.get("error_message"),
+            slot_id=data.get("slot_id"),
+            scenario_id=data.get("scenario_id"),
+            browser=data.get("browser"),
+            repetition=data.get("repetition"),
+            campaign_id=data.get("campaign_id"),
+            interruption=data.get("interruption")
         )
+
+
+def write_failed_attempt_record(
+    trial_dir: Union[str, Path],
+    attempt: Union[ExecutionAttempt, Dict[str, Any]]
+) -> Path:
+    """
+    Atomically writes a durable failed_attempt_record.json to trial_dir:
+    - Writes to a temporary file in trial_dir.
+    - Flushes and fsyncs to ensure durability on disk.
+    - Atomically renames to failed_attempt_record.json.
+    - Flushes containing directory on POSIX systems for durability.
+    - Preserves attempt number, trial ID, status, validity, execution mode,
+      timestamps, cleanup information, evidence paths, and error details.
+    """
+    tdir = Path(trial_dir).resolve()
+    tdir.mkdir(parents=True, exist_ok=True)
+    target_path = tdir / FAILURE_RECORD_FILENAME
+    tmp_path = tdir / f"{FAILURE_RECORD_FILENAME}.tmp.{os.getpid()}_{time.time_ns()}"
+
+    data = attempt.to_dict() if isinstance(attempt, ExecutionAttempt) else dict(attempt)
+
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
+
+    os.replace(tmp_path, target_path)
+    fsync_directory(tdir)
+    return target_path
 
 
 class MatrixSlot:
@@ -377,6 +530,7 @@ def validate_attempt_evidence(
     - Strictly checks fallback classification adheres to A7 classification matrix.
     Returns: (is_valid, reason, result_dict)
     """
+    result_json_path = _resolve_repo_relative_path(result_json_path)
     if not result_json_path.is_file():
         return False, f"result.json missing at {result_json_path}", {}
 
@@ -385,8 +539,8 @@ def validate_attempt_evidence(
     except Exception as e:
         return False, f"Failed to parse result.json: {e}", {}
 
-    if data.get("schema_version") != run_trial.SCHEMA_VERSION:
-        return False, f"Schema version mismatch: {data.get('schema_version')} != {run_trial.SCHEMA_VERSION}", data
+    if data.get("schema_version") not in SUPPORTED_SCHEMA_VERSIONS:
+        return False, f"Schema version mismatch: {data.get('schema_version')} not in {sorted(list(SUPPORTED_SCHEMA_VERSIONS))}", data
 
     if data.get("scenario_id") != expected_scenario:
         return False, f"Scenario mismatch in result: {data.get('scenario_id')} != {expected_scenario}", data
@@ -403,7 +557,7 @@ def validate_attempt_evidence(
     pcap_str = data.get("capture_metadata", {}).get("pcap_path")
     if not pcap_str:
         return False, "capture_metadata missing pcap_path", data
-    pcap_path = Path(pcap_str)
+    pcap_path = _resolve_repo_relative_path(pcap_str)
     if not pcap_path.is_file():
         return False, f"PCAP file missing at {pcap_path}", data
 
@@ -497,6 +651,7 @@ class CampaignManifest:
             "schema_version": SCHEMA_VERSION,
             "campaign_id": self.campaign_id,
             "status": self.status,
+            "halt_reason": self.halt_reason,
             "execution_mode": "SIMULATION" if self.is_simulation else "LIVE",
             "is_simulation": self.is_simulation,
             "created_at": self.created_at,
@@ -516,16 +671,17 @@ class CampaignManifest:
     def save_atomically(self) -> None:
         """
         Saves manifest atomically: writes to temporary file, flushes, fsyncs,
-        and atomically renames to campaign_manifest.json.
+        atomically renames to campaign_manifest.json, and flushes directory on POSIX.
         """
         self.output_dir.mkdir(parents=True, exist_ok=True)
         data = self.to_dict()
-        tmp_path = self.manifest_path.with_suffix(".tmp")
+        tmp_path = self.manifest_path.with_suffix(f".tmp.{os.getpid()}_{time.time_ns()}")
         with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp_path, self.manifest_path)
+        fsync_directory(self.output_dir)
 
     @classmethod
     def load(cls, manifest_path: Path) -> "CampaignManifest":
@@ -539,9 +695,9 @@ class CampaignManifest:
         except Exception as e:
             raise CampaignResumeError(f"Failed to read campaign manifest {manifest_path}: {e}")
 
-        if data.get("schema_version") != SCHEMA_VERSION:
+        if data.get("schema_version") not in SUPPORTED_SCHEMA_VERSIONS:
             raise CampaignResumeError(
-                f"Manifest schema version mismatch: {data.get('schema_version')} != {SCHEMA_VERSION}"
+                f"Manifest schema version mismatch: {data.get('schema_version')} not in {sorted(list(SUPPORTED_SCHEMA_VERSIONS))}"
             )
 
         config = data.get("configuration", {})
@@ -610,7 +766,7 @@ def reconcile_manifest_for_resume(
                     break
 
             if valid_attempt:
-                res_path = Path(valid_attempt.evidence_paths.get("result_json", ""))
+                res_path = _resolve_repo_relative_path(valid_attempt.evidence_paths.get("result_json", ""))
                 is_valid, msg, _ = validate_attempt_evidence(
                     res_path,
                     slot.scenario_id,
@@ -645,6 +801,197 @@ def reconcile_manifest_for_resume(
 
 
 # ==============================================================================
+# Interruption Coordination Engine (Signal-Safe Attempt Lifecycle)
+# ==============================================================================
+
+class InterruptionCoordinator:
+    """
+    Coordinates process-wide signal interception, graceful termination,
+    and uninterrupted critical sections across campaign and trial execution.
+
+    Invariants:
+    1. First SIGINT or SIGTERM initiates controlled interruption.
+    2. Critical sections (cleanup, baseline restoration, evidence preservation,
+       manifest updates) run to completion without being aborted by signals.
+    3. Active child processes (capture, browser) registered with coordinator
+       are terminated and reaped when an interruption is signaled.
+    4. Second SIGINT/SIGTERM causes immediate forced exit (128 + signum).
+    5. Clean exit codes on interruption: SIGINT -> 130, SIGTERM -> 143.
+    """
+    def __init__(self):
+        self._interrupted: bool = False
+        self._interrupted_signum: Optional[int] = None
+        self._interrupted_signal_name: Optional[str] = None
+        self._signal_count: int = 0
+        self._critical_depth: int = 0
+        self._tracked_processes: Set[Any] = set()
+        self._termination_errors: List[str] = []
+        self._lock = threading.RLock()
+        self._old_sigint = None
+        self._old_sigterm = None
+        self._installed: bool = False
+
+    @property
+    def interrupted(self) -> bool:
+        return self._interrupted
+
+    @property
+    def signum(self) -> Optional[int]:
+        return self._interrupted_signum
+
+    @property
+    def signal_name(self) -> Optional[str]:
+        return self._interrupted_signal_name
+
+    @property
+    def signal_count(self) -> int:
+        return self._signal_count
+
+    def record_interruption(self, signum: int, signal_name: Optional[str] = None) -> None:
+        """Manually records an interruption (e.g. from an exception or simulated signal)."""
+        with self._lock:
+            self._interrupted = True
+            self._interrupted_signum = signum
+            if signal_name:
+                self._interrupted_signal_name = signal_name
+            elif hasattr(signal, "Signals"):
+                try:
+                    self._interrupted_signal_name = signal.Signals(signum).name
+                except Exception:
+                    self._interrupted_signal_name = str(signum)
+            else:
+                self._interrupted_signal_name = str(signum)
+
+    def register_process(self, proc: Any) -> None:
+        """Registers an active child process (capture or browser) for lifecycle management."""
+        with self._lock:
+            if getattr(proc, "_ps028_leader_starttime", None) is None:
+                pid = getattr(proc, "pid", None)
+                if isinstance(pid, int) and pid > 0:
+                    try:
+                        ident = run_trial.get_process_identity(pid)
+                        if ident and ident.get("valid", True) and ident.get("starttime"):
+                            proc._ps028_leader_starttime = ident["starttime"]
+                            proc._ps028_leader_ident = ident
+                    except Exception:
+                        pass
+            self._tracked_processes.add(proc)
+
+    def unregister_process(self, proc: Any) -> None:
+        """Unregisters a finished or reaped child process."""
+        with self._lock:
+            self._tracked_processes.discard(proc)
+
+    def record_termination_error(self, err: str) -> None:
+        """Records an error encountered during child process termination or reaping."""
+        with self._lock:
+            self._termination_errors.append(err)
+
+    def get_termination_errors(self) -> List[str]:
+        """Returns all recorded process termination and reaping errors."""
+        with self._lock:
+            return list(self._termination_errors)
+
+    def clear_termination_errors(self) -> None:
+        """Clears recorded process termination errors."""
+        with self._lock:
+            self._termination_errors.clear()
+
+    def terminate_tracked_processes(self) -> None:
+        """Safely terminates and reaps all currently tracked child processes."""
+        with self._lock:
+            procs = list(self._tracked_processes)
+            self._tracked_processes.clear()
+
+        for proc in procs:
+            try:
+                reaped = run_trial.terminate_process_group(
+                    proc,
+                    timeout=1.5,
+                    escalate_to_kill=True,
+                    coordinator=self
+                )
+                if not reaped:
+                    with self._lock:
+                        err = f"Failed to terminate and reap tracked process {getattr(proc, 'pid', 'unknown')}"
+                        if err not in self._termination_errors:
+                            self._termination_errors.append(err)
+            except Exception as exc:
+                with self._lock:
+                    self._termination_errors.append(
+                        f"Exception terminating tracked process {getattr(proc, 'pid', 'unknown')}: {exc}"
+                    )
+
+    @contextlib.contextmanager
+    def critical_section(self, section_name: str):
+        """
+        Guarantees that the enclosed code executes without being aborted by signals.
+        If a signal arrives during this block, it is latched into coordinator state
+        and child processes are terminated, but no KeyboardInterrupt is raised until
+        after the critical section finishes.
+        """
+        with self._lock:
+            self._critical_depth += 1
+        try:
+            yield
+        finally:
+            with self._lock:
+                self._critical_depth = max(0, self._critical_depth - 1)
+
+    def handle_signal(self, signum: int, frame: Any) -> None:
+        """Signal handler for SIGINT and SIGTERM."""
+        with self._lock:
+            self._signal_count += 1
+            if self._signal_count > 1:
+                print(
+                    f"\n[CRITICAL] Repeated signal {signum} received; forcing immediate process exit.",
+                    file=sys.stderr
+                )
+                sys.exit(128 + signum)
+
+            self._interrupted = True
+            self._interrupted_signum = signum
+            signame = signal.Signals(signum).name if hasattr(signal, "Signals") else str(signum)
+            self._interrupted_signal_name = signame
+            in_critical = self._critical_depth > 0
+
+        print(
+            f"\n[WARN] Campaign received {signame} ({signum}); requesting controlled interruption "
+            f"({'deferring until critical section completes' if in_critical else 'initiating controlled stop'})...",
+            file=sys.stderr
+        )
+
+        self.terminate_tracked_processes()
+
+        if not in_critical:
+            raise KeyboardInterrupt(f"Campaign interrupted by signal {signum} ({signame})")
+
+    def install(self) -> None:
+        """Installs the signal handlers for SIGINT and SIGTERM."""
+        with self._lock:
+            if not self._installed:
+                try:
+                    self._old_sigint = signal.signal(signal.SIGINT, self.handle_signal)
+                    self._old_sigterm = signal.signal(signal.SIGTERM, self.handle_signal)
+                    self._installed = True
+                except (ValueError, OSError):
+                    pass
+
+    def restore(self) -> None:
+        """Restores previous signal handlers."""
+        with self._lock:
+            if self._installed:
+                try:
+                    if self._old_sigint is not None:
+                        signal.signal(signal.SIGINT, self._old_sigint)
+                    if self._old_sigterm is not None:
+                        signal.signal(signal.SIGTERM, self._old_sigterm)
+                except (ValueError, OSError):
+                    pass
+                self._installed = False
+
+
+# ==============================================================================
 # Sequential Campaign Execution Engine
 # ==============================================================================
 
@@ -666,7 +1013,10 @@ class CampaignRunner:
         browser_timeout: float = 15.0,
         fail_fast_on_measurement: bool = False,
         lab_lock_file: Optional[Path] = None,
-        lock_timeout: float = 10.0
+        lock_timeout: float = 10.0,
+        exit_on_interruption: bool = True,
+        coordinator: Optional[InterruptionCoordinator] = None,
+        browser_cmd_override: Optional[List[str]] = None
     ):
         self.scenarios = [s.upper() for s in (scenarios or DEFAULT_SCENARIOS)]
         for sc in self.scenarios:
@@ -684,6 +1034,14 @@ class CampaignRunner:
         self.fail_fast_on_measurement = fail_fast_on_measurement
         self.lab_lock_file = lab_lock_file or concurrency.DEFAULT_LAB_LOCK_FILE
         self.lock_timeout = lock_timeout
+        self.exit_on_interruption = exit_on_interruption
+        self.browser_cmd_override = browser_cmd_override
+
+        # Interruption coordinator & tracking
+        self.coordinator = coordinator or InterruptionCoordinator()
+        self._active_trial_id: Optional[str] = None
+        self._active_trial_dir: Optional[Path] = None
+        self._active_slot: Optional[MatrixSlot] = None
 
         # Resolve browsers
         self.browsers = self._resolve_browsers(browsers, is_simulation)
@@ -694,6 +1052,41 @@ class CampaignRunner:
         self.trials_dir = self.output_dir / "trials"
         self.manifest_path = self.output_dir / MANIFEST_FILENAME
         self.lock_path = self.output_dir / LOCK_FILENAME
+
+    @property
+    def _interrupted(self) -> bool:
+        return self.coordinator.interrupted
+
+    @_interrupted.setter
+    def _interrupted(self, val: bool) -> None:
+        if val:
+            self.coordinator.record_interruption(getattr(signal, "SIGINT", 2), "SIGINT")
+        else:
+            self.coordinator._interrupted = False
+
+    @property
+    def _interrupted_signum(self) -> Optional[int]:
+        return self.coordinator.signum
+
+    @_interrupted_signum.setter
+    def _interrupted_signum(self, val: Optional[int]) -> None:
+        self.coordinator._interrupted_signum = val
+
+    @property
+    def _interrupted_signal_name(self) -> Optional[str]:
+        return self.coordinator.signal_name
+
+    @_interrupted_signal_name.setter
+    def _interrupted_signal_name(self, val: Optional[str]) -> None:
+        self.coordinator._interrupted_signal_name = val
+
+    @property
+    def _signal_count(self) -> int:
+        return self.coordinator.signal_count
+
+    @_signal_count.setter
+    def _signal_count(self, val: int) -> None:
+        self.coordinator._signal_count = val
 
     def _resolve_browsers(self, requested: Optional[List[str]], is_simulation: bool) -> List[str]:
         """Resolves and validates available browsers."""
@@ -759,6 +1152,50 @@ class CampaignRunner:
         manifest.save_atomically()
         return manifest
 
+    def _collect_preserved_evidence(self, trial_dir: Path) -> Tuple[Dict[str, str], Dict[str, Any]]:
+        """
+        Audits physical trial directory to preserve all genuine evidence generated
+        prior to an error or signal interruption. Never overwrites or removes files.
+        """
+        paths = {"trial_dir": str(trial_dir)}
+        cap_meta: Dict[str, Any] = {}
+
+        pcap_file = trial_dir / "capture.pcap"
+        if pcap_file.is_file() and pcap_file.stat().st_size > 0:
+            try:
+                valid, sha, sz, count, msg = run_trial.validate_pcap_file(pcap_file)
+                cap_meta = {
+                    "pcap_path": str(pcap_file),
+                    "pcap_sha256": sha,
+                    "pcap_size_bytes": sz,
+                    "packet_count": count,
+                    "pcap_valid": valid,
+                    "validation_message": msg,
+                }
+            except Exception as pe:
+                cap_meta = {
+                    "pcap_path": str(pcap_file),
+                    "pcap_size_bytes": pcap_file.stat().st_size,
+                    "pcap_valid": False,
+                    "validation_message": f"PCAP audit error: {pe}",
+                }
+            paths["capture_pcap"] = str(pcap_file)
+
+        evidence_names = [
+            ("result.json", "result_json"),
+            ("tcpdump.log", "tcpdump_log"),
+            ("browser.log", "browser_log"),
+            ("netlog.json", "browser_netlog"),
+            ("browser_telemetry.log", "browser_telemetry"),
+            (FAILURE_RECORD_FILENAME, "failed_attempt_record")
+        ]
+        for fname, key in evidence_names:
+            fpath = trial_dir / fname
+            if fpath.is_file():
+                paths[key] = str(fpath)
+
+        return paths, cap_meta
+
     def execute_slot_attempt(
         self,
         slot: MatrixSlot,
@@ -768,9 +1205,11 @@ class CampaignRunner:
         Executes one trial attempt for the given matrix slot:
         1. Generates unique trial ID (trial-<timestamp>-<hash>).
         2. Assigns dedicated directory under trials/<trial_id> (NEVER overwrites).
-        3. Calls run_trial.run_trial in-process.
+        3. Calls run_trial.run_trial in-process with caller-managed signal coordination.
         4. Validates cleanup and baseline restoration unconditionally.
-        5. Returns structured ExecutionAttempt.
+        5. Preserves all partial evidence generated before an interruption or failure.
+        6. Durably and atomically writes failed_attempt_record.json on failure or interruption.
+        7. Returns structured ExecutionAttempt agreeing with physical failure record.
         """
         trial_id = run_trial.generate_trial_id()
         trial_dir = self.trials_dir / trial_id
@@ -787,6 +1226,10 @@ class CampaignRunner:
         trial_result: Optional[Dict[str, Any]] = None
         exec_error: Optional[str] = None
 
+        self._active_slot = slot
+        self._active_trial_id = trial_id
+        self._active_trial_dir = trial_dir
+
         try:
             trial_result = run_trial.run_trial(
                 scenario_id=slot.scenario_id,
@@ -798,152 +1241,232 @@ class CampaignRunner:
                 is_simulation=self.is_simulation,
                 skip_baseline_check=False,
                 lock_file=self.lab_lock_file,
-                lock_timeout=self.lock_timeout
+                lock_timeout=self.lock_timeout,
+                caller_manages_signals=True,
+                coordinator=self.coordinator,
+                raw_cmd_override=self.browser_cmd_override
             )
+        except (KeyboardInterrupt, InterruptedError) as ki:
+            if not self.coordinator.interrupted:
+                self.coordinator.record_interruption(getattr(signal, "SIGINT", 2), "SIGINT")
+            exec_error = f"Campaign attempt interrupted by signal {self.coordinator.signum} ({self.coordinator.signal_name}): {ki}"
         except Exception as exc:
             exec_error = str(exc)
+        finally:
+            self._active_trial_id = None
+            self._active_trial_dir = None
+            self._active_slot = None
 
-        end_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        duration_ms = round((time.time() - t_start) * 1000.0, 2)
+        with self.coordinator.critical_section("attempt_finalization"):
+            end_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            duration_ms = round((time.time() - t_start) * 1000.0, 2)
 
-        # ----------------------------------------------------------------------
-        # FAIL-STOP EVALUATION: Cleanup & Baseline Verification
-        # ----------------------------------------------------------------------
-        cleanup_status: Dict[str, Any] = {}
-        if trial_result:
-            cleanup_status = trial_result.get("cleanup_status", {})
-        else:
-            # Trial failed before writing result: check whether baseline is clean
-            baseline_ok = False
+            # Audit all genuine evidence physically written to trial_dir
+            disk_paths, disk_pcap_meta = self._collect_preserved_evidence(trial_dir)
+
+            # ----------------------------------------------------------------------
+            # FAIL-STOP EVALUATION: Cleanup & Baseline Verification
+            # ----------------------------------------------------------------------
+            cleanup_status: Dict[str, Any] = {}
+            if trial_result:
+                cleanup_status = trial_result.get("cleanup_status", {})
+            else:
+                # Trial failed before writing result: check whether baseline is clean
+                baseline_ok = False
+                baseline_errs: List[str] = []
+                try:
+                    baseline_ok = impair.self_test_baseline(dry_run=self.is_simulation)
+                    if not baseline_ok:
+                        baseline_errs.append("Post-interruption baseline verification failed")
+                except Exception as b_exc:
+                    baseline_errs.append(f"baseline check error: {b_exc}")
+
+                if not baseline_ok:
+                    try:
+                        impair.clear_impairments(dry_run=self.is_simulation)
+                        baseline_ok = impair.self_test_baseline(dry_run=self.is_simulation)
+                        if not baseline_ok:
+                            baseline_errs.append("Baseline not clean after clear_impairments")
+                    except Exception as c_err:
+                        baseline_errs.append(f"impairment clear error: {c_err}")
+
+                cleanup_status = {
+                    "scenario_restored": baseline_ok,
+                    "baseline_verified": baseline_ok,
+                    "profile_cleaned": True,
+                    "lock_released": True,
+                    "errors": baseline_errs
+                }
+
+            scenario_restored = cleanup_status.get("scenario_restored", False)
+            baseline_verified = cleanup_status.get("baseline_verified", False)
+            cleanup_errors = list(cleanup_status.get("errors", []))
+
+            # Include any child process termination/reaping failures from coordinator
+            termination_errors = self.coordinator.get_termination_errors()
+            if termination_errors:
+                cleanup_errors.extend(termination_errors)
+                self.coordinator.clear_termination_errors()
+
+            # Extra verification of baseline state using impair.self_test_baseline
             try:
-                baseline_ok = impair.self_test_baseline(dry_run=self.is_simulation)
-            except Exception as b_exc:
-                exec_error = f"{exec_error}; baseline check error: {b_exc}" if exec_error else str(b_exc)
-            cleanup_status = {
-                "scenario_restored": False,
-                "baseline_verified": baseline_ok,
-                "profile_cleaned": True,
-                "lock_released": True,
-                "errors": [exec_error] if exec_error else ["Unknown trial error"]
-            }
-
-        scenario_restored = cleanup_status.get("scenario_restored", False)
-        baseline_verified = cleanup_status.get("baseline_verified", False)
-        cleanup_errors = cleanup_status.get("errors", [])
-
-        # Extra verification of baseline state using impair.self_test_baseline
-        try:
-            post_baseline_ok = impair.self_test_baseline(dry_run=self.is_simulation)
-            if not post_baseline_ok:
+                post_baseline_ok = impair.self_test_baseline(dry_run=self.is_simulation)
+                if not post_baseline_ok:
+                    baseline_verified = False
+                    cleanup_errors.append("Post-trial self_test_baseline returned False")
+            except Exception as b_err:
                 baseline_verified = False
-                cleanup_errors.append("Post-trial self_test_baseline returned False")
-        except Exception as b_err:
-            baseline_verified = False
-            cleanup_errors.append(f"Post-trial self_test_baseline exception: {b_err}")
+                cleanup_errors.append(f"Post-trial self_test_baseline exception: {b_err}")
 
-        # Check for cleanup/baseline failure
-        if not scenario_restored or not baseline_verified or len(cleanup_errors) > 0:
-            err_details = "; ".join(cleanup_errors) if cleanup_errors else "Baseline not verified"
+            # Persist updated cleanup and termination errors in cleanup_status
+            cleanup_status["scenario_restored"] = scenario_restored
+            cleanup_status["baseline_verified"] = baseline_verified
+            cleanup_status["errors"] = list(cleanup_errors)
+
+            # Interruption payload if signal was caught
+            interruption_info = None
+            if self.coordinator.interrupted:
+                interruption_info = {
+                    "signal_number": self.coordinator.signum,
+                    "signal_name": self.coordinator.signal_name,
+                    "interrupted_at": end_iso,
+                    "error_details": exec_error or "Campaign interrupted by signal"
+                }
+
+            # Check for cleanup/baseline failure
+            if not scenario_restored or not baseline_verified or len(cleanup_errors) > 0:
+                err_details = "; ".join(cleanup_errors) if cleanup_errors else "Baseline not verified"
+                timestamps = (
+                    trial_result.get("timestamps", {})
+                    if trial_result and trial_result.get("timestamps")
+                    else {"start_time": start_iso, "end_time": end_iso, "duration_ms": duration_ms}
+                )
+                evidence_paths = (
+                    trial_result.get("evidence_paths", {})
+                    if trial_result and trial_result.get("evidence_paths")
+                    else disk_paths
+                )
+                capture_metadata = (
+                    trial_result.get("capture_metadata", {})
+                    if trial_result and trial_result.get("capture_metadata")
+                    else disk_pcap_meta
+                )
+                http_outcome = trial_result.get("http_outcome", {}) if trial_result else {}
+                network_observations = trial_result.get("network_observations", {}) if trial_result else {}
+
+                attempt = ExecutionAttempt(
+                    attempt_number=attempt_number,
+                    trial_id=trial_id,
+                    execution_mode="SIMULATION" if self.is_simulation else "LIVE",
+                    is_simulation=self.is_simulation,
+                    timestamps=timestamps,
+                    status="FAILED",
+                    validity="CLEANUP_FAILURE",
+                    evidence_paths=evidence_paths,
+                    capture_metadata=capture_metadata,
+                    http_outcome=http_outcome,
+                    network_observations=network_observations,
+                    cleanup_status=cleanup_status,
+                    error_message=f"CLEANUP OR BASELINE FAILURE: {err_details}",
+                    slot_id=slot.slot_id,
+                    scenario_id=slot.scenario_id,
+                    browser=slot.browser,
+                    repetition=slot.repetition,
+                    campaign_id=self.campaign_id,
+                    interruption=interruption_info
+                )
+                write_failed_attempt_record(trial_dir, attempt)
+                return attempt
+
+            # If trial errored out during execution or was interrupted
+            if trial_result is None or exec_error is not None:
+                attempt_status = "INTERRUPTED" if self.coordinator.interrupted else "FAILED"
+                attempt_validity = "INTERRUPTED" if self.coordinator.interrupted else "MEASUREMENT_FAILURE"
+                attempt = ExecutionAttempt(
+                    attempt_number=attempt_number,
+                    trial_id=trial_id,
+                    execution_mode="SIMULATION" if self.is_simulation else "LIVE",
+                    is_simulation=self.is_simulation,
+                    timestamps={"start_time": start_iso, "end_time": end_iso, "duration_ms": duration_ms},
+                    status=attempt_status,
+                    validity=attempt_validity,
+                    evidence_paths=disk_paths,
+                    capture_metadata=disk_pcap_meta,
+                    http_outcome={},
+                    network_observations={},
+                    cleanup_status=cleanup_status,
+                    error_message=exec_error,
+                    slot_id=slot.slot_id,
+                    scenario_id=slot.scenario_id,
+                    browser=slot.browser,
+                    repetition=slot.repetition,
+                    campaign_id=self.campaign_id,
+                    interruption=interruption_info
+                )
+                write_failed_attempt_record(trial_dir, attempt)
+                return attempt
+
+            # Validate evidence using existing A7 rules
+            pcap_meta = trial_result.get("capture_metadata", {})
+            pcap_valid = pcap_meta.get("pcap_valid", False)
+            packet_count = pcap_meta.get("packet_count", 0)
+            net_obs = trial_result.get("network_observations", {})
+            classification = net_obs.get("classification", "INCONCLUSIVE")
+
+            if self.is_simulation:
+                validity = "SIMULATION"
+                status = "COMPLETED"
+            elif pcap_valid and packet_count > 0 and classification != "INCONCLUSIVE":
+                validity = "VALID_LIVE"
+                status = "COMPLETED"
+            else:
+                validity = "MEASUREMENT_FAILURE"
+                status = "FAILED"
+                exec_error = pcap_meta.get("validation_message") or "Measurement classification failed or inconclusive"
+
             attempt = ExecutionAttempt(
                 attempt_number=attempt_number,
                 trial_id=trial_id,
-                execution_mode="SIMULATION" if self.is_simulation else "LIVE",
+                execution_mode=trial_result.get("execution_mode", "LIVE"),
                 is_simulation=self.is_simulation,
-                timestamps={"start_time": start_iso, "end_time": end_iso, "duration_ms": duration_ms},
-                status="FAILED",
-                validity="CLEANUP_FAILURE",
-                evidence_paths={"trial_dir": str(trial_dir)},
-                capture_metadata={},
-                http_outcome={},
-                network_observations={},
+                timestamps=trial_result.get("timestamps", {}),
+                status=status,
+                validity=validity,
+                evidence_paths=trial_result.get("evidence_paths", {}),
+                capture_metadata=pcap_meta,
+                http_outcome=trial_result.get("http_outcome", {}),
+                network_observations=net_obs,
                 cleanup_status=cleanup_status,
-                error_message=f"CLEANUP OR BASELINE FAILURE: {err_details}"
+                error_message=exec_error,
+                slot_id=slot.slot_id,
+                scenario_id=slot.scenario_id,
+                browser=slot.browser,
+                repetition=slot.repetition,
+                campaign_id=self.campaign_id,
+                interruption=interruption_info
             )
+            if status == "FAILED" or validity in ("CLEANUP_FAILURE", "MEASUREMENT_FAILURE"):
+                write_failed_attempt_record(trial_dir, attempt)
             return attempt
-
-        # If trial errored out during execution
-        if trial_result is None or exec_error is not None:
-            attempt = ExecutionAttempt(
-                attempt_number=attempt_number,
-                trial_id=trial_id,
-                execution_mode="SIMULATION" if self.is_simulation else "LIVE",
-                is_simulation=self.is_simulation,
-                timestamps={"start_time": start_iso, "end_time": end_iso, "duration_ms": duration_ms},
-                status="FAILED",
-                validity="MEASUREMENT_FAILURE",
-                evidence_paths={"trial_dir": str(trial_dir)},
-                capture_metadata={},
-                http_outcome={},
-                network_observations={},
-                cleanup_status=cleanup_status,
-                error_message=exec_error
-            )
-            return attempt
-
-        # Validate evidence using existing A7 rules
-        pcap_meta = trial_result.get("capture_metadata", {})
-        pcap_valid = pcap_meta.get("pcap_valid", False)
-        packet_count = pcap_meta.get("packet_count", 0)
-        net_obs = trial_result.get("network_observations", {})
-        classification = net_obs.get("classification", "INCONCLUSIVE")
-
-        if self.is_simulation:
-            validity = "SIMULATION"
-            status = "COMPLETED"
-        elif pcap_valid and packet_count > 0 and classification != "INCONCLUSIVE":
-            validity = "VALID_LIVE"
-            status = "COMPLETED"
-        else:
-            validity = "MEASUREMENT_FAILURE"
-            status = "FAILED"
-            exec_error = pcap_meta.get("validation_message") or "Measurement classification failed or inconclusive"
-
-        attempt = ExecutionAttempt(
-            attempt_number=attempt_number,
-            trial_id=trial_id,
-            execution_mode=trial_result.get("execution_mode", "LIVE"),
-            is_simulation=self.is_simulation,
-            timestamps=trial_result.get("timestamps", {}),
-            status=status,
-            validity=validity,
-            evidence_paths=trial_result.get("evidence_paths", {}),
-            capture_metadata=pcap_meta,
-            http_outcome=trial_result.get("http_outcome", {}),
-            network_observations=net_obs,
-            cleanup_status=cleanup_status,
-            error_message=exec_error
-        )
-        return attempt
 
     def run(self) -> Dict[str, Any]:
         """
         Executes the campaign sequentially under the campaign manifest lock:
         - Prevents concurrent access to the campaign manifest.
         - Sequentially runs each pending matrix slot.
+        - Gracefully handles SIGINT (exit 130) and SIGTERM (exit 143), ensuring active attempts
+          are finalized with durable failure records and cleanup is executed before exit.
         - Immediately stops upon any cleanup or baseline failure (FAIL-STOP).
         - Atomically saves manifest after every attempt.
         """
         with acquire_manifest_lock(self.lock_path, timeout=self.lock_timeout):
             manifest = self.initialize_manifest()
+            self._manifest = manifest
 
-            # Signal interruption handler
-            interrupted = False
-
-            def _handle_signal(signum, frame):
-                nonlocal interrupted
-                interrupted = True
-                manifest.status = "INTERRUPTED"
-                manifest.halt_reason = f"Campaign interrupted by signal {signum}"
-                manifest.save_atomically()
-                print(f"\n[WARN] Campaign interrupted by signal {signum}. Manifest saved safely.", file=sys.stderr)
-                sys.exit(130)
-
-            old_sigint = signal.signal(signal.SIGINT, _handle_signal)
-            old_sigterm = signal.signal(signal.SIGTERM, _handle_signal)
-
+            self.coordinator.install()
             try:
                 for slot in manifest.matrix_slots:
-                    if interrupted:
+                    if self.coordinator.interrupted:
                         break
 
                     if slot.is_completed():
@@ -954,15 +1477,26 @@ class CampaignRunner:
                     attempt = self.execute_slot_attempt(slot, attempt_number=attempt_num)
                     slot.add_attempt(attempt)
 
-                    # Check FAIL-STOP condition: Cleanup or Baseline Failure
+                    # Check FAIL-STOP condition: Cleanup or Baseline Failure (paramount, even after signal)
                     if attempt.validity == "CLEANUP_FAILURE":
                         manifest.status = "HALTED_ON_FAILURE"
                         manifest.halt_reason = (
                             f"FAIL-STOP: Lab cleanup or baseline restoration failed at slot "
                             f"{slot.slot_id} (trial {attempt.trial_id}): {attempt.error_message}"
                         )
-                        manifest.save_atomically()
+                        with self.coordinator.critical_section("manifest_save"):
+                            manifest.save_atomically()
                         raise CampaignHaltedError(manifest.halt_reason)
+
+                    if self.coordinator.interrupted:
+                        manifest.status = "INTERRUPTED"
+                        manifest.halt_reason = (
+                            f"Campaign interrupted by signal {self.coordinator.signum} "
+                            f"({self.coordinator.signal_name})"
+                        )
+                        with self.coordinator.critical_section("manifest_save"):
+                            manifest.save_atomically()
+                        break
 
                     # Optional fail-fast on measurement failure
                     if self.fail_fast_on_measurement and attempt.status == "FAILED":
@@ -971,14 +1505,24 @@ class CampaignRunner:
                             f"Fail-fast triggered on measurement failure at slot "
                             f"{slot.slot_id} (trial {attempt.trial_id}): {attempt.error_message}"
                         )
-                        manifest.save_atomically()
+                        with self.coordinator.critical_section("manifest_save"):
+                            manifest.save_atomically()
                         raise CampaignHaltedError(manifest.halt_reason)
 
                     # Save progress atomically after each attempt
-                    manifest.save_atomically()
+                    with self.coordinator.critical_section("manifest_save"):
+                        manifest.save_atomically()
 
                 # Finalize campaign status
-                if not interrupted:
+                if self.coordinator.interrupted:
+                    manifest.status = "INTERRUPTED"
+                    manifest.halt_reason = (
+                        f"Campaign interrupted by signal {self.coordinator.signum} "
+                        f"({self.coordinator.signal_name})"
+                    )
+                    with self.coordinator.critical_section("manifest_save"):
+                        manifest.save_atomically()
+                else:
                     all_done = all(s.is_completed() for s in manifest.matrix_slots)
                     if all_done:
                         manifest.status = "COMPLETED"
@@ -994,14 +1538,30 @@ class CampaignRunner:
                                     break
                             manifest.completed_at = latest_end or datetime.datetime.now(datetime.timezone.utc).isoformat()
                     else:
-                        if manifest.status != "HALTED_ON_FAILURE":
+                        if manifest.status not in ("HALTED_ON_FAILURE", "INTERRUPTED"):
                             manifest.status = "INCOMPLETE"
-                    manifest.save_atomically()
+                    with self.coordinator.critical_section("manifest_save"):
+                        manifest.save_atomically()
+
+                if self.coordinator.interrupted and self.exit_on_interruption:
+                    sys.exit(128 + self.coordinator.signum)
 
                 return manifest.to_dict()
+            except KeyboardInterrupt:
+                if self.coordinator.interrupted:
+                    manifest.status = "INTERRUPTED"
+                    manifest.halt_reason = (
+                        f"Campaign interrupted by signal {self.coordinator.signum} "
+                        f"({self.coordinator.signal_name})"
+                    )
+                    with self.coordinator.critical_section("manifest_save"):
+                        manifest.save_atomically()
+                    if self.exit_on_interruption:
+                        sys.exit(128 + self.coordinator.signum)
+                    return manifest.to_dict()
+                raise
             finally:
-                signal.signal(signal.SIGINT, old_sigint)
-                signal.signal(signal.SIGTERM, old_sigterm)
+                self.coordinator.restore()
 
 
 # ==============================================================================
@@ -1037,7 +1597,7 @@ def finalize_campaign_manifest(manifest_path: Path) -> CampaignManifest:
             if not valid_attempt:
                 all_done = False
                 break
-            res_path = Path(valid_attempt.evidence_paths.get("result_json", ""))
+            res_path = _resolve_repo_relative_path(valid_attempt.evidence_paths.get("result_json", ""))
             is_valid, _, _ = validate_attempt_evidence(res_path, slot.scenario_id, manifest.is_simulation)
             if not is_valid:
                 all_done = False

@@ -1,0 +1,12 @@
+{
+  "amendment_a13_compliant": true,
+  "generated_by_command": "python3 lab/run_research_sweep.py",
+  "is_simulation": true,
+  "platform": "Linux-6.18.58.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+  "python_version": "3.12.3",
+  "random_seed": 42,
+  "row_count": 720,
+  "sha256": "df8cf34c26aa16ea06952f3c0a9188050760775e84d821c19f0b4f8c6dec86c9",
+  "sweep_type": "D2_DNS_SWEEP",
+  "target_file": "d2_dns_sweep.csv"
+}

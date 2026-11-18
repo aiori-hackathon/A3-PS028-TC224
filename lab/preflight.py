@@ -281,9 +281,14 @@ def check_configuration_files() -> List[Dict[str, Any]]:
     return results
 
 
-def check_sudo_authorization() -> Dict[str, Any]:
+def check_sudo_authorization(
+    helper_path: Optional[Path] = None,
+    python_path: Optional[Path] = None,
+    is_test_fixture: bool = False
+) -> Dict[str, Any]:
     """
-    Verifies that non-interactive root authorization is available via sudo -n.
+    Verifies that non-interactive root authorization is available via sudo -n
+    invoking the trusted installed helper (check-auth).
     Returns dict with status PASS/FAIL, detail message, and instructions.
     """
     if os.geteuid() == 0:
@@ -293,9 +298,13 @@ def check_sudo_authorization() -> Dict[str, Any]:
             "method": "root",
             "message": "Process is running as root (EUID 0)."
         }
+
+    target_helper = helper_path or (Path("/usr/local/libexec/ps028/privileged_helper.py") if not is_test_fixture else (SCRIPT_DIR / "privileged_helper.py"))
+    target_python = python_path or (Path("/usr/bin/python3") if not is_test_fixture else Path(sys.executable))
+
     try:
         proc = subprocess.run(
-            ["sudo", "-n", "true"],
+            ["sudo", "-n", str(target_python), "-I", str(target_helper), "check-auth"],
             capture_output=True,
             text=True,
             check=False
@@ -317,7 +326,8 @@ def check_sudo_authorization() -> Dict[str, Any]:
                 "message": (
                     "Non-interactive sudo authorization is unavailable (sudo -n failed). "
                     "Live PS-028 measurement operations require root privileges for network and capture operations. "
-                    "Please run 'sudo -v' in your terminal before running live trials or campaigns."
+                    "Please ensure the trusted privileged helper is deployed via lab/deploy_privileged_helper.sh "
+                    "and run 'sudo -v' in your terminal before running live trials or campaigns."
                 )
             }
     except FileNotFoundError:

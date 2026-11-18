@@ -1,0 +1,229 @@
+name: PS-028 Continuous Integration
+
+'on':
+  push:
+    branches:
+      - fix/phase-e-bundle-timeline-mapping
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python-tests:
+    name: Python Backend & Integration Tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Install system dependencies (TShark)
+        run: |
+          sudo apt-get update
+          EXPECTED_VER=$(grep "^tshark=" lab/system_packages.txt | cut -d'=' -f2)
+          echo "Expected TShark version from manifest: ${EXPECTED_VER}"
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "tshark=${EXPECTED_VER}"
+          INSTALLED_VER=$(dpkg-query -W -f='${Version}' tshark)
+          echo "Installed TShark version: ${INSTALLED_VER}"
+          if [ "${INSTALLED_VER}" != "${EXPECTED_VER}" ]; then
+            echo "[ERROR] Installed TShark version '${INSTALLED_VER}' differs from pinned manifest '${EXPECTED_VER}'" >&2
+            exit 1
+          fi
+          echo "[OK] Verified exact pinned TShark package: ${INSTALLED_VER}"
+          command -v tshark
+          tshark --version
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7.1.0
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: 'requirements.lock'
+
+      - name: Install dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install --require-hashes -r requirements.lock
+
+      - name: Python environment and dependency diagnostics
+        run: |
+          python3 -c "
+          import sys, subprocess, shutil, pathlib
+          print(f'[DIAGNOSTIC] sys.executable: {sys.executable}')
+          print(f'[DIAGNOSTIC] Python version: {sys.version}')
+          pip_proc = subprocess.run([sys.executable, '-m', 'pip', '--version'], capture_output=True, text=True, check=True)
+          print(f'[DIAGNOSTIC] Pip version: {pip_proc.stdout.strip()}')
+          import dns
+          print(f'[DIAGNOSTIC] Normal dnspython version: {getattr(dns, \"__version__\", \"unknown\")} location: {dns.__file__}')
+          import yaml
+          print(f'[DIAGNOSTIC] Normal PyYAML version: {getattr(yaml, \"__version__\", \"unknown\")} location: {yaml.__file__}')
+          iso_proc = subprocess.run(
+              [sys.executable, '-I', '-c', 'import sys, yaml, dns; print(f\"[ISOLATED] yaml={yaml.__file__} dns={dns.__file__}\")'],
+              capture_output=True, text=True
+          )
+          print(f'[DIAGNOSTIC] Isolated-mode returncode: {iso_proc.returncode}')
+          print(f'[DIAGNOSTIC] Isolated-mode stdout: {iso_proc.stdout.strip()}')
+          if iso_proc.returncode != 0:
+              print(f'[ERROR] Isolated-mode stderr: {iso_proc.stderr.strip()}', file=sys.stderr)
+              sys.exit(1)
+          chrome_path = shutil.which('google-chrome')
+          if chrome_path:
+              c_proc = subprocess.run([chrome_path, '--version'], capture_output=True, text=True)
+              print(f'[DIAGNOSTIC] Browser found at {chrome_path}: {c_proc.stdout.strip()}')
+              cp = pathlib.Path(chrome_path).resolve()
+              print(f'[DIAGNOSTIC] Resolved browser path: {cp} (mode {oct(cp.stat().st_mode)})')
+              for p in cp.parents:
+                  print(f'[DIAGNOSTIC] Parent: {p} (mode {oct(p.stat().st_mode)})')
+          else:
+              print('[DIAGNOSTIC] google-chrome not found in PATH')
+          "
+
+      - name: Verify historical campaign checksum manifest (Rule R2)
+        run: |
+          sha256sum -c lab/derived/phase-c/historical_integrity_before.sha256
+
+      - name: Run Python lab unit and regression tests
+        run: |
+          python3 -m unittest discover -s lab -p "test_*.py"
+
+      - name: Run Python integration tests
+        run: |
+          python3 -m unittest discover -s tests -p "test_*.py"
+
+  frontend-validation:
+    name: Frontend WebTester Validation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7.0.1
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: setup/webtester/package-lock.json
+
+      - name: Install dependencies
+        working-directory: setup/webtester
+        run: npm ci
+
+      - name: Run frontend unit tests (Historical Evidence Explorer)
+        working-directory: setup/webtester
+        run: npm test
+
+      - name: Run Astro check and TypeScript validation
+        working-directory: setup/webtester
+        run: npm run check
+
+      - name: Build static production site
+        working-directory: setup/webtester
+        run: npm run build
+
+      - name: Run distribution smoke tests
+        working-directory: setup/webtester
+        run: npm run test:smoke
+
+      - name: Install Playwright browsers and dependencies
+        working-directory: setup/webtester
+        run: npx playwright install --with-deps chromium
+
+      - name: Run genuine browser acceptance tests
+        working-directory: setup/webtester
+        run: npm run test:browser
+
+  artifacts-validation:
+    name: Submission Artifacts & PDF Validation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    needs: [python-tests, frontend-validation]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7.1.0
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: 'requirements.lock'
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: setup/webtester/package-lock.json
+
+      - name: Install Python dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install --require-hashes -r requirements.lock
+
+      - name: Install frontend dependencies
+        working-directory: setup/webtester
+        run: npm ci
+
+      - name: Install Playwright browsers and dependencies
+        working-directory: setup/webtester
+        run: npx playwright install --with-deps chromium
+
+      - name: Build presentation PDF
+        run: |
+          python3 lab/build_submission_report.py
+
+      - name: Build technical report PDF
+        run: |
+          python3 lab/build_technical_report_pdf.py
+
+      - name: Verify generated PDF artifacts
+        run: |
+          python3 -c "
+          import re, sys
+          from pathlib import Path
+
+          # 1. Verify Presentation PDF
+          pres = Path('PS028_Hackathon_Submission_Presentation.pdf')
+          if not pres.is_file() or pres.stat().st_size == 0:
+              print('[ERROR] Presentation PDF missing or empty', file=sys.stderr)
+              sys.exit(1)
+          pres_pages = len(re.findall(rb'/Type\s*/Page\b', pres.read_bytes()))
+          if pres_pages != 11:
+              print(f'[ERROR] Presentation PDF expected 11 pages, got {pres_pages}', file=sys.stderr)
+              sys.exit(1)
+          print(f'[PASS] Presentation PDF verified: {pres.stat().st_size:,} bytes, {pres_pages} pages')
+
+          # 2. Verify Technical Report PDF
+          tech = Path('PS028 Detailed Analysis & Report PDF.pdf')
+          if not tech.is_file() or tech.stat().st_size < 400_000:
+              print(f'[ERROR] Technical Report PDF missing or too small ({tech.stat().st_size if tech.is_file() else 0} bytes)', file=sys.stderr)
+              sys.exit(1)
+          tech_pages = len(re.findall(rb'/Type\s*/Page\b', tech.read_bytes()))
+          if tech_pages < 18:
+              print(f'[ERROR] Technical Report PDF expected >= 18 pages, got {tech_pages}', file=sys.stderr)
+              sys.exit(1)
+          print(f'[PASS] Technical Report PDF verified: {tech.stat().st_size:,} bytes, {tech_pages} pages')
+          "
+
+      - name: Upload submission PDF artifacts
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: ps028-submission-artifacts
+          path: |
+            PS028_Hackathon_Submission_Presentation.pdf
+            PS028 Detailed Analysis & Report PDF.pdf
+            lab/derived/phase-c/presentation_deck.html
+            lab/derived/phase-c/technical_report.html

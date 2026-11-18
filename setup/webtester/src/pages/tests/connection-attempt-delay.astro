@@ -9,20 +9,20 @@ import { ConnectionAttemptDelayTest } from "@/components/tests/connection-attemp
     titleLine1="Happy Eyeballs"
     titleLine2="Connection Attempt Delay Test"
   >
-    <p>
+    <p class="text-black">
       We set up a server with as many unique IPv4 and IPv6 addresses as measured
       delays. Each delay has a corresponding IPv4 and IPv6 address bound to all
       subdomains of a delay-specific domain name. By using tc netem, we delay
       the traffic for the IPv6 address by the configured number of milliseconds.
       This enables us to test how browsers deploy Happy Eyeballs.
     </p>
-    <p>
+    <p class="text-black">
       We randomize domains to prevent caching effects on the browser's side. The
       measurement without randomization shows whether the browser caches or uses
       performance measurements to select IP versions. The web server only offers
       HTTP/1.1 to prevent connection reuse between tests.
     </p>
-    <p>
+    <p class="text-black">
       Please note that the connection attempt trace for this test is currently
       unreliable, as correlation requires an SNI to be present.
     </p>

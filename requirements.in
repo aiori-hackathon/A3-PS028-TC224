@@ -1,0 +1,13 @@
+# PS-028 Happy Eyeballs Measurement Lab - Top-Level Dependencies
+# Pinned direct dependencies for reproducible builds across Python 3.12+ environments.
+# Direct requirements:
+# - PyYAML: Scenario configuration and baseline parsing
+# - markdown-it-py: Technical report HTML/PDF generation engine
+# - dnspython: DNS resolution, query validation, and record testing
+# Transitive requirement pinned for exact hash verification:
+# - mdurl: Required transitively by markdown-it-py (URL parsing engine)
+
+PyYAML==6.0.1
+markdown-it-py==3.0.0
+mdurl==0.1.2
+dnspython==2.6.1

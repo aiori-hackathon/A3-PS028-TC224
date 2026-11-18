@@ -1,0 +1,8 @@
+scenario_id,execution_mode,status,elapsed_sec,pre_baseline_ok,post_baseline_ok,key_metric_name,key_metric_value,secondary_metric_name,secondary_metric_value,error
+S0,SIMULATION,PASS,0.007,True,True,ipv4_rtt_ms,20.100,ipv6_rtt_ms,20.200,
+S1,SIMULATION,PASS,0.006,True,True,ipv6_tcp_outcome,timeout,ipv6_timeout_sec,2.000,
+S2,SIMULATION,PASS,0.008,True,True,ipv6_tcp_outcome,refused,rst_elapsed_sec,0.020,
+S3,SIMULATION,PASS,0.006,True,True,ipv6_rtt_ms,150.300,ipv4_rtt_ms,20.200,
+S4,SIMULATION,PASS,0.006,True,True,ipv6_rtt_ms,600.400,ipv4_rtt_ms,20.200,
+S5,SIMULATION,PASS,0.008,True,True,observed_loss_pct,48.000,total_syn_count,50,
+S6,SIMULATION,PASS,0.006,True,True,aaaa_delay_ms,508.000,observed_delay_delta_ms,504.500,

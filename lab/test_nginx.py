@@ -117,6 +117,12 @@ http {{
     @classmethod
     def tearDownClass(cls):
         subprocess.run(["nginx", "-c", str(cls.test_conf), "-s", "stop"], check=False)
+        if hasattr(cls, "proc") and cls.proc:
+            try:
+                cls.proc.wait(timeout=2.0)
+            except subprocess.TimeoutExpired:
+                cls.proc.kill()
+                cls.proc.wait()
         time.sleep(0.1)
         if cls.temp_dir.exists():
             import shutil

@@ -35,8 +35,25 @@ LOCK_FILE = SCRIPT_DIR / ".verify_dns.lock"
 DNS_CONFIG_FILE = SCRIPT_DIR / "dns_config.json"
 DNS_BACKUP_A3 = SCRIPT_DIR / "dns_config.json.bak"
 DNS_BACKUP_A4 = SCRIPT_DIR / "dns_config.json.impair_bak"
-DNS_PID_FILE = SCRIPT_DIR / "dns.pid"
+
+DEFAULT_DNS_PID_FILE = Path("/run/ps028/dns.pid")
+DNS_PID_FILE = DEFAULT_DNS_PID_FILE
+
+DEFAULT_DNS_LOG_FILE = Path("/var/log/ps028/dns.log")
+DNS_LOG_FILE = DEFAULT_DNS_LOG_FILE
+
 DNS_SERVER_SCRIPT = SCRIPT_DIR / "dns_server.py"
+
+def resolve_dns_pid_file(preferred: Optional[Path] = None) -> Path:
+    if preferred is not None:
+        return preferred
+    return DEFAULT_DNS_PID_FILE
+
+
+def resolve_dns_log_file(preferred: Optional[Path] = None) -> Path:
+    if preferred is not None:
+        return preferred
+    return DEFAULT_DNS_LOG_FILE
 
 NFT_TABLE_NAME = "ps028_impair"
 NFT_FAMILY = "inet"
@@ -74,6 +91,42 @@ class ImpairmentError(Exception):
 class LockAcquisitionError(LabLockError, ImpairmentError):
     """Raised when lab or DNS lock cannot be acquired."""
     pass
+
+
+class DNSReloadError(ImpairmentError):
+    """Base exception for DNS server reload and configuration verification failures."""
+    pass
+
+
+class DNSPIDError(DNSReloadError):
+    """Raised when DNS PID file is missing, corrupt, stale, or process cmdline mismatches."""
+    pass
+
+
+class DNSSignalError(DNSReloadError):
+    """Raised when delivering SIGHUP signal to verified DNS server process fails."""
+    pass
+
+
+class DNSConfirmationTimeoutError(DNSReloadError):
+    """Raised when SIGHUP confirmation string is not observed in dns.log within timeout."""
+    pass
+
+
+class DNSConfigurationRejectedError(DNSReloadError):
+    """Raised when dns_server.py rejects configuration reload and retains old rules."""
+    pass
+
+
+class DNSDelayVerificationError(DNSReloadError):
+    """Raised when active query response delay falls outside pre-declared tolerance or query fails."""
+    pass
+
+
+DNS_LOG_FILE = SCRIPT_DIR / "dns.log"
+DNS_RELOAD_TIMEOUT_S = 2.0
+DNS_DELAY_TOLERANCE_MS = 25.0
+VERIFY_QUERY_DOMAIN = "trial-verify.he.test."
 
 
 ALLOWED_NFT_INTERFACES = {"ps028-rt-sv6", "ps028-rt-sv4"}
@@ -452,38 +505,249 @@ def save_dns_config_atomically(config: Dict[str, Any], path: Optional[Path] = No
                 pass
 
 
-def reload_dns_server(dry_run: bool = False) -> None:
-    """Deliver verified SIGHUP to the running DNS server process."""
-    if dry_run:
-        log_info("[DRY-RUN] Would deliver SIGHUP to DNS server process")
-        return
-
-    if not DNS_PID_FILE.is_file():
-        log_warn("DNS PID file not found; cannot deliver SIGHUP.")
-        return
+def verify_dns_process_identity(
+    pid_file: Optional[Path] = None
+) -> int:
+    """
+    Stage 1: Verify DNS server process liveness and cmdline identity.
+    Fails closed with DNSPIDError on any discrepancy.
+    """
+    target_pid_file = resolve_dns_pid_file(pid_file)
+    if not target_pid_file.is_file():
+        raise DNSPIDError(f"DNS PID file {target_pid_file} does not exist: DNS server is not running")
 
     try:
-        pid_str = DNS_PID_FILE.read_text(encoding="utf-8").strip()
+        pid_str = target_pid_file.read_text(encoding="utf-8").strip()
         pid = int(pid_str)
     except Exception as e:
-        raise ImpairmentError(f"Invalid DNS PID file {DNS_PID_FILE}: {e}")
+        raise DNSPIDError(f"Invalid DNS PID file {target_pid_file}: {e}")
 
+    if pid <= 1:
+        raise DNSPIDError(f"Invalid DNS PID {pid} in {target_pid_file}: must be a user process > 1")
+
+    # Liveness check
     try:
-        with open(f"/proc/{pid}/cmdline", "rb") as f:
-            cmdline = [a.decode("utf-8", errors="replace") for a in f.read().split(b"\x00") if a]
-        if not any("dns_server.py" in arg for arg in cmdline):
-            raise ImpairmentError(f"PID {pid} in {DNS_PID_FILE} does not match dns_server.py (cmdline: {cmdline})")
-    except (FileNotFoundError, ProcessLookupError):
-        raise ImpairmentError(f"DNS server process {pid} is not running (stale PID file)")
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        raise DNSPIDError(f"DNS server process PID {pid} is not running (stale PID file)")
     except PermissionError:
         pass
 
+    # Authenticate process cmdline
     try:
-        os.kill(pid, signal.SIGHUP)
-        time.sleep(0.05)
-        log_ok(f"SIGHUP delivered to DNS server (PID {pid}).")
+        with open(f"/proc/{pid}/cmdline", "rb") as f:
+            raw = f.read()
+        cmdline = [a.decode("utf-8", errors="replace") for a in raw.split(b"\x00") if a]
+        if not any("dns_server.py" in arg for arg in cmdline):
+            raise DNSPIDError(
+                f"PID {pid} in {target_pid_file} does not match dns_server.py (cmdline: {cmdline})"
+            )
+    except (FileNotFoundError, ProcessLookupError):
+        raise DNSPIDError(f"DNS server process {pid} terminated unexpectedly during verification")
+    except PermissionError as e:
+        raise DNSPIDError(f"Permission denied verifying cmdline for PID {pid}: {e}")
+
+    return pid
+
+
+def read_dns_log_confirmation(
+    log_file: Path,
+    initial_offset: int,
+    timeout: float = DNS_RELOAD_TIMEOUT_S,
+    poll_interval: float = 0.02
+) -> str:
+    """
+    Stage 4: Read back SIGHUP confirmation from dns.log starting at initial_offset.
+    Fails closed on timeout or server rejection.
+    """
+    t_start = time.time()
+    success_needle = "SIGHUP config reload applied successfully"
+    rejection_needle = "SIGHUP config reload rejected:"
+
+    while time.time() - t_start < timeout:
+        if log_file.is_file() and log_file.stat().st_size > initial_offset:
+            with open(log_file, "r", encoding="utf-8", errors="replace") as f:
+                f.seek(initial_offset)
+                new_data = f.read()
+
+            if success_needle in new_data:
+                return success_needle
+
+            if rejection_needle in new_data:
+                for line in new_data.splitlines():
+                    if rejection_needle in line:
+                        raise DNSConfigurationRejectedError(
+                            f"Controlled DNS Server rejected reload: {line.strip()}"
+                        )
+                raise DNSConfigurationRejectedError("Controlled DNS Server rejected configuration reload")
+
+        time.sleep(poll_interval)
+
+    raise DNSConfirmationTimeoutError(
+        f"Timed out ({timeout}s) waiting for SIGHUP reload confirmation in {log_file} (offset {initial_offset})"
+    )
+
+
+def verify_active_dns_delay(
+    expected_delay_ms: int,
+    qtype: str = "A",
+    expected_addr: str = BASELINE_A_ADDR,
+    server_ip: str = DNS_SERVER_IP,
+    server_port: int = 53,
+    tolerance_ms: float = DNS_DELAY_TOLERANCE_MS,
+    timeout: float = 3.0,
+    netns: Optional[str] = None
+) -> float:
+    """
+    Stage 5: Send active DNS query probe and confirm response delay matches expected delay ±25ms.
+    Fails closed with DNSDelayVerificationError on timeout, error rcode, address mismatch,
+    or delay outside tolerance.
+    """
+    import dns.message
+    import dns.query
+    import dns.rcode
+
+    q = dns.message.make_query(VERIFY_QUERY_DOMAIN, qtype)
+    t0 = time.time()
+
+    try:
+        if netns:
+            cmd = ["dig", f"@{server_ip}", "-p", str(server_port), VERIFY_QUERY_DOMAIN, qtype, f"+time={int(timeout)}", "+tries=1"]
+            rc, stdout, stderr = execute_netns_cmd(netns, cmd, check=False)
+            t1 = time.time()
+            elapsed_ms = (t1 - t0) * 1000.0
+            if rc != 0 or expected_addr not in stdout:
+                raise DNSDelayVerificationError(
+                    f"Active query failed in {netns}: rc={rc}, expected {expected_addr}, stdout={stdout}"
+                )
+        else:
+            resp = dns.query.udp(q, server_ip, port=server_port, timeout=timeout)
+            t1 = time.time()
+            elapsed_ms = (t1 - t0) * 1000.0
+
+            if resp.rcode() != dns.rcode.NOERROR:
+                raise DNSDelayVerificationError(
+                    f"Active DNS query returned error rcode: {dns.rcode.to_text(resp.rcode())}"
+                )
+
+            found_addr = False
+            for rrset in resp.answer:
+                for item in rrset:
+                    if hasattr(item, "address") and item.address == expected_addr:
+                        found_addr = True
+                        break
+            if not found_addr:
+                raise DNSDelayVerificationError(
+                    f"Active DNS query did not return expected address {expected_addr} in answer"
+                )
     except Exception as e:
-        raise ImpairmentError(f"Failed to send SIGHUP to DNS server (PID {pid}): {e}")
+        if isinstance(e, DNSDelayVerificationError):
+            raise
+        raise DNSDelayVerificationError(f"Active DNS query failed: {e}")
+
+    min_bound = max(0.0, float(expected_delay_ms) - tolerance_ms)
+    max_bound = float(expected_delay_ms) + tolerance_ms
+
+    if not (min_bound <= elapsed_ms <= max_bound):
+        raise DNSDelayVerificationError(
+            f"Observed DNS {qtype} resolution delay {elapsed_ms:.1f}ms outside expected "
+            f"{expected_delay_ms}ms ± {tolerance_ms}ms (bounds: [{min_bound:.1f}ms, {max_bound:.1f}ms])"
+        )
+
+    return elapsed_ms
+
+
+def reload_dns_server(
+    dry_run: bool = False,
+    pid_file: Optional[Path] = None,
+    log_file: Optional[Path] = None,
+    config_file: Optional[Path] = None,
+    timeout: float = DNS_RELOAD_TIMEOUT_S,
+    verify_active_delays: bool = True,
+    tolerance_ms: float = DNS_DELAY_TOLERANCE_MS,
+    dns_server_ip: str = DNS_SERVER_IP,
+    dns_port: int = 53,
+    netns: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Deliver verified SIGHUP to the running Controlled DNS Server and verify reload.
+    Strictly fails closed at every step.
+    """
+    if dry_run:
+        log_info("[DRY-RUN] Would deliver verified SIGHUP to DNS server process")
+        return {"status": "DRY_RUN"}
+
+    target_pid_file = resolve_dns_pid_file(pid_file)
+    target_log_file = resolve_dns_log_file(log_file)
+    target_config = config_file or DNS_CONFIG_FILE
+
+    # Stage 1: Verified PID Resolution & cmdline check
+    pid = verify_dns_process_identity(pid_file=target_pid_file)
+
+    # Stage 2: Capture pre-signal log offset
+    initial_offset = target_log_file.stat().st_size if target_log_file.is_file() else 0
+
+    # Stage 3: SIGHUP Signal Delivery
+    from lab.privileged_helper import safe_signal_process
+    success, reason = safe_signal_process(
+        pid,
+        signal.SIGHUP,
+        expected_cmd_substring="dns_server.py",
+        expected_netns="ps028-rt"
+    )
+    if not success:
+        if "terminated before" in reason or "already terminated" in reason:
+            raise DNSSignalError(f"DNS server process PID {pid} died before SIGHUP delivery: {reason}")
+        if "permission" in reason.lower() or "not permitted" in reason.lower():
+            raise DNSSignalError(f"Permission denied sending SIGHUP to DNS server PID {pid}: {reason}")
+        raise DNSSignalError(f"Failed to signal DNS server PID {pid}: {reason}")
+    log_ok(f"SIGHUP delivered to verified DNS server (PID {pid}).")
+
+    # Stage 4: SIGHUP Confirmation Readback from dns.log
+    read_dns_log_confirmation(
+        log_file=target_log_file,
+        initial_offset=initial_offset,
+        timeout=timeout
+    )
+    log_ok(f"SIGHUP config reload confirmed in {target_log_file.name}.")
+
+    # Stage 5: Active Query Delay Verification
+    measured_delays = {}
+    if verify_active_delays:
+        cfg = load_dns_config(path=target_config)
+        exp_a = cfg.get("rules", {}).get("A", {}).get("delay_ms", 0)
+        exp_aaaa = cfg.get("rules", {}).get("AAAA", {}).get("delay_ms", 0)
+
+        # Verify A query
+        del_a = verify_active_dns_delay(
+            expected_delay_ms=exp_a,
+            qtype="A",
+            expected_addr=BASELINE_A_ADDR,
+            server_ip=dns_server_ip,
+            server_port=dns_port,
+            tolerance_ms=tolerance_ms,
+            netns=netns
+        )
+        measured_delays["A_ms"] = del_a
+
+        # Verify AAAA query
+        del_aaaa = verify_active_dns_delay(
+            expected_delay_ms=exp_aaaa,
+            qtype="AAAA",
+            expected_addr=BASELINE_AAAA_ADDR,
+            server_ip=dns_server_ip,
+            server_port=dns_port,
+            tolerance_ms=tolerance_ms,
+            netns=netns
+        )
+        measured_delays["AAAA_ms"] = del_aaaa
+        log_ok(f"Active DNS query delays verified: A={del_a:.1f}ms (exp {exp_a}ms), AAAA={del_aaaa:.1f}ms (exp {exp_aaaa}ms).")
+
+    return {
+        "status": "OK",
+        "pid": pid,
+        "measured_delays": measured_delays
+    }
 
 
 def apply_dns_delays(
@@ -601,6 +865,8 @@ def restore_dns_baseline(
                 bak_a4_path.unlink(missing_ok=True)
                 log_ok(f"Restored DNS baseline from {bak_a4_path.name}.")
                 return
+            except DNSReloadError:
+                raise
             except Exception as e:
                 log_warn(f"Failed to restore from {bak_a4_path.name}: {e}. Falling back to clean reset.")
 
@@ -613,6 +879,8 @@ def restore_dns_baseline(
                     save_dns_config_atomically(cfg, path=cfg_path, dry_run=False)
                     reload_dns_server(dry_run=False)
                     log_ok("Restored DNS baseline rules: A=0ms, AAAA=0ms.")
+            except DNSReloadError:
+                raise
             except Exception as e:
                 log_error(f"Error resetting DNS config: {e}")
                 raise ImpairmentError(f"Failed to reset DNS config: {e}")
@@ -636,9 +904,28 @@ def apply_nftables_rules(rules: List[str], dry_run: bool = False, scenario_id: O
     for r in rules:
         validate_nftables_rule(r, scenario_id=scenario_id)
 
-    require_root(dry_run=dry_run)
-    clear_nftables_rules(dry_run=dry_run)
+    if dry_run:
+        log_info(f"[DRY-RUN] Would apply {len(rules)} nftables rules in {NFT_NAMESPACE} -> {NFT_TABLE_NAME}")
+        return
 
+    # Unprivileged path
+    if not is_root():
+        if scenario_id and scenario_id in ALLOWED_SCENARIOS:
+            import lab.privileged_helper as priv_helper
+            priv_helper.run_helper_action(
+                "apply-scenario",
+                extra_args=["--scenario", scenario_id],
+                caller_holds_lock=True,
+                lock_file=LAB_LOCK_FILE
+            )
+            return
+        raise ImpairmentError(
+            "Direct application of unvalidated nftables rules cannot be performed unprivileged. "
+            "Please apply impairments via apply_scenario() using an allowlisted scenario ID."
+        )
+
+    # Privileged in-process path
+    clear_nftables_rules(dry_run=dry_run)
     if not rules:
         return
 
@@ -688,7 +975,28 @@ def apply_netem_delays(delays: Dict[str, str], dry_run: bool = False) -> None:
     Configure tc netem delay on specified interfaces using 'replace'.
     STRICT SAFETY: Never runs 'tc qdisc del dev <iface> root' to prevent removing baseline delays.
     """
-    require_root(dry_run=dry_run)
+    if dry_run:
+        for iface, delay_str in delays.items():
+            netns = INTERFACE_MAPPING.get(iface, "unknown")
+            log_info(f"[DRY-RUN] Would configure tc netem delay {delay_str} on {netns}/{iface}")
+        return
+
+    # Unprivileged path
+    if not is_root():
+        if delays == BASELINE_DELAYS:
+            import lab.privileged_helper as priv_helper
+            priv_helper.run_helper_action(
+                "restore-baseline",
+                caller_holds_lock=True,
+                lock_file=LAB_LOCK_FILE
+            )
+            return
+        raise ImpairmentError(
+            "Direct configuration of netem delays cannot be performed unprivileged. "
+            "Please configure delays via apply_scenario() using an allowlisted scenario ID."
+        )
+
+    # Privileged in-process path
     for iface, delay_str in delays.items():
         if iface not in INTERFACE_MAPPING:
             raise ImpairmentError(f"Unknown interface '{iface}' in delay configuration")
@@ -727,12 +1035,17 @@ def save_state(scenario_id: str, metadata: Dict[str, Any], dry_run: bool = False
         log_info(f"[DRY-RUN] Would record active scenario '{scenario_id}' in {STATE_FILE.name}")
         return
 
-    tmp_file = SCRIPT_DIR / f".impair_state.json.tmp.{os.getpid()}"
-    with open(tmp_file, "w", encoding="utf-8") as f:
-        json.dump(state, f, indent=2)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp_file, STATE_FILE)
+    target_dir = STATE_FILE.parent
+    tmp_file = target_dir / f".impair_state.json.tmp.{os.getpid()}"
+    try:
+        with open(tmp_file, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_file, STATE_FILE)
+    finally:
+        if tmp_file.is_file():
+            tmp_file.unlink(missing_ok=True)
 
 
 def get_current_state() -> Optional[Dict[str, Any]]:
@@ -862,7 +1175,7 @@ def clear_impairments(dry_run: bool = False, lock_file: Optional[Path] = None, l
         log_ok("System restored to baseline.")
 
 
-def self_test_baseline(dry_run: bool = False) -> bool:
+def self_test_baseline(dry_run: bool = False, dns_pid_file: Optional[Path] = None) -> bool:
     """
     Verify that the environment is in the pristine healthy baseline state:
     - No project nftables rules exist
@@ -907,22 +1220,29 @@ def self_test_baseline(dry_run: bool = False) -> bool:
     else:
         log_ok("Check 3 PASSED: No leftover impairment DNS backups found.")
 
-    # 4. Check DNS Server Process
-    if not DNS_PID_FILE.is_file():
-        log_warn("DNS PID file missing; cannot verify DNS process status.")
+    # 4. Check DNS Server Process (Fail Closed)
+    active_dns_pid_file = resolve_dns_pid_file(dns_pid_file)
+    if not dry_run:
+        if not active_dns_pid_file.is_file():
+            log_error(f"Baseline Check FAILED: DNS PID file missing at {active_dns_pid_file}; DNS server is not running.")
+            all_passed = False
+        else:
+            try:
+                pid = verify_dns_process_identity(active_dns_pid_file)
+                log_ok(f"Check 4 PASSED: DNS server process (PID {pid}) verified active running dns_server.py.")
+            except DNSPIDError as e:
+                log_error(f"Baseline Check FAILED: {e}")
+                all_passed = False
     else:
-        try:
-            pid = int(DNS_PID_FILE.read_text(encoding="utf-8").strip())
-            os.kill(pid, 0)
-            log_ok(f"Check 4 PASSED: DNS server process (PID {pid}) is running.")
-        except PermissionError:
-            log_ok(f"Check 4 PASSED: DNS server process (PID {pid}) is running (verified active).")
-        except ProcessLookupError:
-            log_error(f"Baseline Check FAILED: DNS server process (PID {pid}) is not running.")
-            all_passed = False
-        except Exception as e:
-            log_error(f"Baseline Check FAILED: DNS server process check error: {e}")
-            all_passed = False
+        if active_dns_pid_file.is_file():
+            try:
+                pid = verify_dns_process_identity(active_dns_pid_file)
+                log_ok(f"Check 4 PASSED: DNS server process (PID {pid}) verified active running dns_server.py.")
+            except DNSPIDError as e:
+                log_error(f"Baseline Check FAILED: {e}")
+                all_passed = False
+        else:
+            log_info("[DRY-RUN] DNS PID file missing; skipping process check in dry-run mode.")
 
     # 5. Privileged Checks (Netns tc, nftables, and live connectivity)
     if dry_run:
