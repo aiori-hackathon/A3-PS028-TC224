@@ -337,6 +337,180 @@ class TestPacketCaptureValidationAndDissection(unittest.TestCase):
         self.assertFalse(is_valid)
         self.assertIn("Inconsistent packet counts", msg)
 
+    def test_validate_pcap_valid_big_endian(self):
+        """Blocker B: Valid big-endian PCAP parses correctly."""
+        pcap_file = self.temp_dir / "valid_big_endian.pcap"
+        header = struct.pack(">IHHIIII", 0xa1b2c3d4, 2, 4, 0, 0, 65535, 1)
+        pkt_data = b"\x00" * 30
+        pkt_hdr = struct.pack(">IIII", 1729000000, 0, len(pkt_data), len(pkt_data))
+        pcap_file.write_bytes(header + pkt_hdr + pkt_data)
+
+        is_valid, sha256_hex, size, count, msg = run_trial.validate_pcap_file(pcap_file)
+        self.assertTrue(is_valid)
+        self.assertEqual(count, 1)
+        self.assertEqual(size, len(header) + len(pkt_hdr) + len(pkt_data))
+
+    def test_validate_pcap_rejects_zero_snaplen(self):
+        """Blocker B: Declared snaplen of 0 is rejected fail-closed."""
+        pcap_file = self.temp_dir / "zero_snaplen.pcap"
+        header = struct.pack("<IHHIIII", 0xa1b2c3d4, 2, 4, 0, 0, 0, 1)
+        pkt_data = b"\x00" * 20
+        pkt_hdr = struct.pack("<IIII", 1729000000, 0, len(pkt_data), len(pkt_data))
+        pcap_file.write_bytes(header + pkt_hdr + pkt_data)
+
+        is_valid, _, _, count, msg = run_trial.validate_pcap_file(pcap_file)
+        self.assertFalse(is_valid)
+        self.assertEqual(count, 0)
+        self.assertIn("Invalid PCAP snaplen", msg)
+
+    def test_validate_pcap_rejects_snaplen_above_maximum(self):
+        """Blocker B: Declared snaplen > 262144 is rejected fail-closed."""
+        pcap_file = self.temp_dir / "excessive_snaplen.pcap"
+        header = struct.pack("<IHHIIII", 0xa1b2c3d4, 2, 4, 0, 0, 300000, 1)
+        pkt_data = b"\x00" * 20
+        pkt_hdr = struct.pack("<IIII", 1729000000, 0, len(pkt_data), len(pkt_data))
+        pcap_file.write_bytes(header + pkt_hdr + pkt_data)
+
+        is_valid, _, _, count, msg = run_trial.validate_pcap_file(pcap_file)
+        self.assertFalse(is_valid)
+        self.assertEqual(count, 0)
+        self.assertIn("Invalid PCAP snaplen", msg)
+
+    def test_validate_pcap_rejects_packet_exceeding_declared_snaplen(self):
+        """Blocker B: Packet incl_len exceeding declared snaplen is rejected fail-closed."""
+        pcap_file = self.temp_dir / "exceeds_snaplen.pcap"
+        # Declare snaplen = 100 bytes
+        header = struct.pack("<IHHIIII", 0xa1b2c3d4, 2, 4, 0, 0, 100, 1)
+        # Packet has incl_len = 150 bytes (> snaplen 100)
+        pkt_data = b"\x00" * 150
+        pkt_hdr = struct.pack("<IIII", 1729000000, 0, len(pkt_data), len(pkt_data))
+        pcap_file.write_bytes(header + pkt_hdr + pkt_data)
+
+        is_valid, _, _, count, msg = run_trial.validate_pcap_file(pcap_file)
+        self.assertFalse(is_valid)
+        self.assertEqual(count, 0)
+        self.assertIn("exceeds declared snaplen", msg)
+
+    def test_validate_pcap_tampered_with_matching_sha_rejected(self):
+        """Blocker B: Structurally invalid PCAP is rejected even if SHA matches expected."""
+        pcap_file = self.temp_dir / "tampered_sha_match.pcap"
+        # Packet with captured length > wire length (tampered)
+        header = struct.pack("<IHHIIII", 0xa1b2c3d4, 2, 4, 0, 0, 65535, 1)
+        pkt_hdr = struct.pack("<IIII", 1729000000, 0, 50, 20)
+        content = header + pkt_hdr + (b"\x00" * 50)
+        pcap_file.write_bytes(content)
+        tampered_sha = hashlib.sha256(content).hexdigest()
+
+        is_valid, _, _, count, msg = run_trial.validate_pcap_file(pcap_file, expected_sha256=tampered_sha)
+        self.assertFalse(is_valid)
+        self.assertIn("Inconsistent packet length", msg)
+
+    def _make_pcapng_bytes(self, packets: Optional[List[bytes]] = None, snaplen: int = 65535) -> bytes:
+        endian = "<"
+        # 1. Section Header Block (SHB): type=0x0a0d0d0a, len=28, bom=0x1a2b3c4d, v1.0, len=-1
+        shb = struct.pack(endian + "II", 0x0a0d0d0a, 28)
+        shb += b"\x4d\x3c\x2b\x1a"  # Little-endian BOM
+        shb += struct.pack(endian + "HHqI", 1, 0, -1, 28)
+
+        # 2. Interface Description Block (IDB): type=1, len=20, linktype=1, reserved=0, snaplen=snaplen
+        idb = struct.pack(endian + "II", 1, 20)
+        idb += struct.pack(endian + "HHI", 1, 0, snaplen)
+        idb += struct.pack(endian + "I", 20)
+
+        # 3. Enhanced Packet Blocks (EPBs)
+        epbs = b""
+        if packets:
+            for pdata in packets:
+                incl_len = len(pdata)
+                orig_len = incl_len
+                pad_len = (4 - (incl_len % 4)) % 4
+                padded_data = pdata + (b"\x00" * pad_len)
+                block_len = 32 + len(padded_data)
+                epb = struct.pack(endian + "II", 6, block_len)
+                epb += struct.pack(endian + "IIIII", 0, 0, 0, incl_len, orig_len)
+                epb += padded_data
+                epb += struct.pack(endian + "I", block_len)
+                epbs += epb
+
+        return shb + idb + epbs
+
+    def test_validate_pcapng_valid_sample_without_tshark(self):
+        """PCAP-NG: Valid sample is parsed structurally without relying on TShark."""
+        pcap_file = self.temp_dir / "valid.pcapng"
+        pkt_bytes = b"\xaa" * 24
+        pcap_file.write_bytes(self._make_pcapng_bytes([pkt_bytes]))
+
+        with patch("shutil.which", return_value=None):
+            is_valid, sha, size, count, msg = run_trial.validate_pcap_file(pcap_file)
+            self.assertTrue(is_valid)
+            self.assertEqual(count, 1)
+            self.assertIn("Valid PCAP", msg)
+
+    def test_validate_pcapng_rejects_zero_packet_blocks(self):
+        """PCAP-NG: PCAP-NG with zero packet blocks fails closed."""
+        pcap_file = self.temp_dir / "zero_packets.pcapng"
+        pcap_file.write_bytes(self._make_pcapng_bytes([]))
+
+        is_valid, _, _, count, msg = run_trial.validate_pcap_file(pcap_file)
+        self.assertFalse(is_valid)
+        self.assertEqual(count, 0)
+        self.assertIn("zero valid packet blocks", msg)
+
+    def test_validate_pcapng_rejects_truncated_section_header(self):
+        """PCAP-NG: Truncated Section Header Block fails closed."""
+        pcap_file = self.temp_dir / "trunc_shb.pcapng"
+        pcap_file.write_bytes(b"\x0a\x0d\x0d\x0a\x10\x00\x00\x00")  # Only 8 bytes
+
+        is_valid, _, _, count, msg = run_trial.validate_pcap_file(pcap_file)
+        self.assertFalse(is_valid)
+        self.assertEqual(count, 0)
+        self.assertIn("too small", msg)
+
+    def test_validate_pcapng_rejects_invalid_byte_order_magic(self):
+        """PCAP-NG: Invalid BOM fails closed."""
+        pcap_file = self.temp_dir / "bad_bom.pcapng"
+        raw = bytearray(self._make_pcapng_bytes([b"\x00" * 20]))
+        raw[8:12] = b"\x11\x22\x33\x44"  # Corrupt BOM
+        pcap_file.write_bytes(bytes(raw))
+
+        is_valid, _, _, count, msg = run_trial.validate_pcap_file(pcap_file)
+        self.assertFalse(is_valid)
+        self.assertEqual(count, 0)
+        self.assertIn("Invalid PCAP-NG byte order magic", msg)
+
+    def test_validate_pcapng_rejects_mismatched_block_lengths(self):
+        """PCAP-NG: Mismatched leading and trailing block lengths fail closed."""
+        pcap_file = self.temp_dir / "mismatched_block_len.pcapng"
+        raw = bytearray(self._make_pcapng_bytes([b"\x00" * 20]))
+        # Alter the trailing block length of the EPB (last 4 bytes of file)
+        struct.pack_into("<I", raw, len(raw) - 4, 9999)
+        pcap_file.write_bytes(bytes(raw))
+
+        is_valid, _, _, count, msg = run_trial.validate_pcap_file(pcap_file)
+        self.assertFalse(is_valid)
+        self.assertIn("block length mismatch", msg)
+
+    def test_validate_pcapng_rejects_packet_exceeding_idb_snaplen(self):
+        """PCAP-NG: EPB packet exceeding IDB declared snaplen fails closed."""
+        pcap_file = self.temp_dir / "exceed_idb_snap.pcapng"
+        # Create PCAP-NG with IDB snaplen = 50, but packet length = 80
+        pcap_file.write_bytes(self._make_pcapng_bytes([b"\x00" * 80], snaplen=50))
+
+        is_valid, _, _, count, msg = run_trial.validate_pcap_file(pcap_file)
+        self.assertFalse(is_valid)
+        self.assertEqual(count, 0)
+        self.assertIn("exceeds snaplen", msg)
+
+    def test_validate_pcapng_rejects_trailing_garbage(self):
+        """PCAP-NG: Trailing unparsed bytes fail closed."""
+        pcap_file = self.temp_dir / "trailing_garbage.pcapng"
+        valid_bytes = self._make_pcapng_bytes([b"\x00" * 20])
+        pcap_file.write_bytes(valid_bytes + b"\xde\xad\xbe\xef")
+
+        is_valid, _, _, count, msg = run_trial.validate_pcap_file(pcap_file)
+        self.assertFalse(is_valid)
+        self.assertIn("Trailing unparsed bytes", msg)
+
 
 class TestHappyEyeballsFallbackClassification(unittest.TestCase):
     """

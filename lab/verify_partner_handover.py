@@ -85,6 +85,38 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
+def _parse_strict_int(
+    val: Any,
+    field_name: str,
+    min_val: Optional[int] = None,
+    max_val: Optional[int] = None
+) -> int:
+    """
+    Strictly validates that val is a non-empty, valid integer representation:
+    - Rejects None, empty string, non-strings that are not int, floats, scientific notation,
+      and strings with decimal points or trailing non-digit characters.
+    - Validates bounds if min_val or max_val are specified.
+    """
+    if val is None or (isinstance(val, str) and not val.strip()):
+        raise VerificationError(f"Field '{field_name}' is missing or empty")
+
+    s_val = str(val).strip()
+    if not re.fullmatch(r"[+-]?[0-9]+", s_val):
+        raise VerificationError(f"Field '{field_name}' must be a valid integer, got '{val}'")
+
+    try:
+        int_val = int(s_val)
+    except ValueError as exc:
+        raise VerificationError(f"Field '{field_name}' failed integer conversion: {exc}") from exc
+
+    if min_val is not None and int_val < min_val:
+        raise VerificationError(f"Field '{field_name}' value {int_val} is below minimum {min_val}")
+    if max_val is not None and int_val > max_val:
+        raise VerificationError(f"Field '{field_name}' value {int_val} exceeds maximum {max_val}")
+
+    return int_val
+
+
 def _normalize_browser_name(raw: str) -> str:
     """Normalizes browser name to canonical 'google-chrome' or 'firefox'."""
     lower = raw.strip().lower()
@@ -408,6 +440,7 @@ def _verify_derived_directory(
                     f"attempts.csv row count mismatch: expected {total_attempts_count} reconciled attempts, got {row_count}"
                 )
             seen_csv_trials = set()
+            seen_attempt_ids = set()
             for idx, r in enumerate(rows, start=1):
                 r_cid = r.get("campaign_id")
                 if r_cid != campaign_id:
@@ -423,13 +456,37 @@ def _verify_derived_directory(
                     )
                 seen_csv_trials.add(r_tid)
 
+                r_att_id = r.get("attempt_id")
+                if not r_att_id:
+                    raise VerificationError(f"attempts.csv row {idx} missing attempt_id")
+                if r_att_id in seen_attempt_ids:
+                    raise VerificationError(
+                        f"Duplicate attempt_id '{r_att_id}' in attempts.csv at row {idx}"
+                    )
+                seen_attempt_ids.add(r_att_id)
+
                 if r_tid not in all_campaign_trial_ids:
                     raise VerificationError(
                         f"attempts.csv row {idx} references unknown trial_id '{r_tid}'"
                     )
 
+                # Strict numeric field parsing
+                r_slot_idx = _parse_strict_int(
+                    r.get("slot_index"), f"attempts.csv row {idx} slot_index", min_val=1, max_val=EXPECTED_TOTAL_SLOTS
+                )
+                r_rep = _parse_strict_int(
+                    r.get("repetition"), f"attempts.csv row {idx} repetition", min_val=1, max_val=EXPECTED_REPETITIONS_PER_PAIR
+                )
+                r_att_num = _parse_strict_int(
+                    r.get("attempt_number"), f"attempts.csv row {idx} attempt_number", min_val=1
+                )
+
                 if expected_attempts and r_tid in expected_attempts:
                     exp = expected_attempts[r_tid]
+                    if exp.get("slot_id") and r.get("slot_id") != exp["slot_id"]:
+                        raise VerificationError(
+                            f"attempts.csv row {idx} slot_id mismatch for trial '{r_tid}': expected '{exp['slot_id']}', got '{r.get('slot_id')}'"
+                        )
                     if exp.get("scenario_id") and r.get("scenario_id") != exp["scenario_id"]:
                         raise VerificationError(
                             f"attempts.csv row {idx} scenario_id mismatch for trial '{r_tid}': expected '{exp['scenario_id']}', got '{r.get('scenario_id')}'"
@@ -446,28 +503,29 @@ def _verify_derived_directory(
                         raise VerificationError(
                             f"attempts.csv row {idx} validity mismatch for trial '{r_tid}': expected '{exp['validity']}', got '{r.get('validity_category')}'"
                         )
-                    if exp.get("repetition") is not None and r.get("repetition"):
-                        try:
-                            if int(r.get("repetition")) != int(exp["repetition"]):
-                                raise VerificationError(
-                                    f"attempts.csv row {idx} repetition mismatch for trial '{r_tid}': expected {exp['repetition']}, got {r.get('repetition')}"
-                                )
-                        except ValueError:
-                            pass
-                    if exp.get("attempt_number") is not None and r.get("attempt_number"):
-                        try:
-                            if int(r.get("attempt_number")) != int(exp["attempt_number"]):
-                                raise VerificationError(
-                                    f"attempts.csv row {idx} attempt_number mismatch for trial '{r_tid}': expected {exp['attempt_number']}, got {r.get('attempt_number')}"
-                                )
-                        except ValueError:
-                            pass
+                    if exp.get("repetition") is not None:
+                        exp_rep = _parse_strict_int(exp["repetition"], f"expected repetition for trial {r_tid}")
+                        if r_rep != exp_rep:
+                            raise VerificationError(
+                                f"attempts.csv row {idx} repetition mismatch for trial '{r_tid}': expected {exp_rep}, got {r_rep}"
+                            )
+                    if exp.get("attempt_number") is not None:
+                        exp_att_num = _parse_strict_int(exp["attempt_number"], f"expected attempt_number for trial {r_tid}")
+                        if r_att_num != exp_att_num:
+                            raise VerificationError(
+                                f"attempts.csv row {idx} attempt_number mismatch for trial '{r_tid}': expected {exp_att_num}, got {r_att_num}"
+                            )
 
             if expected_attempts:
                 missing_trials = set(expected_attempts.keys()) - seen_csv_trials
                 if missing_trials:
                     raise VerificationError(
                         f"attempts.csv is missing {len(missing_trials)} campaign attempts: {sorted(list(missing_trials))[:3]}"
+                    )
+                extra_trials = seen_csv_trials - set(expected_attempts.keys())
+                if extra_trials:
+                    raise VerificationError(
+                        f"attempts.csv contains {len(extra_trials)} unexpected extra attempts: {sorted(list(extra_trials))[:3]}"
                     )
 
         elif ledger == "connection_attempts.csv":
@@ -483,6 +541,14 @@ def _verify_derived_directory(
                         f"{ledger} row {idx} references unknown trial_id '{r_tid}'"
                     )
                 seen_conn_trials.add(r_tid)
+
+                _parse_strict_int(r.get("tcp_stream"), f"{ledger} row {idx} tcp_stream", min_val=0)
+                if r.get("client_port") and str(r.get("client_port")).strip():
+                    _parse_strict_int(r.get("client_port"), f"{ledger} row {idx} client_port", min_val=1, max_val=65535)
+                if r.get("server_port") and str(r.get("server_port")).strip():
+                    _parse_strict_int(r.get("server_port"), f"{ledger} row {idx} server_port", min_val=1, max_val=65535)
+                if r.get("retransmitted_syn_count") and str(r.get("retransmitted_syn_count")).strip():
+                    _parse_strict_int(r.get("retransmitted_syn_count"), f"{ledger} row {idx} retransmitted_syn_count", min_val=0)
 
             # Every valid live trial must have representation in connection_attempts.csv
             missing_valid = valid_trial_ids - seen_conn_trials
@@ -504,6 +570,20 @@ def _verify_derived_directory(
                         f"{ledger} row {idx} references unknown trial_id '{r_tid}'"
                     )
                 seen_timeline_trials.add(r_tid)
+
+                _parse_strict_int(r.get("event_index"), f"{ledger} row {idx} event_index", min_val=1)
+                ts_raw = r.get("event_timestamp_epoch")
+                if ts_raw is None or not str(ts_raw).strip():
+                    raise VerificationError(f"{ledger} row {idx} missing event_timestamp_epoch")
+                try:
+                    float(str(ts_raw).strip())
+                except ValueError:
+                    raise VerificationError(f"{ledger} row {idx} invalid event_timestamp_epoch '{ts_raw}'")
+
+                if r.get("tcp_stream") and str(r.get("tcp_stream")).strip():
+                    _parse_strict_int(r.get("tcp_stream"), f"{ledger} row {idx} tcp_stream", min_val=0)
+                if r.get("frame_number") and str(r.get("frame_number")).strip():
+                    _parse_strict_int(r.get("frame_number"), f"{ledger} row {idx} frame_number", min_val=1)
 
             # Every trial (valid live trials and preserved failed attempts) must have timeline events
             missing_campaign_trials = all_campaign_trial_ids - seen_timeline_trials
@@ -721,7 +801,7 @@ def verify_partner_campaign_directory(
             else:
                 # Mandatory 8: Preserved failed attempt
                 failed_attempts_count += 1
-                if att_validity not in ("CLEANUP_FAILURE", "MEASUREMENT_FAILURE"):
+                if att_validity not in ("CLEANUP_FAILURE", "MEASUREMENT_FAILURE", "INTERRUPTED"):
                     raise VerificationError(
                         f"Failed attempt '{tid}' in slot '{sid}' has unrecognized validity '{att_validity}'"
                     )

@@ -18,8 +18,11 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import struct
+import subprocess
 import tempfile
+import time
 from typing import Any, Dict, List, Optional
 import unittest
 from unittest.mock import MagicMock, call, patch
@@ -1138,6 +1141,336 @@ class TestFailedAttemptRecordIntegrity(unittest.TestCase):
         fdata = json.loads(rec_path.read_text(encoding="utf-8"))
         self.assertEqual(fdata["status"], "FAILED")
         self.assertEqual(fdata["validity"], "MEASUREMENT_FAILURE")
+
+
+class TestCampaignSignalInterruption(unittest.TestCase):
+    """
+    Regression tests for attempt-safe SIGINT and SIGTERM handling:
+    1. Controlled interruption during an active trial preserves partial evidence.
+    2. Durable failed_attempt_record.json written atomically with POSIX fsync.
+    3. Manifest records INTERRUPTED state; attempts marked INTERRUPTED.
+    4. Interruption with baseline/cleanup failure transitions to CLEANUP_FAILURE.
+    5. Interruption between slots does not invent fictitious attempts.
+    6. Subprocess signal delivery exits with conventional 130 (SIGINT) and 143 (SIGTERM).
+    7. Subprocess repeated signal triggers immediate termination.
+    """
+
+    def setUp(self):
+        self.temp_dir_obj = tempfile.TemporaryDirectory()
+        self.temp_dir = Path(self.temp_dir_obj.name)
+
+    def tearDown(self):
+        self.temp_dir_obj.cleanup()
+
+    @patch("lab.impair.self_test_baseline", return_value=True)
+    @patch("lab.run_trial.run_trial")
+    def test_in_process_sigint_interruption_during_trial(self, mock_run, mock_base):
+        def mock_trial(**kwargs):
+            tdir = kwargs["output_dir"]
+            # Write partial evidence before raising KeyboardInterrupt
+            pcap = tdir / "capture.pcap"
+            _create_dummy_pcap(pcap, packet_count=2)
+            (tdir / "tcpdump.log").write_text("Partial capture started\n", encoding="utf-8")
+            raise KeyboardInterrupt("Simulated Ctrl+C during trial execution")
+
+        mock_run.side_effect = mock_trial
+
+        runner = run_campaign.CampaignRunner(
+            scenarios=["S0"],
+            browsers=["google-chrome"],
+            repetitions=1,
+            output_dir=self.temp_dir,
+            is_simulation=False,
+            exit_on_interruption=False
+        )
+
+        manifest_dict = runner.run()
+        self.assertEqual(manifest_dict["status"], "INTERRUPTED")
+        self.assertIn("SIGINT", manifest_dict["halt_reason"])
+
+        slot = manifest_dict["matrix_slots"][0]
+        self.assertFalse(slot["status"] == "COMPLETED")
+        self.assertEqual(len(slot["attempts"]), 1)
+        att = slot["attempts"][0]
+        self.assertEqual(att["status"], "INTERRUPTED")
+        self.assertEqual(att["validity"], "INTERRUPTED")
+        self.assertIsNotNone(att.get("interruption"))
+        self.assertEqual(att["interruption"]["signal_number"], 2)
+        self.assertEqual(att["interruption"]["signal_name"], "SIGINT")
+
+        # Verify durable failed_attempt_record.json on disk
+        rec_path = Path(att["evidence_paths"]["trial_dir"]) / "failed_attempt_record.json"
+        self.assertTrue(rec_path.is_file())
+        fdata = json.loads(rec_path.read_text(encoding="utf-8"))
+        self.assertEqual(fdata["status"], "INTERRUPTED")
+        self.assertEqual(fdata["validity"], "INTERRUPTED")
+        self.assertEqual(fdata["trial_id"], att["trial_id"])
+        self.assertEqual(fdata["interruption"]["signal_name"], "SIGINT")
+
+        # Verify partial evidence preserved
+        self.assertTrue((Path(att["evidence_paths"]["trial_dir"]) / "capture.pcap").is_file())
+        self.assertEqual(att["capture_metadata"]["packet_count"], 2)
+
+    @patch("lab.impair.self_test_baseline", return_value=True)
+    def test_in_process_sigterm_interruption_during_trial(self, mock_base):
+        runner = run_campaign.CampaignRunner(
+            scenarios=["S0"],
+            browsers=["google-chrome"],
+            repetitions=1,
+            output_dir=self.temp_dir,
+            is_simulation=False,
+            exit_on_interruption=False
+        )
+        slot = run_campaign.MatrixSlot("slot-0001", 1, "S0", "google-chrome", 1)
+
+        # Simulate runner receiving SIGTERM
+        runner._interrupted = True
+        runner._interrupted_signum = signal.SIGTERM
+        runner._interrupted_signal_name = "SIGTERM"
+
+        with patch("lab.run_trial.run_trial", side_effect=InterruptedError("Simulated SIGTERM")):
+            attempt = runner.execute_slot_attempt(slot, attempt_number=1)
+
+        self.assertEqual(attempt.status, "INTERRUPTED")
+        self.assertEqual(attempt.validity, "INTERRUPTED")
+        self.assertIsNotNone(attempt.interruption)
+        self.assertEqual(attempt.interruption["signal_number"], int(signal.SIGTERM))
+        self.assertEqual(attempt.interruption["signal_name"], "SIGTERM")
+
+        rec_path = Path(attempt.evidence_paths["trial_dir"]) / "failed_attempt_record.json"
+        self.assertTrue(rec_path.is_file())
+        fdata = json.loads(rec_path.read_text(encoding="utf-8"))
+        self.assertEqual(fdata["status"], "INTERRUPTED")
+        self.assertEqual(fdata["validity"], "INTERRUPTED")
+
+    @patch("lab.impair.clear_impairments")
+    @patch("lab.impair.self_test_baseline", return_value=False)
+    @patch("lab.run_trial.run_trial", side_effect=KeyboardInterrupt("Interrupted"))
+    def test_interruption_with_cleanup_failure_records_cleanup_failure(self, mock_run, mock_base, mock_clear):
+        runner = run_campaign.CampaignRunner(
+            scenarios=["S0"],
+            browsers=["google-chrome"],
+            repetitions=1,
+            output_dir=self.temp_dir,
+            is_simulation=False,
+            exit_on_interruption=False
+        )
+        slot = run_campaign.MatrixSlot("slot-0001", 1, "S0", "google-chrome", 1)
+
+        attempt = runner.execute_slot_attempt(slot, attempt_number=1)
+        self.assertEqual(attempt.status, "FAILED")
+        self.assertEqual(attempt.validity, "CLEANUP_FAILURE")
+        self.assertIsNotNone(attempt.interruption)
+
+        rec_path = Path(attempt.evidence_paths["trial_dir"]) / "failed_attempt_record.json"
+        self.assertTrue(rec_path.is_file())
+        fdata = json.loads(rec_path.read_text(encoding="utf-8"))
+        self.assertEqual(fdata["validity"], "CLEANUP_FAILURE")
+
+    @patch("lab.impair.self_test_baseline", return_value=True)
+    @patch("lab.run_trial.run_trial")
+    def test_signal_between_attempts_does_not_create_fictitious_attempt(self, mock_run, mock_base):
+        def mock_trial(**kwargs):
+            return _create_mock_trial_result(
+                scenario_id=kwargs["scenario_id"],
+                trial_id=kwargs["trial_id"],
+                output_dir=self.temp_dir,
+                is_simulation=False,
+                packet_count=2,
+                classification="DIRECT_IPV6"
+            )
+        mock_run.side_effect = mock_trial
+
+        runner = run_campaign.CampaignRunner(
+            scenarios=["S0", "S1"],
+            browsers=["google-chrome"],
+            repetitions=1,
+            output_dir=self.temp_dir,
+            is_simulation=False,
+            exit_on_interruption=False
+        )
+
+        orig_execute = runner.execute_slot_attempt
+        def intercepted_execute(slot, attempt_number):
+            att = orig_execute(slot, attempt_number)
+            # Inject interruption immediately after first slot attempt completes
+            runner._interrupted = True
+            runner._interrupted_signum = signal.SIGINT
+            runner._interrupted_signal_name = "SIGINT"
+            return att
+
+        runner.execute_slot_attempt = intercepted_execute
+
+        manifest_dict = runner.run()
+        self.assertEqual(manifest_dict["status"], "INTERRUPTED")
+        slots = manifest_dict["matrix_slots"]
+        self.assertEqual(len(slots), 2)
+        # Slot 0 completed successfully
+        self.assertEqual(len(slots[0]["attempts"]), 1)
+        self.assertEqual(slots[0]["status"], "COMPLETED")
+        # Slot 1 was never attempted: 0 attempts, no fictitious trials
+        self.assertEqual(len(slots[1]["attempts"]), 0)
+        self.assertEqual(slots[1]["status"], "PENDING")
+
+    def test_subprocess_sigint_controlled_exit_130_and_manifest_durability(self):
+        camp_dir = self.temp_dir / "camp_sigint"
+        camp_dir.mkdir(parents=True, exist_ok=True)
+        flag_file = self.temp_dir / "started_sigint.flag"
+
+        code = f"""
+import os, sys, time, signal
+from pathlib import Path
+import lab.run_campaign as run_campaign
+import lab.run_trial as run_trial
+
+flag_path = Path({repr(str(flag_file))})
+def slow_trial(**kwargs):
+    flag_path.write_text("ready", encoding="utf-8")
+    time.sleep(10.0)
+    return {{"timestamps": {{}}, "cleanup_status": {{"scenario_restored": True, "baseline_verified": True, "errors": []}}}}
+
+run_trial.run_trial = slow_trial
+
+runner = run_campaign.CampaignRunner(
+    scenarios=["S0"],
+    browsers=["google-chrome"],
+    repetitions=1,
+    output_dir=Path({repr(str(camp_dir))}),
+    is_simulation=True,
+    exit_on_interruption=True
+)
+runner.run()
+"""
+        proc = subprocess.Popen(
+            [sys.executable, "-c", code],
+            cwd=str(REPO_ROOT),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+
+        t0 = time.time()
+        while not flag_file.exists() and time.time() - t0 < 5.0:
+            time.sleep(0.05)
+        self.assertTrue(flag_file.exists(), "Subprocess did not start trial within timeout")
+
+        proc.send_signal(signal.SIGINT)
+        stdout, stderr = proc.communicate(timeout=5.0)
+
+        self.assertEqual(proc.returncode, 130, f"Expected returncode 130, got {proc.returncode}. Stderr: {stderr}")
+
+        mpath = camp_dir / "campaign_manifest.json"
+        self.assertTrue(mpath.is_file())
+        mdata = json.loads(mpath.read_text(encoding="utf-8"))
+        self.assertEqual(mdata["status"], "INTERRUPTED")
+        self.assertIn("SIGINT", mdata.get("halt_reason", ""))
+
+    def test_subprocess_sigterm_controlled_exit_143(self):
+        camp_dir = self.temp_dir / "camp_sigterm"
+        camp_dir.mkdir(parents=True, exist_ok=True)
+        flag_file = self.temp_dir / "started_sigterm.flag"
+
+        code = f"""
+import os, sys, time, signal
+from pathlib import Path
+import lab.run_campaign as run_campaign
+import lab.run_trial as run_trial
+
+flag_path = Path({repr(str(flag_file))})
+def slow_trial(**kwargs):
+    flag_path.write_text("ready", encoding="utf-8")
+    time.sleep(10.0)
+    return {{"timestamps": {{}}, "cleanup_status": {{"scenario_restored": True, "baseline_verified": True, "errors": []}}}}
+
+run_trial.run_trial = slow_trial
+
+runner = run_campaign.CampaignRunner(
+    scenarios=["S0"],
+    browsers=["google-chrome"],
+    repetitions=1,
+    output_dir=Path({repr(str(camp_dir))}),
+    is_simulation=True,
+    exit_on_interruption=True
+)
+runner.run()
+"""
+        proc = subprocess.Popen(
+            [sys.executable, "-c", code],
+            cwd=str(REPO_ROOT),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+
+        t0 = time.time()
+        while not flag_file.exists() and time.time() - t0 < 5.0:
+            time.sleep(0.05)
+        self.assertTrue(flag_file.exists(), "Subprocess did not start trial within timeout")
+
+        proc.send_signal(signal.SIGTERM)
+        stdout, stderr = proc.communicate(timeout=5.0)
+
+        self.assertEqual(proc.returncode, 143, f"Expected returncode 143, got {proc.returncode}. Stderr: {stderr}")
+
+        mpath = camp_dir / "campaign_manifest.json"
+        self.assertTrue(mpath.is_file())
+        mdata = json.loads(mpath.read_text(encoding="utf-8"))
+        self.assertEqual(mdata["status"], "INTERRUPTED")
+        self.assertIn("SIGTERM", mdata.get("halt_reason", ""))
+
+    def test_subprocess_repeated_signal_forces_immediate_termination(self):
+        camp_dir = self.temp_dir / "camp_repeat_sig"
+        camp_dir.mkdir(parents=True, exist_ok=True)
+        flag_file = self.temp_dir / "started_repeat.flag"
+
+        code = f"""
+import os, sys, time, signal
+from pathlib import Path
+import lab.run_campaign as run_campaign
+import lab.run_trial as run_trial
+
+flag_path = Path({repr(str(flag_file))})
+def slow_trial(**kwargs):
+    flag_path.write_text("ready", encoding="utf-8")
+    while True:
+        try:
+            time.sleep(10.0)
+        except (KeyboardInterrupt, InterruptedError):
+            time.sleep(5.0)
+            break
+    return {{"timestamps": {{}}, "cleanup_status": {{"scenario_restored": True, "baseline_verified": True, "errors": []}}}}
+
+run_trial.run_trial = slow_trial
+
+runner = run_campaign.CampaignRunner(
+    scenarios=["S0"],
+    browsers=["google-chrome"],
+    repetitions=1,
+    output_dir=Path({repr(str(camp_dir))}),
+    is_simulation=True,
+    exit_on_interruption=True
+)
+runner.run()
+"""
+        proc = subprocess.Popen(
+            [sys.executable, "-c", code],
+            cwd=str(REPO_ROOT),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+
+        t0 = time.time()
+        while not flag_file.exists() and time.time() - t0 < 5.0:
+            time.sleep(0.05)
+        self.assertTrue(flag_file.exists())
+
+        proc.send_signal(signal.SIGINT)
+        time.sleep(0.05)
+        proc.send_signal(signal.SIGINT)
+
+        stdout, stderr = proc.communicate(timeout=5.0)
+        self.assertEqual(proc.returncode, 130)
 
 
 if __name__ == "__main__":

@@ -234,6 +234,24 @@ def generate_campaign_id(prefix: str = "campaign") -> str:
     return f"{prefix}-{ts}-{rand_suffix}"
 
 
+def fsync_directory(dir_path: Union[str, Path]) -> None:
+    """
+    Flushes directory changes to disk on POSIX systems so file additions
+    or atomic renames are durably recorded in the filesystem directory entry.
+    """
+    try:
+        flags = os.O_RDONLY
+        if hasattr(os, "O_DIRECTORY"):
+            flags |= os.O_DIRECTORY
+        fd = os.open(str(dir_path), flags)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    except OSError:
+        pass
+
+
 class ExecutionAttempt:
     """
     Represents a concrete execution attempt for a matrix slot.
@@ -253,7 +271,13 @@ class ExecutionAttempt:
         http_outcome: Dict[str, Any],
         network_observations: Dict[str, Any],
         cleanup_status: Dict[str, Any],
-        error_message: Optional[str] = None
+        error_message: Optional[str] = None,
+        slot_id: Optional[str] = None,
+        scenario_id: Optional[str] = None,
+        browser: Optional[str] = None,
+        repetition: Optional[int] = None,
+        campaign_id: Optional[str] = None,
+        interruption: Optional[Dict[str, Any]] = None
     ):
         self.attempt_number = attempt_number
         self.trial_id = trial_id
@@ -268,9 +292,15 @@ class ExecutionAttempt:
         self.network_observations = network_observations
         self.cleanup_status = cleanup_status
         self.error_message = error_message
+        self.slot_id = slot_id
+        self.scenario_id = scenario_id
+        self.browser = browser
+        self.repetition = repetition
+        self.campaign_id = campaign_id
+        self.interruption = interruption
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        res = {
             "attempt_number": self.attempt_number,
             "trial_id": self.trial_id,
             "execution_mode": self.execution_mode,
@@ -285,6 +315,19 @@ class ExecutionAttempt:
             "cleanup_status": self.cleanup_status,
             "error_message": self.error_message,
         }
+        if self.slot_id:
+            res["slot_id"] = self.slot_id
+        if self.scenario_id:
+            res["scenario_id"] = self.scenario_id
+        if self.browser:
+            res["browser"] = self.browser
+        if self.repetition is not None:
+            res["repetition"] = self.repetition
+        if self.campaign_id:
+            res["campaign_id"] = self.campaign_id
+        if self.interruption:
+            res["interruption"] = self.interruption
+        return res
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ExecutionAttempt":
@@ -301,7 +344,13 @@ class ExecutionAttempt:
             http_outcome=data.get("http_outcome", {}),
             network_observations=data.get("network_observations", {}),
             cleanup_status=data.get("cleanup_status", {}),
-            error_message=data.get("error_message")
+            error_message=data.get("error_message"),
+            slot_id=data.get("slot_id"),
+            scenario_id=data.get("scenario_id"),
+            browser=data.get("browser"),
+            repetition=data.get("repetition"),
+            campaign_id=data.get("campaign_id"),
+            interruption=data.get("interruption")
         )
 
 
@@ -314,8 +363,9 @@ def write_failed_attempt_record(
     - Writes to a temporary file in trial_dir.
     - Flushes and fsyncs to ensure durability on disk.
     - Atomically renames to failed_attempt_record.json.
+    - Flushes containing directory on POSIX systems for durability.
     - Preserves attempt number, trial ID, status, validity, execution mode,
-      timestamps, cleanup information, and error details.
+      timestamps, cleanup information, evidence paths, and error details.
     """
     tdir = Path(trial_dir).resolve()
     tdir.mkdir(parents=True, exist_ok=True)
@@ -330,6 +380,7 @@ def write_failed_attempt_record(
         os.fsync(f.fileno())
 
     os.replace(tmp_path, target_path)
+    fsync_directory(tdir)
     return target_path
 
 
@@ -567,6 +618,7 @@ class CampaignManifest:
             "schema_version": SCHEMA_VERSION,
             "campaign_id": self.campaign_id,
             "status": self.status,
+            "halt_reason": self.halt_reason,
             "execution_mode": "SIMULATION" if self.is_simulation else "LIVE",
             "is_simulation": self.is_simulation,
             "created_at": self.created_at,
@@ -586,16 +638,17 @@ class CampaignManifest:
     def save_atomically(self) -> None:
         """
         Saves manifest atomically: writes to temporary file, flushes, fsyncs,
-        and atomically renames to campaign_manifest.json.
+        atomically renames to campaign_manifest.json, and flushes directory on POSIX.
         """
         self.output_dir.mkdir(parents=True, exist_ok=True)
         data = self.to_dict()
-        tmp_path = self.manifest_path.with_suffix(".tmp")
+        tmp_path = self.manifest_path.with_suffix(f".tmp.{os.getpid()}_{time.time_ns()}")
         with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp_path, self.manifest_path)
+        fsync_directory(self.output_dir)
 
     @classmethod
     def load(cls, manifest_path: Path) -> "CampaignManifest":
@@ -736,7 +789,8 @@ class CampaignRunner:
         browser_timeout: float = 15.0,
         fail_fast_on_measurement: bool = False,
         lab_lock_file: Optional[Path] = None,
-        lock_timeout: float = 10.0
+        lock_timeout: float = 10.0,
+        exit_on_interruption: bool = True
     ):
         self.scenarios = [s.upper() for s in (scenarios or DEFAULT_SCENARIOS)]
         for sc in self.scenarios:
@@ -754,6 +808,16 @@ class CampaignRunner:
         self.fail_fast_on_measurement = fail_fast_on_measurement
         self.lab_lock_file = lab_lock_file or concurrency.DEFAULT_LAB_LOCK_FILE
         self.lock_timeout = lock_timeout
+        self.exit_on_interruption = exit_on_interruption
+
+        # Interruption tracking
+        self._interrupted: bool = False
+        self._interrupted_signum: Optional[int] = None
+        self._interrupted_signal_name: Optional[str] = None
+        self._signal_count: int = 0
+        self._active_trial_id: Optional[str] = None
+        self._active_trial_dir: Optional[Path] = None
+        self._active_slot: Optional[MatrixSlot] = None
 
         # Resolve browsers
         self.browsers = self._resolve_browsers(browsers, is_simulation)
@@ -829,6 +893,50 @@ class CampaignRunner:
         manifest.save_atomically()
         return manifest
 
+    def _collect_preserved_evidence(self, trial_dir: Path) -> Tuple[Dict[str, str], Dict[str, Any]]:
+        """
+        Audits physical trial directory to preserve all genuine evidence generated
+        prior to an error or signal interruption. Never overwrites or removes files.
+        """
+        paths = {"trial_dir": str(trial_dir)}
+        cap_meta: Dict[str, Any] = {}
+
+        pcap_file = trial_dir / "capture.pcap"
+        if pcap_file.is_file() and pcap_file.stat().st_size > 0:
+            try:
+                valid, sha, sz, count, msg = run_trial.validate_pcap_file(pcap_file)
+                cap_meta = {
+                    "pcap_path": str(pcap_file),
+                    "pcap_sha256": sha,
+                    "pcap_size_bytes": sz,
+                    "packet_count": count,
+                    "pcap_valid": valid,
+                    "validation_message": msg,
+                }
+            except Exception as pe:
+                cap_meta = {
+                    "pcap_path": str(pcap_file),
+                    "pcap_size_bytes": pcap_file.stat().st_size,
+                    "pcap_valid": False,
+                    "validation_message": f"PCAP audit error: {pe}",
+                }
+            paths["capture_pcap"] = str(pcap_file)
+
+        evidence_names = [
+            ("result.json", "result_json"),
+            ("tcpdump.log", "tcpdump_log"),
+            ("browser.log", "browser_log"),
+            ("netlog.json", "browser_netlog"),
+            ("browser_telemetry.log", "browser_telemetry"),
+            (FAILURE_RECORD_FILENAME, "failed_attempt_record")
+        ]
+        for fname, key in evidence_names:
+            fpath = trial_dir / fname
+            if fpath.is_file():
+                paths[key] = str(fpath)
+
+        return paths, cap_meta
+
     def execute_slot_attempt(
         self,
         slot: MatrixSlot,
@@ -838,9 +946,11 @@ class CampaignRunner:
         Executes one trial attempt for the given matrix slot:
         1. Generates unique trial ID (trial-<timestamp>-<hash>).
         2. Assigns dedicated directory under trials/<trial_id> (NEVER overwrites).
-        3. Calls run_trial.run_trial in-process.
+        3. Calls run_trial.run_trial in-process with caller-managed signal coordination.
         4. Validates cleanup and baseline restoration unconditionally.
-        5. Returns structured ExecutionAttempt.
+        5. Preserves all partial evidence generated before an interruption or failure.
+        6. Durably and atomically writes failed_attempt_record.json on failure or interruption.
+        7. Returns structured ExecutionAttempt agreeing with physical failure record.
         """
         trial_id = run_trial.generate_trial_id()
         trial_dir = self.trials_dir / trial_id
@@ -857,6 +967,10 @@ class CampaignRunner:
         trial_result: Optional[Dict[str, Any]] = None
         exec_error: Optional[str] = None
 
+        self._active_slot = slot
+        self._active_trial_id = trial_id
+        self._active_trial_dir = trial_dir
+
         try:
             trial_result = run_trial.run_trial(
                 scenario_id=slot.scenario_id,
@@ -868,15 +982,27 @@ class CampaignRunner:
                 is_simulation=self.is_simulation,
                 skip_baseline_check=False,
                 lock_file=self.lab_lock_file,
-                lock_timeout=self.lock_timeout
+                lock_timeout=self.lock_timeout,
+                caller_manages_signals=True
             )
-        except KeyboardInterrupt as ki:
-            exec_error = f"Trial interrupted by KeyboardInterrupt: {ki}"
+        except (KeyboardInterrupt, InterruptedError) as ki:
+            if not self._interrupted:
+                self._interrupted = True
+                self._interrupted_signum = getattr(signal, "SIGINT", 2)
+                self._interrupted_signal_name = "SIGINT"
+            exec_error = f"Campaign attempt interrupted by signal {self._interrupted_signum} ({self._interrupted_signal_name}): {ki}"
         except Exception as exc:
             exec_error = str(exc)
+        finally:
+            self._active_trial_id = None
+            self._active_trial_dir = None
+            self._active_slot = None
 
         end_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
         duration_ms = round((time.time() - t_start) * 1000.0, 2)
+
+        # Audit all genuine evidence physically written to trial_dir
+        disk_paths, disk_pcap_meta = self._collect_preserved_evidence(trial_dir)
 
         # ----------------------------------------------------------------------
         # FAIL-STOP EVALUATION: Cleanup & Baseline Verification
@@ -887,21 +1013,34 @@ class CampaignRunner:
         else:
             # Trial failed before writing result: check whether baseline is clean
             baseline_ok = False
+            baseline_errs: List[str] = []
             try:
                 baseline_ok = impair.self_test_baseline(dry_run=self.is_simulation)
+                if not baseline_ok:
+                    baseline_errs.append("Post-interruption baseline verification failed")
             except Exception as b_exc:
-                exec_error = f"{exec_error}; baseline check error: {b_exc}" if exec_error else str(b_exc)
+                baseline_errs.append(f"baseline check error: {b_exc}")
+
+            if not baseline_ok:
+                try:
+                    impair.clear_impairments(dry_run=self.is_simulation)
+                    baseline_ok = impair.self_test_baseline(dry_run=self.is_simulation)
+                    if not baseline_ok:
+                        baseline_errs.append("Baseline not clean after clear_impairments")
+                except Exception as c_err:
+                    baseline_errs.append(f"impairment clear error: {c_err}")
+
             cleanup_status = {
-                "scenario_restored": False,
+                "scenario_restored": baseline_ok,
                 "baseline_verified": baseline_ok,
                 "profile_cleaned": True,
                 "lock_released": True,
-                "errors": [exec_error] if exec_error else ["Unknown trial error"]
+                "errors": baseline_errs
             }
 
         scenario_restored = cleanup_status.get("scenario_restored", False)
         baseline_verified = cleanup_status.get("baseline_verified", False)
-        cleanup_errors = cleanup_status.get("errors", [])
+        cleanup_errors = list(cleanup_status.get("errors", []))
 
         # Extra verification of baseline state using impair.self_test_baseline
         try:
@@ -912,6 +1051,16 @@ class CampaignRunner:
         except Exception as b_err:
             baseline_verified = False
             cleanup_errors.append(f"Post-trial self_test_baseline exception: {b_err}")
+
+        # Interruption payload if signal was caught
+        interruption_info = None
+        if self._interrupted:
+            interruption_info = {
+                "signal_number": self._interrupted_signum,
+                "signal_name": self._interrupted_signal_name,
+                "interrupted_at": end_iso,
+                "error_details": exec_error or "Campaign interrupted by signal"
+            }
 
         # Check for cleanup/baseline failure
         if not scenario_restored or not baseline_verified or len(cleanup_errors) > 0:
@@ -924,23 +1073,16 @@ class CampaignRunner:
             evidence_paths = (
                 trial_result.get("evidence_paths", {})
                 if trial_result and trial_result.get("evidence_paths")
-                else {"trial_dir": str(trial_dir)}
+                else disk_paths
             )
             capture_metadata = (
                 trial_result.get("capture_metadata", {})
-                if trial_result
-                else {}
+                if trial_result and trial_result.get("capture_metadata")
+                else disk_pcap_meta
             )
-            http_outcome = (
-                trial_result.get("http_outcome", {})
-                if trial_result
-                else {}
-            )
-            network_observations = (
-                trial_result.get("network_observations", {})
-                if trial_result
-                else {}
-            )
+            http_outcome = trial_result.get("http_outcome", {}) if trial_result else {}
+            network_observations = trial_result.get("network_observations", {}) if trial_result else {}
+
             attempt = ExecutionAttempt(
                 attempt_number=attempt_number,
                 trial_id=trial_id,
@@ -954,27 +1096,41 @@ class CampaignRunner:
                 http_outcome=http_outcome,
                 network_observations=network_observations,
                 cleanup_status=cleanup_status,
-                error_message=f"CLEANUP OR BASELINE FAILURE: {err_details}"
+                error_message=f"CLEANUP OR BASELINE FAILURE: {err_details}",
+                slot_id=slot.slot_id,
+                scenario_id=slot.scenario_id,
+                browser=slot.browser,
+                repetition=slot.repetition,
+                campaign_id=self.campaign_id,
+                interruption=interruption_info
             )
             write_failed_attempt_record(trial_dir, attempt)
             return attempt
 
-        # If trial errored out during execution
+        # If trial errored out during execution or was interrupted
         if trial_result is None or exec_error is not None:
+            attempt_status = "INTERRUPTED" if self._interrupted else "FAILED"
+            attempt_validity = "INTERRUPTED" if self._interrupted else "MEASUREMENT_FAILURE"
             attempt = ExecutionAttempt(
                 attempt_number=attempt_number,
                 trial_id=trial_id,
                 execution_mode="SIMULATION" if self.is_simulation else "LIVE",
                 is_simulation=self.is_simulation,
                 timestamps={"start_time": start_iso, "end_time": end_iso, "duration_ms": duration_ms},
-                status="FAILED",
-                validity="MEASUREMENT_FAILURE",
-                evidence_paths={"trial_dir": str(trial_dir)},
-                capture_metadata={},
+                status=attempt_status,
+                validity=attempt_validity,
+                evidence_paths=disk_paths,
+                capture_metadata=disk_pcap_meta,
                 http_outcome={},
                 network_observations={},
                 cleanup_status=cleanup_status,
-                error_message=exec_error
+                error_message=exec_error,
+                slot_id=slot.slot_id,
+                scenario_id=slot.scenario_id,
+                browser=slot.browser,
+                repetition=slot.repetition,
+                campaign_id=self.campaign_id,
+                interruption=interruption_info
             )
             write_failed_attempt_record(trial_dir, attempt)
             return attempt
@@ -1010,7 +1166,13 @@ class CampaignRunner:
             http_outcome=trial_result.get("http_outcome", {}),
             network_observations=net_obs,
             cleanup_status=cleanup_status,
-            error_message=exec_error
+            error_message=exec_error,
+            slot_id=slot.slot_id,
+            scenario_id=slot.scenario_id,
+            browser=slot.browser,
+            repetition=slot.repetition,
+            campaign_id=self.campaign_id,
+            interruption=interruption_info
         )
         if status == "FAILED" or validity in ("CLEANUP_FAILURE", "MEASUREMENT_FAILURE"):
             write_failed_attempt_record(trial_dir, attempt)
@@ -1021,30 +1183,46 @@ class CampaignRunner:
         Executes the campaign sequentially under the campaign manifest lock:
         - Prevents concurrent access to the campaign manifest.
         - Sequentially runs each pending matrix slot.
+        - Gracefully handles SIGINT (exit 130) and SIGTERM (exit 143), ensuring active attempts
+          are finalized with durable failure records and cleanup is executed before exit.
         - Immediately stops upon any cleanup or baseline failure (FAIL-STOP).
         - Atomically saves manifest after every attempt.
         """
         with acquire_manifest_lock(self.lock_path, timeout=self.lock_timeout):
             manifest = self.initialize_manifest()
+            self._manifest = manifest
 
             # Signal interruption handler
-            interrupted = False
+            self._interrupted = False
+            self._interrupted_signum = None
+            self._interrupted_signal_name = None
+            self._signal_count = 0
 
             def _handle_signal(signum, frame):
-                nonlocal interrupted
-                interrupted = True
-                manifest.status = "INTERRUPTED"
-                manifest.halt_reason = f"Campaign interrupted by signal {signum}"
-                manifest.save_atomically()
-                print(f"\n[WARN] Campaign interrupted by signal {signum}. Manifest saved safely.", file=sys.stderr)
-                sys.exit(130)
+                self._signal_count += 1
+                if self._signal_count > 1:
+                    print(
+                        f"\n[CRITICAL] Repeated signal {signum} received; forcing immediate process exit.",
+                        file=sys.stderr
+                    )
+                    sys.exit(128 + signum)
+
+                self._interrupted = True
+                self._interrupted_signum = signum
+                signame = signal.Signals(signum).name if hasattr(signal, "Signals") else str(signum)
+                self._interrupted_signal_name = signame
+                print(
+                    f"\n[WARN] Campaign received {signame} ({signum}); requesting controlled interruption...",
+                    file=sys.stderr
+                )
+                raise KeyboardInterrupt(f"Campaign interrupted by signal {signum} ({signame})")
 
             old_sigint = signal.signal(signal.SIGINT, _handle_signal)
             old_sigterm = signal.signal(signal.SIGTERM, _handle_signal)
 
             try:
                 for slot in manifest.matrix_slots:
-                    if interrupted:
+                    if self._interrupted:
                         break
 
                     if slot.is_completed():
@@ -1054,6 +1232,15 @@ class CampaignRunner:
                     attempt_num = len(slot.attempts) + 1
                     attempt = self.execute_slot_attempt(slot, attempt_number=attempt_num)
                     slot.add_attempt(attempt)
+
+                    if self._interrupted:
+                        manifest.status = "INTERRUPTED"
+                        manifest.halt_reason = (
+                            f"Campaign interrupted by signal {self._interrupted_signum} "
+                            f"({self._interrupted_signal_name})"
+                        )
+                        manifest.save_atomically()
+                        break
 
                     # Check FAIL-STOP condition: Cleanup or Baseline Failure
                     if attempt.validity == "CLEANUP_FAILURE":
@@ -1079,7 +1266,14 @@ class CampaignRunner:
                     manifest.save_atomically()
 
                 # Finalize campaign status
-                if not interrupted:
+                if self._interrupted:
+                    manifest.status = "INTERRUPTED"
+                    manifest.halt_reason = (
+                        f"Campaign interrupted by signal {self._interrupted_signum} "
+                        f"({self._interrupted_signal_name})"
+                    )
+                    manifest.save_atomically()
+                else:
                     all_done = all(s.is_completed() for s in manifest.matrix_slots)
                     if all_done:
                         manifest.status = "COMPLETED"
@@ -1095,11 +1289,26 @@ class CampaignRunner:
                                     break
                             manifest.completed_at = latest_end or datetime.datetime.now(datetime.timezone.utc).isoformat()
                     else:
-                        if manifest.status != "HALTED_ON_FAILURE":
+                        if manifest.status not in ("HALTED_ON_FAILURE", "INTERRUPTED"):
                             manifest.status = "INCOMPLETE"
                     manifest.save_atomically()
 
+                if self._interrupted and self.exit_on_interruption:
+                    sys.exit(128 + self._interrupted_signum)
+
                 return manifest.to_dict()
+            except KeyboardInterrupt:
+                if self._interrupted:
+                    manifest.status = "INTERRUPTED"
+                    manifest.halt_reason = (
+                        f"Campaign interrupted by signal {self._interrupted_signum} "
+                        f"({self._interrupted_signal_name})"
+                    )
+                    manifest.save_atomically()
+                    if self.exit_on_interruption:
+                        sys.exit(128 + self._interrupted_signum)
+                    return manifest.to_dict()
+                raise
             finally:
                 signal.signal(signal.SIGINT, old_sigint)
                 signal.signal(signal.SIGTERM, old_sigterm)

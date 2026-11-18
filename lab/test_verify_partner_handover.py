@@ -354,19 +354,19 @@ def make_synthetic_derived_directory(
                     "retransmitted_syn_count": "0"
                 })
 
-                timeline_rows.append({
-                    "trial_id": tid,
-                    "event_index": "1",
-                    "event_timestamp_epoch": "1700000000.0",
-                    "event_source": "HARNESS",
-                    "event_type": "TRIAL_START",
-                    "address_family": "",
-                    "tcp_stream": "",
-                    "frame_number": "",
-                    "details": "Synthetic start",
-                    "pcap_sha256": pcap_sha,
-                    "source_path": f"trials/{tid}/result.json"
-                })
+            timeline_rows.append({
+                "trial_id": tid,
+                "event_index": "1",
+                "event_timestamp_epoch": "1700000000.0",
+                "event_source": "HARNESS",
+                "event_type": "TRIAL_START",
+                "address_family": "",
+                "tcp_stream": "",
+                "frame_number": "",
+                "details": "Synthetic start",
+                "pcap_sha256": pcap_sha,
+                "source_path": f"trials/{tid}/result.json"
+            })
 
     datasets = {
         "attempts.csv": attempts_rows,
@@ -1090,6 +1090,229 @@ class TestVerifyPartnerHandover(unittest.TestCase):
         with self.assertRaises(verify_partner_handover.VerificationError) as ctx:
             verify_partner_handover.verify_partner_archive(arch_path)
         self.assertIn("special device node", str(ctx.exception).lower())
+
+    def test_derived_attempts_csv_malformed_slot_index_rejected(self):
+        """attempts.csv with non-integer slot_index (e.g. float or string) fails closed."""
+        camp = make_synthetic_campaign(self.temp_dir, repetitions=20)
+        derived = make_synthetic_derived_directory(camp, self.temp_dir / "derived")
+
+        att_csv = derived / "attempts.csv"
+        with open(att_csv, "r", encoding="utf-8") as rf:
+            rows = list(csv.DictReader(rf))
+        rows[0]["slot_index"] = "1.5"
+        fieldnames = list(rows[0].keys())
+        with open(att_csv, "w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
+
+        prov_file = derived / "attempts.csv.provenance.json"
+        pdata = json.loads(prov_file.read_text(encoding="utf-8"))
+        pdata["sha256"] = verify_partner_handover.sha256_file(att_csv)
+        prov_file.write_text(json.dumps(pdata), encoding="utf-8")
+
+        with self.assertRaises(verify_partner_handover.VerificationError) as ctx:
+            verify_partner_handover.verify_partner_campaign_directory(camp, derived_dir=derived)
+        self.assertIn("must be a valid integer", str(ctx.exception).lower())
+
+    def test_derived_attempts_csv_malformed_repetition_rejected(self):
+        """attempts.csv with out-of-range repetition fails closed."""
+        camp = make_synthetic_campaign(self.temp_dir, repetitions=20)
+        derived = make_synthetic_derived_directory(camp, self.temp_dir / "derived")
+
+        att_csv = derived / "attempts.csv"
+        with open(att_csv, "r", encoding="utf-8") as rf:
+            rows = list(csv.DictReader(rf))
+        rows[0]["repetition"] = "0"
+        fieldnames = list(rows[0].keys())
+        with open(att_csv, "w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
+
+        prov_file = derived / "attempts.csv.provenance.json"
+        pdata = json.loads(prov_file.read_text(encoding="utf-8"))
+        pdata["sha256"] = verify_partner_handover.sha256_file(att_csv)
+        prov_file.write_text(json.dumps(pdata), encoding="utf-8")
+
+        with self.assertRaises(verify_partner_handover.VerificationError) as ctx:
+            verify_partner_handover.verify_partner_campaign_directory(camp, derived_dir=derived)
+        self.assertIn("below minimum", str(ctx.exception).lower())
+
+    def test_derived_attempts_csv_malformed_attempt_number_rejected(self):
+        """attempts.csv with invalid attempt_number fails closed."""
+        camp = make_synthetic_campaign(self.temp_dir, repetitions=20)
+        derived = make_synthetic_derived_directory(camp, self.temp_dir / "derived")
+
+        att_csv = derived / "attempts.csv"
+        with open(att_csv, "r", encoding="utf-8") as rf:
+            rows = list(csv.DictReader(rf))
+        rows[0]["attempt_number"] = "-1"
+        fieldnames = list(rows[0].keys())
+        with open(att_csv, "w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
+
+        prov_file = derived / "attempts.csv.provenance.json"
+        pdata = json.loads(prov_file.read_text(encoding="utf-8"))
+        pdata["sha256"] = verify_partner_handover.sha256_file(att_csv)
+        prov_file.write_text(json.dumps(pdata), encoding="utf-8")
+
+        with self.assertRaises(verify_partner_handover.VerificationError) as ctx:
+            verify_partner_handover.verify_partner_campaign_directory(camp, derived_dir=derived)
+        self.assertIn("below minimum", str(ctx.exception).lower())
+
+    def test_derived_attempts_csv_tampered_attempt_id_rejected(self):
+        """attempts.csv with duplicate attempt_id fails closed."""
+        camp = make_synthetic_campaign(self.temp_dir, repetitions=20)
+        derived = make_synthetic_derived_directory(camp, self.temp_dir / "derived")
+
+        att_csv = derived / "attempts.csv"
+        with open(att_csv, "r", encoding="utf-8") as rf:
+            rows = list(csv.DictReader(rf))
+        rows[1]["attempt_id"] = rows[0]["attempt_id"]
+        fieldnames = list(rows[0].keys())
+        with open(att_csv, "w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
+
+        prov_file = derived / "attempts.csv.provenance.json"
+        pdata = json.loads(prov_file.read_text(encoding="utf-8"))
+        pdata["sha256"] = verify_partner_handover.sha256_file(att_csv)
+        prov_file.write_text(json.dumps(pdata), encoding="utf-8")
+
+        with self.assertRaises(verify_partner_handover.VerificationError) as ctx:
+            verify_partner_handover.verify_partner_campaign_directory(camp, derived_dir=derived)
+        self.assertIn("duplicate attempt_id", str(ctx.exception).lower())
+
+    def test_derived_attempts_csv_omitted_manifest_attempt_rejected(self):
+        """attempts.csv missing an attempt that exists in manifest fails closed."""
+        camp = make_synthetic_campaign(self.temp_dir, repetitions=20)
+        derived = make_synthetic_derived_directory(camp, self.temp_dir / "derived")
+
+        att_csv = derived / "attempts.csv"
+        with open(att_csv, "r", encoding="utf-8") as rf:
+            rows = list(csv.DictReader(rf))
+        # Omit the first row
+        omitted = rows.pop(0)
+        fieldnames = list(omitted.keys())
+        with open(att_csv, "w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
+
+        prov_file = derived / "attempts.csv.provenance.json"
+        pdata = json.loads(prov_file.read_text(encoding="utf-8"))
+        pdata["sha256"] = verify_partner_handover.sha256_file(att_csv)
+        prov_file.write_text(json.dumps(pdata), encoding="utf-8")
+
+        with self.assertRaises(verify_partner_handover.VerificationError) as ctx:
+            verify_partner_handover.verify_partner_campaign_directory(camp, derived_dir=derived)
+        self.assertIn("row count mismatch", str(ctx.exception).lower())
+
+    def test_derived_connection_attempts_malformed_port_rejected(self):
+        """connection_attempts.csv with invalid port fails closed."""
+        camp = make_synthetic_campaign(self.temp_dir, repetitions=20)
+        derived = make_synthetic_derived_directory(camp, self.temp_dir / "derived")
+
+        conn_csv = derived / "connection_attempts.csv"
+        with open(conn_csv, "r", encoding="utf-8") as rf:
+            rows = list(csv.DictReader(rf))
+        rows[0]["client_port"] = "70000"
+        fieldnames = list(rows[0].keys())
+        with open(conn_csv, "w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
+
+        prov_file = derived / "connection_attempts.csv.provenance.json"
+        pdata = json.loads(prov_file.read_text(encoding="utf-8"))
+        pdata["sha256"] = verify_partner_handover.sha256_file(conn_csv)
+        prov_file.write_text(json.dumps(pdata), encoding="utf-8")
+
+        with self.assertRaises(verify_partner_handover.VerificationError) as ctx:
+            verify_partner_handover.verify_partner_campaign_directory(camp, derived_dir=derived)
+        self.assertIn("exceeds maximum", str(ctx.exception).lower())
+
+    def test_derived_timeline_malformed_event_index_rejected(self):
+        """trial_timeline.csv with invalid event_index fails closed."""
+        camp = make_synthetic_campaign(self.temp_dir, repetitions=20)
+        derived = make_synthetic_derived_directory(camp, self.temp_dir / "derived")
+
+        time_csv = derived / "trial_timeline.csv"
+        with open(time_csv, "r", encoding="utf-8") as rf:
+            rows = list(csv.DictReader(rf))
+        rows[0]["event_index"] = "abc"
+        fieldnames = list(rows[0].keys())
+        with open(time_csv, "w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
+
+        prov_file = derived / "trial_timeline.csv.provenance.json"
+        pdata = json.loads(prov_file.read_text(encoding="utf-8"))
+        pdata["sha256"] = verify_partner_handover.sha256_file(time_csv)
+        prov_file.write_text(json.dumps(pdata), encoding="utf-8")
+
+        with self.assertRaises(verify_partner_handover.VerificationError) as ctx:
+            verify_partner_handover.verify_partner_campaign_directory(camp, derived_dir=derived)
+        self.assertIn("must be a valid integer", str(ctx.exception).lower())
+
+    def test_campaign_and_derived_with_interrupted_attempt_accepted(self):
+        """Campaign and derived ledgers with an INTERRUPTED attempt and subsequent retry verify cleanly."""
+        camp = make_synthetic_campaign(self.temp_dir, repetitions=20)
+        mpath = camp / "campaign_manifest.json"
+        mdata = json.loads(mpath.read_text(encoding="utf-8"))
+
+        # In slot 0, insert an INTERRUPTED attempt prior to the successful attempt
+        slot0 = mdata["matrix_slots"][0]
+        succ_att = slot0["attempts"][0]
+        succ_att["attempt_number"] = 2
+
+        interrupted_tid = f"trial-synth-{mdata['campaign_id']}-interrupted-0001-01"
+        int_tdir = camp / "trials" / interrupted_tid
+        int_tdir.mkdir(parents=True, exist_ok=True)
+
+        int_record = {
+            "attempt_number": 1,
+            "trial_id": interrupted_tid,
+            "execution_mode": "LIVE",
+            "is_simulation": False,
+            "timestamps": {
+                "start_time": "2026-11-18T00:00:00.000000+00:00",
+                "end_time": "2026-11-18T00:00:02.000000+00:00",
+                "duration_ms": 2000.0
+            },
+            "status": "INTERRUPTED",
+            "validity": "INTERRUPTED",
+            "evidence_paths": {"trial_dir": str(int_tdir)},
+            "capture_metadata": {},
+            "cleanup_status": {
+                "scenario_restored": True,
+                "baseline_verified": True,
+                "errors": []
+            },
+            "error_message": "Campaign attempt interrupted by signal 2 (SIGINT)",
+            "interruption": {
+                "signal_number": 2,
+                "signal_name": "SIGINT",
+                "interrupted_at": "2026-11-18T00:00:02.000000+00:00",
+                "error_details": "Campaign attempt interrupted by signal 2"
+            }
+        }
+        (int_tdir / "failed_attempt_record.json").write_text(
+            json.dumps(int_record, indent=2), encoding="utf-8"
+        )
+
+        slot0["attempts"] = [int_record, succ_att]
+        mdata["summary"]["total_attempts"] += 1
+        mdata["summary"]["failed_attempts"] += 1
+        mpath.write_text(json.dumps(mdata, indent=2), encoding="utf-8")
+
+        derived = make_synthetic_derived_directory(camp, self.temp_dir / "derived")
+        verify_partner_handover.verify_partner_campaign_directory(camp, derived_dir=derived)
 
 
 if __name__ == "__main__":

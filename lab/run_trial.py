@@ -1316,6 +1316,7 @@ def stop_packet_capture(
 
 def validate_pcap_file(
     pcap_path: Path,
+    expected_sha256: Optional[str] = None,
     min_packets: int = 0,
     expected_packets: Optional[int] = None,
     check_tshark: bool = False
@@ -1324,7 +1325,7 @@ def validate_pcap_file(
     Validates a PCAP file:
     1. Checks file existence and non-zero size
     2. Validates PCAP header magic bytes and header structure
-    3. Computes SHA-256 digest
+    3. Computes SHA-256 digest and validates against expected_sha256 if provided
     4. Rigorously audits packet records (record header, captured length, wire length, payload boundaries)
     5. Checks packet count consistency and minimum packet count
     Returns: (is_valid, sha256_hex, size_bytes, packet_count, message)
@@ -1338,6 +1339,9 @@ def validate_pcap_file(
         return False, "", size, 0, f"PCAP file too small ({size} bytes, expected >= 24)"
 
     sha256_hex = hashlib.sha256(data).hexdigest()
+
+    if expected_sha256 and sha256_hex.lower() != expected_sha256.lower():
+        return False, sha256_hex, size, 0, f"PCAP SHA-256 mismatch: recorded {expected_sha256}, computed {sha256_hex}"
 
     # Magic byte checks: standard, nanosecond, swapped, or pcapng
     magic = data[:4]
@@ -1365,23 +1369,143 @@ def validate_pcap_file(
     return True, sha256_hex, size, pkt_count, "Valid PCAP"
 
 
-def _count_packets(pcap_path: Path, data: bytes, check_tshark: bool = False) -> Tuple[bool, int, str]:
+def fsync_directory(dir_path: Union[str, Path]) -> None:
     """
-    Rigorously parses, validates and counts packet records in a PCAP file:
-    - Verifies record header boundary (16 bytes)
-    - Validates captured length incl_len <= snaplen / maximum reasonable packet bound
-    - Validates wire length orig_len >= incl_len
-    - Validates complete packet payload boundary before incrementing count
-    - Verifies zero trailing unparsed bytes after final packet record
-    - Optionally verifies consistency between binary and tshark counts if check_tshark is True
-    Returns: (is_valid, packet_count, message)
+    Flushes directory changes to disk on POSIX systems so file additions
+    or atomic renames are durably recorded in the filesystem directory entry.
     """
-    magic = data[:4]
+    try:
+        flags = os.O_RDONLY
+        if hasattr(os, "O_DIRECTORY"):
+            flags |= os.O_DIRECTORY
+        fd = os.open(str(dir_path), flags)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    except OSError:
+        pass
 
-    # Special handling for PCAP-NG
-    if magic == b"\x0a\x0d\x0d\x0a":
+
+def _count_packets_pcapng(
+    pcap_path: Path,
+    data: bytes,
+    check_tshark: bool = False
+) -> Tuple[bool, int, str]:
+    """
+    Rigorously parses and structurally validates PCAP-NG files:
+    - Validates Section Header Block (SHB), Byte Order Magic, endianness
+    - Validates Interface Description Blocks (IDB) and declared snaplens
+    - Validates Enhanced Packet Blocks (EPB) and Simple Packet Blocks (SPB)
+    - Validates 32-bit alignment and block length consistency (leading == trailing)
+    - Validates payload boundaries, packet captured lengths <= snaplen and <= 262144
+    - Rejects truncated blocks, corrupt data, and trailing unparsed bytes
+    - Derives packet count directly from validated packet blocks (never fake counts)
+    - Optionally cross-checks with TShark when requested and installed
+    """
+    dlen = len(data)
+    if dlen < 28:
+        return False, 0, f"PCAP-NG file too small ({dlen} bytes < 28 bytes minimum section header)"
+
+    offset = 0
+    count = 0
+    endian = "<"
+    interfaces: List[Dict[str, Any]] = []
+    section_count = 0
+
+    while offset < dlen:
+        if offset + 12 > dlen:
+            return False, count, f"Trailing unparsed bytes / truncated PCAP-NG block header at offset {offset} ({dlen - offset} bytes < 12)"
+
+        # Check for Section Header Block (0x0A0D0D0A) which establishes endianness
+        raw_type = data[offset : offset + 4]
+        if raw_type == b"\x0a\x0d\x0d\x0a":
+            section_count += 1
+            interfaces = []  # Reset interface list per section
+            if offset + 28 > dlen:
+                return False, count, f"Truncated Section Header Block at offset {offset} ({dlen - offset} bytes < 28)"
+
+            bom = data[offset + 8 : offset + 12]
+            if bom == b"\x4d\x3c\x2b\x1a":
+                endian = "<"
+            elif bom == b"\x1a\x2b\x3c\x4d":
+                endian = ">"
+            else:
+                return False, count, f"Invalid PCAP-NG byte order magic at offset {offset}: {bom.hex()}"
+
+            block_type, block_len = struct.unpack(endian + "II", data[offset : offset + 8])
+            if block_len < 28:
+                return False, count, f"Invalid Section Header Block length {block_len} at offset {offset} (< 28)"
+        else:
+            block_type, block_len = struct.unpack(endian + "II", data[offset : offset + 8])
+
+        if block_len < 12:
+            return False, count, f"Invalid PCAP-NG block length {block_len} at offset {offset} (< 12)"
+        if block_len % 4 != 0:
+            return False, count, f"PCAP-NG block length {block_len} at offset {offset} is not 32-bit aligned"
+        if offset + block_len > dlen:
+            return False, count, f"Truncated PCAP-NG block at offset {offset}: block length {block_len} exceeds file size ({dlen - offset} available)"
+
+        trailing_len = struct.unpack(endian + "I", data[offset + block_len - 4 : offset + block_len])[0]
+        if trailing_len != block_len:
+            return False, count, f"PCAP-NG block length mismatch at offset {offset}: leading {block_len} != trailing {trailing_len}"
+
+        # Block-specific structural parsing
+        if block_type == 0x00000001:
+            # Interface Description Block (IDB)
+            if block_len < 20:
+                return False, count, f"Truncated PCAP-NG IDB at offset {offset} (length {block_len} < 20)"
+            link_type, reserved, snaplen = struct.unpack(endian + "HHI", data[offset + 8 : offset + 16])
+            if snaplen <= 0 or snaplen > 262144:
+                return False, count, f"Invalid PCAP-NG interface snaplen: {snaplen} (must be > 0 and <= 262144)"
+            interfaces.append({"link_type": link_type, "snaplen": snaplen})
+
+        elif block_type == 0x00000006:
+            # Enhanced Packet Block (EPB)
+            if block_len < 32:
+                return False, count, f"Truncated PCAP-NG EPB at offset {offset} (length {block_len} < 32)"
+            if_id, ts_hi, ts_lo, incl_len, orig_len = struct.unpack(endian + "IIIII", data[offset + 8 : offset + 28])
+            if interfaces and if_id >= len(interfaces):
+                return False, count, f"PCAP-NG EPB at offset {offset} references non-existent interface {if_id} (known interfaces: {len(interfaces)})"
+            iface_snap = interfaces[if_id]["snaplen"] if (interfaces and if_id < len(interfaces)) else 262144
+            if incl_len > iface_snap or incl_len > 262144:
+                return False, count, f"PCAP-NG EPB packet captured length {incl_len} exceeds snaplen {iface_snap} or 262144"
+            if orig_len < incl_len:
+                return False, count, f"Inconsistent PCAP-NG EPB packet length: captured {incl_len} > original wire length {orig_len}"
+            pad = (4 - (incl_len % 4)) % 4
+            if 28 + incl_len + pad + 4 > block_len:
+                return False, count, f"Truncated PCAP-NG EPB payload: packet length {incl_len} exceeds block capacity ({block_len})"
+            count += 1
+
+        elif block_type == 0x00000003:
+            # Simple Packet Block (SPB)
+            if block_len < 16:
+                return False, count, f"Truncated PCAP-NG SPB at offset {offset} (length {block_len} < 16)"
+            orig_len = struct.unpack(endian + "I", data[offset + 8 : offset + 12])[0]
+            data_len = block_len - 16
+            pad = (4 - (orig_len % 4)) % 4
+            incl_len = min(orig_len, data_len)
+            if incl_len > 262144:
+                return False, count, f"Inconsistent PCAP-NG SPB packet length: {incl_len}"
+            if orig_len < incl_len:
+                return False, count, f"Inconsistent PCAP-NG SPB packet length: captured {incl_len} > wire length {orig_len}"
+            count += 1
+
+        offset += block_len
+
+    if offset != dlen:
+        return False, count, f"Trailing unparsed bytes at end of PCAP-NG: {dlen - offset} bytes"
+
+    if section_count == 0:
+        return False, 0, "No valid Section Header Block found in PCAP-NG"
+
+    if count == 0:
+        return False, 0, "PCAP-NG contains zero valid packet blocks"
+
+    # Optional cross-validation with TShark if requested
+    if (check_tshark or os.environ.get("PS028_CROSSCHECK_TSHARK") == "1") and pcap_path.is_file():
         tshark = shutil.which("tshark")
-        if tshark and pcap_path.is_file():
+        if tshark:
             try:
                 res = subprocess.run(
                     [tshark, "-r", str(pcap_path), "-q", "-z", "io,stat,0"],
@@ -1394,10 +1518,34 @@ def _count_packets(pcap_path: Path, data: bytes, check_tshark: bool = False) -> 
                     if "<>" in line:
                         parts = [p.strip() for p in line.split("|") if p.strip()]
                         if len(parts) >= 2 and parts[1].isdigit():
-                            return True, int(parts[1]), "Valid PCAP-NG"
-            except Exception as e:
-                return False, 0, f"PCAP-NG parsing failed: {e}"
-        return True, 1, "PCAP-NG header verified"
+                            tshark_count = int(parts[1])
+                            if tshark_count != count:
+                                return False, count, f"Inconsistent packet counts: structural PCAP-NG parsed {count} packets, tshark reported {tshark_count}"
+                            break
+            except Exception:
+                pass
+
+    return True, count, f"Valid PCAP-NG ({count} packets)"
+
+
+def _count_packets(pcap_path: Path, data: bytes, check_tshark: bool = False) -> Tuple[bool, int, str]:
+    """
+    Rigorously parses, validates and counts packet records in a PCAP file:
+    - Verifies global header boundary (24 bytes) and valid snaplen (0 < snaplen <= 262144)
+    - Verifies record header boundary (16 bytes)
+    - Strictly enforces captured length incl_len <= snaplen and incl_len <= 262144
+    - Validates wire length orig_len >= incl_len
+    - Validates complete packet payload boundary before incrementing count
+    - Verifies zero trailing unparsed bytes after final packet record
+    - Fully validates PCAP-NG structurally via _count_packets_pcapng without failing open
+    - Optionally verifies consistency between binary and tshark counts if check_tshark is True
+    Returns: (is_valid, packet_count, message)
+    """
+    magic = data[:4]
+
+    # Special handling for PCAP-NG
+    if magic == b"\x0a\x0d\x0d\x0a":
+        return _count_packets_pcapng(pcap_path, data, check_tshark=check_tshark)
 
     # Standard / Nanosecond PCAP parsing
     if magic in (b"\xd4\xc3\xb2\xa1", b"\x4d\x3c\xb2\xa1"):
@@ -1407,12 +1555,17 @@ def _count_packets(pcap_path: Path, data: bytes, check_tshark: bool = False) -> 
     else:
         return False, 0, f"Unsupported PCAP magic: {magic.hex()}"
 
+    if len(data) < 24:
+        return False, 0, f"Truncated PCAP global header: {len(data)} bytes < 24"
+
     try:
         major, minor, tz, sigfigs, snaplen, linktype = struct.unpack(endian + "HHIIII", data[4:24])
     except Exception as e:
         return False, 0, f"Malformed PCAP file header: {e}"
 
-    max_snap = max(snaplen, 262144) if snaplen > 0 else 262144
+    if snaplen <= 0 or snaplen > 262144:
+        return False, 0, f"Invalid PCAP snaplen: {snaplen} (must be > 0 and <= 262144)"
+
     offset = 24
     dlen = len(data)
     count = 0
@@ -1423,9 +1576,11 @@ def _count_packets(pcap_path: Path, data: bytes, check_tshark: bool = False) -> 
 
         ts_sec, ts_usec, incl_len, orig_len = struct.unpack(endian + "IIII", data[offset : offset + 16])
 
-        # Validate captured length bound
-        if incl_len > max_snap or incl_len > 262144:
-            return False, count, f"Impossible packet captured length: {incl_len} (max allowed {max_snap})"
+        # Validate captured length bound strictly against standard cap and declared snaplen
+        if incl_len > 262144:
+            return False, count, f"Impossible packet captured length: {incl_len} (max allowed 262144)"
+        if incl_len > snaplen:
+            return False, count, f"Packet captured length {incl_len} exceeds declared snaplen {snaplen}"
 
         # Validate captured length vs wire length
         if orig_len < incl_len:
@@ -4479,6 +4634,7 @@ def run_trial(
     capture_interface: Optional[str] = None,
     capture_filter: Optional[str] = None,
     capture_buffer_kb: Optional[int] = None,
+    caller_manages_signals: bool = False,
 ) -> Dict[str, Any]:
     """
     Executes one complete integrated measurement trial:
@@ -4555,12 +4711,15 @@ def run_trial(
         capture_shutdown_error: Optional[str] = None
 
         # Signal handling to ensure cleanup on SIGINT / SIGTERM
-        def _sig_handler(signum, frame):
-            # Baseline restoration will execute in finally block
-            raise KeyboardInterrupt(f"Interrupted by signal {signum}")
+        old_sigint = None
+        old_sigterm = None
+        if not caller_manages_signals:
+            def _sig_handler(signum, frame):
+                # Baseline restoration will execute in finally block
+                raise KeyboardInterrupt(f"Interrupted by signal {signum}")
 
-        old_sigint = signal.signal(signal.SIGINT, _sig_handler)
-        old_sigterm = signal.signal(signal.SIGTERM, _sig_handler)
+            old_sigint = signal.signal(signal.SIGINT, _sig_handler)
+            old_sigterm = signal.signal(signal.SIGTERM, _sig_handler)
 
         try:
             # 2.5 Browser Preflight Checks (Path Writability & Environment)
@@ -4668,9 +4827,12 @@ def run_trial(
             cleanup_errors.append(f"Trial execution error: {e}")
             raise
         finally:
-            # Restore signal handlers
-            signal.signal(signal.SIGINT, old_sigint)
-            signal.signal(signal.SIGTERM, old_sigterm)
+            # Restore signal handlers if managed by this trial
+            if not caller_manages_signals:
+                if old_sigint is not None:
+                    signal.signal(signal.SIGINT, old_sigint)
+                if old_sigterm is not None:
+                    signal.signal(signal.SIGTERM, old_sigterm)
 
             # 7. Unconditional Cleanup & Baseline Restoration
             if tcpdump_proc is not None:
@@ -5076,8 +5238,14 @@ def run_trial(
         elif browser_result.get("telemetry_path"):
             result["evidence_paths"]["browser_telemetry"] = _serialize_evidence_path(browser_result["telemetry_path"])
 
-        # Persist versioned JSON result
-        result_json_path.write_text(json.dumps(result, indent=2), encoding="utf-8")
+        # Persist versioned JSON result atomically with directory durability
+        tmp_result = result_json_path.with_suffix(f".tmp.{os.getpid()}_{time.time_ns()}")
+        with open(tmp_result, "w", encoding="utf-8") as f:
+            f.write(json.dumps(result, indent=2))
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_result, result_json_path)
+        fsync_directory(tdir)
 
         return result
 

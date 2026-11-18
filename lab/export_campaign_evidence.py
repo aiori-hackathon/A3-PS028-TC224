@@ -925,7 +925,7 @@ def validate_campaign_timeline(
             validity = att.get("validity", "MEASUREMENT_FAILURE")
             if status == "COMPLETED" and validity == "VALID_LIVE":
                 valid_trial_ids.add(tid)
-            elif validity == "CLEANUP_FAILURE":
+            else:
                 exclusion_trial_ids.add(tid)
 
     # Index timeline rows by trial_id
