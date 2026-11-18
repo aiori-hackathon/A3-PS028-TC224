@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import type { HistoricalTrial } from '@/lib/historical-evidence';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import type { BrowserFilterId } from '@/lib/analytics/analytics-types';
@@ -7,6 +7,16 @@ interface WinnerDistributionChartProps {
   trials: HistoricalTrial[];
   globalScenarios: string[];
   globalBrowser: BrowserFilterId;
+}
+
+interface SelectedWinnerEntry {
+  scenario: string;
+  selectedFamily: 'IPv6' | 'IPv4';
+  ipv6Wins: number;
+  ipv4Wins: number;
+  v6Pct: number;
+  v4Pct: number;
+  total: number;
 }
 
 export const WinnerDistributionChart: React.FC<WinnerDistributionChartProps> = ({
@@ -25,24 +35,10 @@ export const WinnerDistributionChart: React.FC<WinnerDistributionChartProps> = (
     v4Pct: number;
   } | null>(null);
 
+  const [selectedEntry, setSelectedEntry] = useState<SelectedWinnerEntry | null>(null);
+
   const effectiveBrowser = localBrowser === 'INHERIT' ? globalBrowser : localBrowser;
   const scenarios = globalScenarios;
-
-  if (scenarios.length === 0) {
-    return (
-      <Card className="shadow-xs">
-        <CardHeader>
-          <CardTitle className="text-base font-semibold">Graph 2 — IPv4 vs IPv6 Winner Distribution</CardTitle>
-          <CardDescription>Select at least one scenario to inspect winner distribution.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="h-64 flex items-center justify-center text-xs text-muted-foreground border border-dashed rounded-lg">
-            No scenario selected
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
 
   // Aggregate winner counts per scenario
   const data = scenarios.map((scId) => {
@@ -76,6 +72,71 @@ export const WinnerDistributionChart: React.FC<WinnerDistributionChartProps> = (
     };
   });
 
+  // Reconcile or clear selection when filters change
+  useEffect(() => {
+    if (!selectedEntry) return;
+    if (!scenarios.includes(selectedEntry.scenario)) {
+      setSelectedEntry(null);
+      return;
+    }
+    const currentData = data.find((d) => d.scenario === selectedEntry.scenario);
+    if (!currentData || currentData.total === 0) {
+      setSelectedEntry(null);
+      return;
+    }
+    setSelectedEntry((prev) =>
+      prev
+        ? {
+            ...prev,
+            ipv6Wins: currentData.ipv6Wins,
+            ipv4Wins: currentData.ipv4Wins,
+            v6Pct: currentData.v6Pct,
+            v4Pct: currentData.v4Pct,
+            total: currentData.total,
+          }
+        : null
+    );
+  }, [scenarios, effectiveBrowser, trials]);
+
+  if (scenarios.length === 0) {
+    return (
+      <Card className="shadow-xs">
+        <CardHeader>
+          <CardTitle className="text-base font-semibold text-black">Graph 2 — IPv4 vs IPv6 Winner Distribution</CardTitle>
+          <CardDescription className="text-xs text-black">Select at least one scenario to inspect winner distribution.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="h-64 flex items-center justify-center text-xs text-black border border-dashed rounded-lg">
+            No scenario selected
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const handleSegmentSelect = (scenario: string, family: 'IPv6' | 'IPv4') => {
+    if (
+      selectedEntry &&
+      selectedEntry.scenario === scenario &&
+      selectedEntry.selectedFamily === family
+    ) {
+      setSelectedEntry(null);
+    } else {
+      const scData = data.find((d) => d.scenario === scenario);
+      if (scData) {
+        setSelectedEntry({
+          scenario,
+          selectedFamily: family,
+          ipv6Wins: scData.ipv6Wins,
+          ipv4Wins: scData.ipv4Wins,
+          v6Pct: scData.v6Pct,
+          v4Pct: scData.v4Pct,
+          total: scData.total,
+        });
+      }
+    }
+  };
+
   const width = 640;
   const height = 280;
   const margin = { top: 25, right: 30, bottom: 45, left: 55 };
@@ -86,15 +147,17 @@ export const WinnerDistributionChart: React.FC<WinnerDistributionChartProps> = (
   const barWidth = Math.min(42, (innerWidth / scenarios.length) * 0.65);
   const groupWidth = innerWidth / scenarios.length;
 
+  const hasSelection = selectedEntry !== null;
+
   return (
     <Card className="shadow-xs overflow-hidden">
       <CardHeader className="pb-3 border-b bg-muted/15">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <CardTitle className="text-base font-semibold text-foreground">
+            <CardTitle className="text-base font-semibold text-black">
               Graph 2 — IPv4 vs IPv6 Winner Distribution
             </CardTitle>
-            <CardDescription className="text-xs text-muted-foreground mt-0.5">
+            <CardDescription className="text-xs text-black mt-0.5">
               Stacked proportion of primary connection path winners across selected scenarios.
             </CardDescription>
           </div>
@@ -109,7 +172,7 @@ export const WinnerDistributionChart: React.FC<WinnerDistributionChartProps> = (
                 className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors cursor-pointer ${
                   displayMode === 'percent'
                     ? 'bg-primary text-primary-foreground font-semibold'
-                    : 'text-muted-foreground hover:text-foreground'
+                    : 'text-black hover:opacity-80'
                 }`}
               >
                 Percentage (%)
@@ -120,7 +183,7 @@ export const WinnerDistributionChart: React.FC<WinnerDistributionChartProps> = (
                 className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors cursor-pointer ${
                   displayMode === 'count'
                     ? 'bg-primary text-primary-foreground font-semibold'
-                    : 'text-muted-foreground hover:text-foreground'
+                    : 'text-black hover:opacity-80'
                 }`}
               >
                 Count (n)
@@ -131,7 +194,7 @@ export const WinnerDistributionChart: React.FC<WinnerDistributionChartProps> = (
             <select
               value={localBrowser}
               onChange={(e) => setLocalBrowser(e.target.value as any)}
-              className="px-2 py-0.5 text-[11px] rounded border bg-background text-foreground"
+              className="px-2 py-0.5 text-[11px] rounded border bg-background text-black"
               aria-label="Filter browser for Graph 2"
             >
               <option value="INHERIT">Browser: Auto</option>
@@ -175,7 +238,7 @@ export const WinnerDistributionChart: React.FC<WinnerDistributionChartProps> = (
                       x={margin.left - 8}
                       y={y + 3}
                       textAnchor="end"
-                      className="text-[10px] fill-muted-foreground font-mono"
+                      className="text-[10px] fill-black text-black font-mono"
                     >
                       {label}
                     </text>
@@ -221,10 +284,14 @@ export const WinnerDistributionChart: React.FC<WinnerDistributionChartProps> = (
               const v6Y = height - margin.bottom - v6Height;
               const v4Y = v6Y - v4Height;
 
+              const isV6Selected =
+                selectedEntry?.scenario === d.scenario && selectedEntry?.selectedFamily === 'IPv6';
+              const isV4Selected =
+                selectedEntry?.scenario === d.scenario && selectedEntry?.selectedFamily === 'IPv4';
+
               return (
                 <g
                   key={d.scenario}
-                  className="cursor-pointer"
                   onMouseEnter={() => setHoveredItem(d)}
                   onMouseLeave={() => setHoveredItem(null)}
                 >
@@ -233,7 +300,7 @@ export const WinnerDistributionChart: React.FC<WinnerDistributionChartProps> = (
                     x={centerX}
                     y={height - margin.bottom + 18}
                     textAnchor="middle"
-                    className="text-xs font-semibold fill-foreground"
+                    className="text-xs font-semibold fill-black text-black"
                   >
                     {d.scenario}
                   </text>
@@ -245,7 +312,21 @@ export const WinnerDistributionChart: React.FC<WinnerDistributionChartProps> = (
                       y={v6Y}
                       width={barWidth}
                       height={v6Height}
-                      className="fill-emerald-600 dark:fill-emerald-500 hover:opacity-90 transition-opacity"
+                      role="button"
+                      tabIndex={0}
+                      aria-pressed={isV6Selected}
+                      aria-label={`Select ${d.scenario} IPv6 Winner: ${d.ipv6Wins} wins (${d.v6Pct.toFixed(1)}%)`}
+                      stroke={isV6Selected ? '#000000' : 'none'}
+                      strokeWidth={isV6Selected ? 3 : 0}
+                      opacity={isV6Selected ? 1 : hasSelection ? 0.45 : 1}
+                      className="fill-emerald-600 dark:fill-emerald-500 hover:opacity-90 transition-all cursor-pointer outline-none focus-visible:stroke-black focus-visible:stroke-[2.5px]"
+                      onClick={() => handleSegmentSelect(d.scenario, 'IPv6')}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          handleSegmentSelect(d.scenario, 'IPv6');
+                        }
+                      }}
                     />
                   )}
 
@@ -256,7 +337,21 @@ export const WinnerDistributionChart: React.FC<WinnerDistributionChartProps> = (
                       y={v4Y}
                       width={barWidth}
                       height={v4Height}
-                      className="fill-blue-600 dark:fill-blue-500 hover:opacity-90 transition-opacity"
+                      role="button"
+                      tabIndex={0}
+                      aria-pressed={isV4Selected}
+                      aria-label={`Select ${d.scenario} IPv4 Winner: ${d.ipv4Wins} wins (${d.v4Pct.toFixed(1)}%)`}
+                      stroke={isV4Selected ? '#000000' : 'none'}
+                      strokeWidth={isV4Selected ? 3 : 0}
+                      opacity={isV4Selected ? 1 : hasSelection ? 0.45 : 1}
+                      className="fill-blue-600 dark:fill-blue-500 hover:opacity-90 transition-all cursor-pointer outline-none focus-visible:stroke-black focus-visible:stroke-[2.5px]"
+                      onClick={() => handleSegmentSelect(d.scenario, 'IPv4')}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          handleSegmentSelect(d.scenario, 'IPv4');
+                        }
+                      }}
                     />
                   )}
                 </g>
@@ -265,23 +360,84 @@ export const WinnerDistributionChart: React.FC<WinnerDistributionChartProps> = (
           </svg>
         </div>
 
+        {/* Selected Entry Detail Panel */}
+        {selectedEntry && (
+          <div
+            data-testid="graph-2-selected-panel"
+            className="mt-3 p-3 rounded-lg border-2 border-black/30 bg-muted/30 text-black text-xs space-y-2 animate-fade-in"
+          >
+            <div className="flex items-center justify-between border-b border-black/15 pb-1.5">
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-black text-white">
+                  Active Selection
+                </span>
+                <span className="font-bold text-black text-sm">
+                  {selectedEntry.scenario} &bull; {selectedEntry.selectedFamily} (
+                  {selectedEntry.selectedFamily === 'IPv6' ? 'Preferred Winner' : 'Fallback Winner'})
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedEntry(null)}
+                className="text-black hover:text-black/70 p-1 rounded hover:bg-black/10 cursor-pointer flex items-center gap-1 text-[11px] font-medium"
+                aria-label="Dismiss selection"
+                title="Dismiss selection"
+              >
+                <span>Dismiss</span>
+                <span className="text-base font-bold leading-none">&times;</span>
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-black pt-1">
+              <div>
+                <span className="font-semibold block text-[11px] text-black">Winner Path:</span>
+                <span className="font-mono text-black font-bold">
+                  {selectedEntry.selectedFamily}
+                </span>
+              </div>
+              <div>
+                <span className="font-semibold block text-[11px] text-black">Wins Proportion:</span>
+                <span className="font-mono font-bold text-black">
+                  {selectedEntry.selectedFamily === 'IPv6'
+                    ? `${selectedEntry.ipv6Wins} wins (${selectedEntry.v6Pct.toFixed(1)}%)`
+                    : `${selectedEntry.ipv4Wins} wins (${selectedEntry.v4Pct.toFixed(1)}%)`}
+                </span>
+              </div>
+              <div>
+                <span className="font-semibold block text-[11px] text-black">Cohort Sample:</span>
+                <span className="font-mono text-black">
+                  n = {selectedEntry.total} trials ({effectiveBrowser === 'ALL' ? 'Chrome & Firefox' : effectiveBrowser})
+                </span>
+              </div>
+              <div>
+                <span className="font-semibold block text-[11px] text-black">Comparison (Opposing Path):</span>
+                <span className="font-mono text-black">
+                  {selectedEntry.selectedFamily === 'IPv6'
+                    ? `IPv4: ${selectedEntry.ipv4Wins} wins (${selectedEntry.v4Pct.toFixed(1)}%)`
+                    : `IPv6: ${selectedEntry.ipv6Wins} wins (${selectedEntry.v6Pct.toFixed(1)}%)`}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Legend */}
-        <div className="flex items-center justify-center gap-6 mt-2 pt-2 border-t text-xs text-muted-foreground">
+        <div className="flex items-center justify-center gap-6 mt-2 pt-2 border-t text-xs text-black">
           <div className="flex items-center gap-1.5">
             <span className="size-3 rounded-xs bg-emerald-600 dark:bg-emerald-500" />
-            <span>IPv6 Preferred Winner</span>
+            <span className="text-black font-medium">IPv6 Preferred Winner</span>
           </div>
           <div className="flex items-center gap-1.5">
             <span className="size-3 rounded-xs bg-blue-600 dark:bg-blue-500" />
-            <span>IPv4 Fallback Winner</span>
+            <span className="text-black font-medium">IPv4 Fallback Winner</span>
           </div>
         </div>
 
         {/* Floating Tooltip */}
         {hoveredItem && (
-          <div className="p-2 rounded bg-popover text-popover-foreground border text-xs shadow-md pointer-events-none mt-2 flex items-center justify-between">
-            <span className="font-semibold">{hoveredItem.scenario} Breakdown:</span>
-            <span className="font-mono ml-2 text-xs">
+          <div className="p-2 rounded bg-popover text-black border text-xs shadow-md pointer-events-none mt-2 flex items-center justify-between">
+            <span className="font-semibold text-black">{hoveredItem.scenario} Breakdown:</span>
+            <span className="font-mono ml-2 text-xs text-black">
               <span className="text-emerald-700 dark:text-emerald-400 font-bold">
                 IPv6: {hoveredItem.ipv6Wins} ({hoveredItem.v6Pct.toFixed(1)}%)
               </span>
@@ -289,7 +445,7 @@ export const WinnerDistributionChart: React.FC<WinnerDistributionChartProps> = (
               <span className="text-blue-700 dark:text-blue-400 font-bold">
                 IPv4: {hoveredItem.ipv4Wins} ({hoveredItem.v4Pct.toFixed(1)}%)
               </span>
-              <span className="text-muted-foreground ml-1">(total n={hoveredItem.total})</span>
+              <span className="text-black ml-1">(total n={hoveredItem.total})</span>
             </span>
           </div>
         )}
