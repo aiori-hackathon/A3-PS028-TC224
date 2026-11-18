@@ -7375,9 +7375,19 @@ time.sleep(60)
 
     def test_12_unchanged_chrome_firefox_command_construction(self):
         """12. Chrome and Firefox command construction flags and env are unchanged."""
+        mock_home = self.td_path / "mock_home"
+        mock_home.mkdir(parents=True, exist_ok=True)
+        synth_user = "synth_test_user"
+        synth_uid = 24001
+        synth_gid = 24001
+        mock_pw = pwd.struct_passwd((
+            synth_user, "x", synth_uid, synth_gid, "Synth Test User", str(mock_home), "/bin/bash"
+        ))
+
         # Test Chrome command flags via mock execute_browser_subprocess
         with patch("lab.run_trial.execute_browser_subprocess") as mock_exec, \
-             patch("lab.run_trial.get_browser_uid_gid", return_value=(1000, 1000)):
+             patch("pwd.getpwuid", return_value=mock_pw), \
+             patch("lab.run_trial.get_browser_uid_gid", return_value=(synth_uid, synth_gid)):
             mock_exec.return_value = (0, "<html>OK</html>", "", False)
             prof = self.td_path / "ch_prof"
             prof.mkdir(parents=True, exist_ok=True)
@@ -7398,7 +7408,8 @@ time.sleep(60)
 
         # Test Firefox command flags via mock execute_browser_subprocess
         with patch("lab.run_trial.execute_browser_subprocess") as mock_exec_ff, \
-             patch("lab.run_trial.get_browser_uid_gid", return_value=(1000, 1000)):
+             patch("pwd.getpwuid", return_value=mock_pw), \
+             patch("lab.run_trial.get_browser_uid_gid", return_value=(synth_uid, synth_gid)):
             mock_exec_ff.return_value = (0, "", "", False)
             ff_prof = self.td_path / "ff_prof"
             ff_prof.mkdir(parents=True, exist_ok=True)
