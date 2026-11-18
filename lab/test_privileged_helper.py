@@ -4624,7 +4624,7 @@ class TestProcessLifecycleAndSignalingSecurity(unittest.TestCase):
         parent_pid = 20001
         child_pid = 20002
         pcap_file = self.temp_dir / "capture.pcap"
-        pcap_file.write_bytes(b"\xd4\xc3\xb2\xa1\x02\x00\x04\x00" + b"\x00" * 16)
+        pcap_file.write_bytes(struct.pack("<IHHIIII", 0xa1b2c3d4, 2, 4, 0, 0, 65535, 1))
         pid_file = self.temp_dir / "capture.pid"
         pid_file.write_text(f"{parent_pid}:{child_pid}\n", encoding="utf-8")
 
@@ -4656,7 +4656,7 @@ class TestProcessLifecycleAndSignalingSecurity(unittest.TestCase):
         parent_pid = 21001
         child_pid = 21002
         pcap_file = self.temp_dir / "capture.pcap"
-        pcap_file.write_bytes(b"\xd4\xc3\xb2\xa1\x02\x00\x04\x00" + b"\x00" * 16)
+        pcap_file.write_bytes(struct.pack("<IHHIIII", 0xa1b2c3d4, 2, 4, 0, 0, 65535, 1))
         pid_file = self.temp_dir / "capture.pid"
         pid_file.write_text(f"{parent_pid}:{child_pid}\n", encoding="utf-8")
 
@@ -4689,7 +4689,7 @@ class TestProcessLifecycleAndSignalingSecurity(unittest.TestCase):
     def test_refuses_to_signal_unrelated_process_in_another_session(self):
         """stop_capture_privileged refuses to signal unrelated or unverified process."""
         pcap_file = self.temp_dir / "capture.pcap"
-        pcap_file.write_bytes(b"\xd4\xc3\xb2\xa1\x02\x00\x04\x00" + b"\x00" * 16)
+        pcap_file.write_bytes(struct.pack("<IHHIIII", 0xa1b2c3d4, 2, 4, 0, 0, 65535, 1))
 
         with patch("lab.run_trial.is_safe_capture_process", return_value=False), \
              patch("lab.privileged_helper._is_alive_proc", return_value=True), \
@@ -4801,7 +4801,7 @@ class TestProcessLifecycleAndSignalingSecurity(unittest.TestCase):
         proc = subprocess.Popen(["sleep", "10"])
         pid = proc.pid
         pcap_file = self.temp_dir / "test_pinned.pcap"
-        pcap_file.write_bytes(b"\xd4\xc3\xb2\xa1\x02\x00\x04\x00" + b"\x00" * 16)
+        pcap_file.write_bytes(struct.pack("<IHHIIII", 0xa1b2c3d4, 2, 4, 0, 0, 65535, 1))
 
         try:
             with patch("lab.run_trial.is_safe_capture_process", return_value=True):
