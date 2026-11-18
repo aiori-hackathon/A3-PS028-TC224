@@ -997,5 +997,148 @@ class TestCampaignSimulationExecution(unittest.TestCase):
         self.assertEqual(len(set(trial_ids)), 4)
 
 
+class TestFailedAttemptRecordIntegrity(unittest.TestCase):
+    """
+    Verifies that every failed campaign attempt produces an atomic, durable
+    failed_attempt_record.json under trials/<trial_id>/ and preserves genuine
+    prior evidence (result.json, capture.pcap, logs) without silent relabeling.
+    """
+
+    def setUp(self):
+        self.temp_dir = Path(tempfile.mkdtemp(prefix="ps028_failure_rec_test_"))
+        self.trials_dir = self.temp_dir / "trials"
+        self.trials_dir.mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_write_failed_attempt_record_atomic_and_durable(self):
+        trial_id = "trial-synth-fail-001"
+        trial_dir = self.trials_dir / trial_id
+        attempt = run_campaign.ExecutionAttempt(
+            attempt_number=1,
+            trial_id=trial_id,
+            execution_mode="LIVE",
+            is_simulation=False,
+            timestamps={"start_time": "2026-11-18T10:00:00Z", "end_time": "2026-11-18T10:00:01Z", "duration_ms": 1000.0},
+            status="FAILED",
+            validity="CLEANUP_FAILURE",
+            evidence_paths={"trial_dir": str(trial_dir)},
+            capture_metadata={},
+            http_outcome={},
+            network_observations={},
+            cleanup_status={"scenario_restored": False, "baseline_verified": False, "errors": ["Mock baseline error"]},
+            error_message="Mock baseline error"
+        )
+        rec_path = run_campaign.write_failed_attempt_record(trial_dir, attempt)
+        self.assertTrue(rec_path.is_file())
+        self.assertEqual(rec_path.name, "failed_attempt_record.json")
+
+        fdata = json.loads(rec_path.read_text(encoding="utf-8"))
+        self.assertEqual(fdata["trial_id"], trial_id)
+        self.assertEqual(fdata["status"], "FAILED")
+        self.assertEqual(fdata["validity"], "CLEANUP_FAILURE")
+        self.assertEqual(fdata["execution_mode"], "LIVE")
+        self.assertEqual(fdata["error_message"], "Mock baseline error")
+        self.assertFalse(fdata["is_simulation"])
+
+    @patch("lab.impair.self_test_baseline", return_value=True)
+    @patch("lab.run_trial.run_trial")
+    def test_cleanup_failure_writes_durable_failure_record_and_preserves_evidence(self, mock_run, mock_base):
+        def mock_trial(**kwargs):
+            tdir = kwargs["output_dir"]
+            tid = kwargs["trial_id"]
+            pcap_file = tdir / "capture.pcap"
+            sha = _create_dummy_pcap(pcap_file, packet_count=3)
+            res_file = tdir / "result.json"
+            res_data = {
+                "schema_version": "1.1.0",
+                "trial_id": tid,
+                "scenario_id": "S0",
+                "browser": "google-chrome",
+                "is_simulation": False,
+                "execution_mode": "LIVE",
+                "cleanup_status": {
+                    "scenario_restored": False,
+                    "baseline_verified": False,
+                    "errors": ["Cleanup restoration failed"]
+                },
+                "evidence_paths": {
+                    "trial_dir": str(tdir),
+                    "result_json": str(res_file),
+                    "capture_pcap": str(pcap_file)
+                },
+                "capture_metadata": {
+                    "pcap_valid": True,
+                    "pcap_sha256": sha,
+                    "packet_count": 3
+                }
+            }
+            res_file.write_text(json.dumps(res_data), encoding="utf-8")
+            return res_data
+
+        mock_run.side_effect = mock_trial
+
+        runner = run_campaign.CampaignRunner(
+            scenarios=["S0"],
+            browsers=["google-chrome"],
+            repetitions=1,
+            output_dir=self.temp_dir,
+            is_simulation=False
+        )
+        slot = run_campaign.MatrixSlot("slot-0001", 1, "S0", "google-chrome", 1)
+
+        attempt = runner.execute_slot_attempt(slot, attempt_number=1)
+        self.assertEqual(attempt.status, "FAILED")
+        self.assertEqual(attempt.validity, "CLEANUP_FAILURE")
+
+        # Verify durable failed_attempt_record.json on disk
+        rec_path = Path(attempt.evidence_paths["trial_dir"]) / "failed_attempt_record.json"
+        self.assertTrue(rec_path.is_file())
+        fdata = json.loads(rec_path.read_text(encoding="utf-8"))
+        self.assertEqual(fdata["status"], "FAILED")
+        self.assertEqual(fdata["validity"], "CLEANUP_FAILURE")
+        self.assertEqual(fdata["trial_id"], attempt.trial_id)
+
+        # Verify genuine prior evidence is preserved and not overwritten
+        pcap_path = Path(attempt.evidence_paths["capture_pcap"])
+        self.assertTrue(pcap_path.is_file())
+        res_json_path = Path(attempt.evidence_paths["result_json"])
+        self.assertTrue(res_json_path.is_file())
+
+    @patch("lab.impair.self_test_baseline", return_value=True)
+    @patch("lab.run_trial.run_trial")
+    def test_measurement_failure_writes_durable_failure_record(self, mock_run, mock_base):
+        def mock_trial(**kwargs):
+            return _create_mock_trial_result(
+                scenario_id=kwargs["scenario_id"],
+                trial_id=kwargs["trial_id"],
+                output_dir=self.temp_dir,
+                is_simulation=False,
+                packet_count=0,
+                classification="INCONCLUSIVE"
+            )
+        mock_run.side_effect = mock_trial
+
+        runner = run_campaign.CampaignRunner(
+            scenarios=["S0"],
+            browsers=["google-chrome"],
+            repetitions=1,
+            output_dir=self.temp_dir,
+            is_simulation=False
+        )
+        slot = run_campaign.MatrixSlot("slot-0001", 1, "S0", "google-chrome", 1)
+
+        attempt = runner.execute_slot_attempt(slot, attempt_number=1)
+        self.assertEqual(attempt.status, "FAILED")
+        self.assertEqual(attempt.validity, "MEASUREMENT_FAILURE")
+
+        rec_path = Path(attempt.evidence_paths["trial_dir"]) / "failed_attempt_record.json"
+        self.assertTrue(rec_path.is_file())
+        fdata = json.loads(rec_path.read_text(encoding="utf-8"))
+        self.assertEqual(fdata["status"], "FAILED")
+        self.assertEqual(fdata["validity"], "MEASUREMENT_FAILURE")
+
+
 if __name__ == "__main__":
     unittest.main()

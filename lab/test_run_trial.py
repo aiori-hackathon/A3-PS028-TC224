@@ -247,6 +247,96 @@ class TestPacketCaptureValidationAndDissection(unittest.TestCase):
         self.assertFalse(is_valid)
         self.assertIn("Invalid PCAP header magic", msg)
 
+    def test_validate_pcap_rejects_truncated_packet_record_header(self):
+        pcap_file = self.temp_dir / "trunc_pkt_hdr.pcap"
+        header = struct.pack("<IHHIIII", 0xa1b2c3d4, 2, 4, 0, 0, 65535, 1)
+        # Global header (24 bytes) + truncated packet record header (only 8 bytes, expected 16)
+        pcap_file.write_bytes(header + b"\x00" * 8)
+
+        is_valid, _, _, count, msg = run_trial.validate_pcap_file(pcap_file)
+        self.assertFalse(is_valid)
+        self.assertEqual(count, 0)
+        self.assertIn("Truncated packet record header", msg)
+
+    def test_validate_pcap_rejects_truncated_packet_payload(self):
+        pcap_file = self.temp_dir / "trunc_payload.pcap"
+        header = struct.pack("<IHHIIII", 0xa1b2c3d4, 2, 4, 0, 0, 65535, 1)
+        # Record header declares 40 bytes captured, but only 10 bytes exist
+        pkt_hdr = struct.pack("<IIII", 1729000000, 0, 40, 40)
+        pcap_file.write_bytes(header + pkt_hdr + b"\x00" * 10)
+
+        is_valid, _, _, count, msg = run_trial.validate_pcap_file(pcap_file)
+        self.assertFalse(is_valid)
+        self.assertEqual(count, 0)
+        self.assertIn("Truncated packet payload", msg)
+
+    def test_validate_pcap_rejects_impossible_packet_length(self):
+        pcap_file = self.temp_dir / "impossible_len.pcap"
+        header = struct.pack("<IHHIIII", 0xa1b2c3d4, 2, 4, 0, 0, 65535, 1)
+        # Record header declares 300,000 bytes captured (exceeds snaplen bound 262144)
+        pkt_hdr = struct.pack("<IIII", 1729000000, 0, 300000, 300000)
+        pcap_file.write_bytes(header + pkt_hdr + b"\x00" * 100)
+
+        is_valid, _, _, count, msg = run_trial.validate_pcap_file(pcap_file)
+        self.assertFalse(is_valid)
+        self.assertEqual(count, 0)
+        self.assertIn("Impossible packet captured length", msg)
+
+    def test_validate_pcap_rejects_inconsistent_packet_lengths_captured_exceeds_wire(self):
+        pcap_file = self.temp_dir / "inconsistent_lens.pcap"
+        header = struct.pack("<IHHIIII", 0xa1b2c3d4, 2, 4, 0, 0, 65535, 1)
+        # Record header declares captured 40 bytes > original wire 20 bytes
+        pkt_hdr = struct.pack("<IIII", 1729000000, 0, 40, 20)
+        pcap_file.write_bytes(header + pkt_hdr + b"\x00" * 40)
+
+        is_valid, _, _, count, msg = run_trial.validate_pcap_file(pcap_file)
+        self.assertFalse(is_valid)
+        self.assertEqual(count, 0)
+        self.assertIn("Inconsistent packet length", msg)
+
+    def test_validate_pcap_rejects_trailing_unparsed_bytes(self):
+        pcap_file = self.temp_dir / "trailing_bytes.pcap"
+        header = struct.pack("<IHHIIII", 0xa1b2c3d4, 2, 4, 0, 0, 65535, 1)
+        pkt_data = b"\x00" * 20
+        pkt_hdr = struct.pack("<IIII", 1729000000, 0, len(pkt_data), len(pkt_data))
+        # Valid packet + 5 trailing unparsed bytes
+        pcap_file.write_bytes(header + pkt_hdr + pkt_data + b"\xff" * 5)
+
+        is_valid, _, _, count, msg = run_trial.validate_pcap_file(pcap_file)
+        self.assertFalse(is_valid)
+        self.assertEqual(count, 1)
+        self.assertTrue("trailing unparsed bytes" in msg.lower() or "truncated packet record header" in msg.lower())
+
+    def test_validate_pcap_rejects_inconsistent_expected_packet_count(self):
+        pcap_file = self.temp_dir / "count_mismatch.pcap"
+        header = struct.pack("<IHHIIII", 0xa1b2c3d4, 2, 4, 0, 0, 65535, 1)
+        pkt_data = b"\x00" * 20
+        pkt_hdr = struct.pack("<IIII", 1729000000, 0, len(pkt_data), len(pkt_data))
+        pcap_file.write_bytes(header + pkt_hdr + pkt_data)
+
+        # File has 1 packet, but we require expected_packets=5
+        is_valid, _, _, count, msg = run_trial.validate_pcap_file(pcap_file, expected_packets=5)
+        self.assertFalse(is_valid)
+        self.assertEqual(count, 1)
+        self.assertIn("Inconsistent packet counts", msg)
+
+    @patch("subprocess.run")
+    def test_validate_pcap_rejects_inconsistent_tshark_packet_count(self, mock_subproc):
+        pcap_file = self.temp_dir / "tshark_mismatch.pcap"
+        header = struct.pack("<IHHIIII", 0xa1b2c3d4, 2, 4, 0, 0, 65535, 1)
+        pkt_data = b"\x00" * 20
+        pkt_hdr = struct.pack("<IIII", 1729000000, 0, len(pkt_data), len(pkt_data))
+        pcap_file.write_bytes(header + pkt_hdr + pkt_data)
+
+        # Binary walk sees 1 packet; mock tshark returning 5 packets
+        mock_subproc.return_value = MagicMock(
+            returncode=0,
+            stdout="| 0.000 <> ... | 5 | ... |\n"
+        )
+        is_valid, _, _, count, msg = run_trial.validate_pcap_file(pcap_file, check_tshark=True)
+        self.assertFalse(is_valid)
+        self.assertIn("Inconsistent packet counts", msg)
+
 
 class TestHappyEyeballsFallbackClassification(unittest.TestCase):
     """

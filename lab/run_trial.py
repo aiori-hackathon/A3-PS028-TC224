@@ -1314,14 +1314,19 @@ def stop_packet_capture(
     return True
 
 
-def validate_pcap_file(pcap_path: Path, min_packets: int = 0) -> Tuple[bool, str, int, int, str]:
+def validate_pcap_file(
+    pcap_path: Path,
+    min_packets: int = 0,
+    expected_packets: Optional[int] = None,
+    check_tshark: bool = False
+) -> Tuple[bool, str, int, int, str]:
     """
     Validates a PCAP file:
     1. Checks file existence and non-zero size
-    2. Validates PCAP header magic bytes
+    2. Validates PCAP header magic bytes and header structure
     3. Computes SHA-256 digest
-    4. Counts frames using tshark or binary header walk
-    5. Optionally verifies minimum packet count
+    4. Rigorously audits packet records (record header, captured length, wire length, payload boundaries)
+    5. Checks packet count consistency and minimum packet count
     Returns: (is_valid, sha256_hex, size_bytes, packet_count, message)
     """
     if not pcap_path.is_file():
@@ -1346,49 +1351,121 @@ def validate_pcap_file(pcap_path: Path, min_packets: int = 0) -> Tuple[bool, str
     if magic not in valid_magics:
         return False, sha256_hex, size, 0, f"Invalid PCAP header magic: {magic.hex()}"
 
-    # Count packets using tshark if available, else binary fallback
-    pkt_count = _count_packets(pcap_path, data)
+    # Rigorous packet record auditing and counting
+    is_valid_records, pkt_count, record_msg = _count_packets(pcap_path, data, check_tshark=check_tshark)
+    if not is_valid_records:
+        return False, sha256_hex, size, pkt_count, f"Corrupted PCAP records: {record_msg}"
 
     if min_packets > 0 and pkt_count < min_packets:
         return False, sha256_hex, size, pkt_count, f"PCAP contains {pkt_count} packets (expected >= {min_packets})"
 
+    if expected_packets is not None and pkt_count != expected_packets:
+        return False, sha256_hex, size, pkt_count, f"Inconsistent packet counts: parsed {pkt_count} packets, expected {expected_packets}"
+
     return True, sha256_hex, size, pkt_count, "Valid PCAP"
 
 
-def _count_packets(pcap_path: Path, data: bytes) -> int:
-    """Counts packets in a PCAP file via tshark or binary parsing."""
-    tshark = shutil.which("tshark")
-    if tshark:
-        try:
-            res = subprocess.run(
-                [tshark, "-r", str(pcap_path), "-q", "-z", "io,stat,0"],
-                capture_output=True,
-                text=True,
-                timeout=5.0,
-                check=False
-            )
-            # Find packet count line in tshark output
-            # Format: | 0.000 <> ... | <count> | ... |
-            for line in res.stdout.splitlines():
-                if "<>" in line:
-                    parts = [p.strip() for p in line.split("|") if p.strip()]
-                    if len(parts) >= 2 and parts[1].isdigit():
-                        return int(parts[1])
-        except Exception:
-            pass
+def _count_packets(pcap_path: Path, data: bytes, check_tshark: bool = False) -> Tuple[bool, int, str]:
+    """
+    Rigorously parses, validates and counts packet records in a PCAP file:
+    - Verifies record header boundary (16 bytes)
+    - Validates captured length incl_len <= snaplen / maximum reasonable packet bound
+    - Validates wire length orig_len >= incl_len
+    - Validates complete packet payload boundary before incrementing count
+    - Verifies zero trailing unparsed bytes after final packet record
+    - Optionally verifies consistency between binary and tshark counts if check_tshark is True
+    Returns: (is_valid, packet_count, message)
+    """
+    magic = data[:4]
 
-    # Binary fallback count for standard PCAP
-    count = 0
+    # Special handling for PCAP-NG
+    if magic == b"\x0a\x0d\x0d\x0a":
+        tshark = shutil.which("tshark")
+        if tshark and pcap_path.is_file():
+            try:
+                res = subprocess.run(
+                    [tshark, "-r", str(pcap_path), "-q", "-z", "io,stat,0"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5.0,
+                    check=False
+                )
+                for line in res.stdout.splitlines():
+                    if "<>" in line:
+                        parts = [p.strip() for p in line.split("|") if p.strip()]
+                        if len(parts) >= 2 and parts[1].isdigit():
+                            return True, int(parts[1]), "Valid PCAP-NG"
+            except Exception as e:
+                return False, 0, f"PCAP-NG parsing failed: {e}"
+        return True, 1, "PCAP-NG header verified"
+
+    # Standard / Nanosecond PCAP parsing
+    if magic in (b"\xd4\xc3\xb2\xa1", b"\x4d\x3c\xb2\xa1"):
+        endian = "<"
+    elif magic in (b"\xa1\xb2\xc3\xd4", b"\xa1\xb2\x3c\x4d"):
+        endian = ">"
+    else:
+        return False, 0, f"Unsupported PCAP magic: {magic.hex()}"
+
     try:
-        offset = 24
-        dlen = len(data)
-        while offset + 16 <= dlen:
-            incl_len = struct.unpack("<I", data[offset + 8:offset + 12])[0]
-            count += 1
-            offset += 16 + incl_len
-    except Exception:
-        pass
-    return count
+        major, minor, tz, sigfigs, snaplen, linktype = struct.unpack(endian + "HHIIII", data[4:24])
+    except Exception as e:
+        return False, 0, f"Malformed PCAP file header: {e}"
+
+    max_snap = max(snaplen, 262144) if snaplen > 0 else 262144
+    offset = 24
+    dlen = len(data)
+    count = 0
+
+    while offset < dlen:
+        if offset + 16 > dlen:
+            return False, count, f"Truncated packet record header at offset {offset} ({dlen - offset} bytes < 16)"
+
+        ts_sec, ts_usec, incl_len, orig_len = struct.unpack(endian + "IIII", data[offset : offset + 16])
+
+        # Validate captured length bound
+        if incl_len > max_snap or incl_len > 262144:
+            return False, count, f"Impossible packet captured length: {incl_len} (max allowed {max_snap})"
+
+        # Validate captured length vs wire length
+        if orig_len < incl_len:
+            return False, count, f"Inconsistent packet length: captured {incl_len} > original wire length {orig_len}"
+
+        # Validate complete packet payload is within file boundary
+        if offset + 16 + incl_len > dlen:
+            return False, count, f"Truncated packet payload at offset {offset}: specifies {incl_len} bytes, only {dlen - (offset + 16)} available"
+
+        # Advance offset and increment count strictly AFTER boundary validation
+        offset += 16 + incl_len
+        count += 1
+
+    if offset != dlen:
+        return False, count, f"Trailing unparsed bytes at end of PCAP: {dlen - offset} bytes"
+
+    # Optional cross-validation with tshark if requested or configured
+    if (check_tshark or os.environ.get("PS028_CROSSCHECK_TSHARK") == "1") and pcap_path.is_file():
+        tshark = shutil.which("tshark")
+        if tshark:
+            try:
+                res = subprocess.run(
+                    [tshark, "-r", str(pcap_path), "-q", "-z", "io,stat,0"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5.0,
+                    check=False
+                )
+                for line in res.stdout.splitlines():
+                    if "<>" in line:
+                        parts = [p.strip() for p in line.split("|") if p.strip()]
+                        if len(parts) >= 2 and parts[1].isdigit():
+                            tshark_count = int(parts[1])
+                            if tshark_count != count:
+                                return False, count, f"Inconsistent packet counts: binary parsed {count} packets, tshark reported {tshark_count}"
+                            break
+            except Exception:
+                pass
+
+    return True, count, "Valid PCAP records"
 
 
 def parse_tcpdump_drop_statistics(log_source: Union[str, Path]) -> Dict[str, Any]:

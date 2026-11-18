@@ -129,27 +129,34 @@ sudo ./lab/setup_topology.sh status
 ```
 
 ### Step 2: Initialize Canonical 280-Trial Campaign
-Create an independent campaign directory dedicated to the partner replication:
+Create an independent campaign directory dedicated to the partner replication outside the source repository:
 ```bash
 PARTNER_CAMPAIGN="ps028-partner-$(hostname)-$(date +%Y%m%d)"
+PARTNER_EVIDENCE_DIR="${HOME}/ps028-partner-evidence/${PARTNER_CAMPAIGN}"
+PARTNER_DERIVED_DIR="${HOME}/ps028-partner-derived/${PARTNER_CAMPAIGN}"
+
+mkdir -p "${PARTNER_EVIDENCE_DIR}"
+mkdir -p "${PARTNER_DERIVED_DIR}"
+
 python3 lab/run_campaign.py \
-  --output-dir "lab/campaigns/${PARTNER_CAMPAIGN}" \
+  --output-dir "${PARTNER_EVIDENCE_DIR}" \
   --repetitions 20 \
   --browsers "google-chrome,firefox" \
   --scenarios "S0,S1,S2,S3,S4,S5,S6"
 ```
 Verify that the campaign finishes with status `COMPLETED` and execution mode `LIVE`:
-- The output manifest `lab/campaigns/${PARTNER_CAMPAIGN}/campaign_manifest.json` tracks exactly 280 unique matrix slots (`matrix_slots`).
+- The output manifest `${PARTNER_EVIDENCE_DIR}/campaign_manifest.json` tracks exactly 280 unique matrix slots (`matrix_slots`).
 - Every planned matrix slot records status `COMPLETED` and contains a successful attempt with validity `VALID_LIVE`.
 - If any retry occurred due to transient measurement or cleanup anomalies, failed-attempt history is preserved (`status: "FAILED"`, validity `MEASUREMENT_FAILURE` or `CLEANUP_FAILURE`) with its corresponding `failed_attempt_record.json` preserved under `trials/<trial_id>/`.
 - Live trial outputs are structured under `trials/<trial_id>/result.json` and `trials/<trial_id>/capture.pcap`.
+- Storing campaign outputs in `${PARTNER_EVIDENCE_DIR}` outside the source repository ensures that the Git working tree remains completely clean (`git_dirty: false`, `git_status: "VERIFIED"`), allowing downstream provenance sidecars to achieve `provenance_status: "VERIFIED"`.
 
 ### Step 3: Run Deterministic Post-Campaign Dissection & Evidence Export
-Upon completion of all 280 planned trials, execute the deterministic analysis and evidence exporter. Partner trials natively generate Schema 1.1.0 JSONs:
+Upon completion of all 280 planned trials, execute the deterministic analysis and evidence exporter. Storing derived ledgers outside the source checkout under `${PARTNER_DERIVED_DIR}` maintains clean repository provenance:
 ```bash
 python3 lab/export_campaign_evidence.py \
-  --campaign-dir "lab/campaigns/${PARTNER_CAMPAIGN}" \
-  --output-dir "lab/derived/partner-replication" \
+  --campaign-dir "${PARTNER_EVIDENCE_DIR}" \
+  --output-dir "${PARTNER_DERIVED_DIR}" \
   --target all
 ```
 
@@ -167,21 +174,21 @@ sudo ./lab/setup_topology.sh check-host-invariance "${BASELINE_FILE}"
 Compute the cryptographic integrity manifest and package the campaign evidence outside the campaign directory:
 ```bash
 # 1. Compute checksums of campaign contents (excluding checksum manifests and archives)
-cd "lab/campaigns/${PARTNER_CAMPAIGN}"
+cd "${PARTNER_EVIDENCE_DIR}"
 find . -type f ! -name "*.sha256" ! -name "*.tar.gz" -exec sha256sum {} + | sort -k2 > partner_evidence.sha256
 
 # 2. Package archive from parent directory to avoid recursive inclusion
-cd ..
+cd "${HOME}/ps028-partner-evidence"
 tar -czvf "${PARTNER_CAMPAIGN}.tar.gz" "${PARTNER_CAMPAIGN}"
 
 # 3. Compute mandatory SHA-256 digest sidecar of the final handover archive
 sha256sum "${PARTNER_CAMPAIGN}.tar.gz" > "${PARTNER_CAMPAIGN}.tar.gz.sha256"
-cd ../..
+cd - > /dev/null
 
 # 4. Verify handover package against all PS-028 criteria before submission
 python3 lab/verify_partner_handover.py \
-  --archive "lab/campaigns/${PARTNER_CAMPAIGN}.tar.gz" \
-  --derived-dir "lab/derived/partner-replication"
+  --archive "${HOME}/ps028-partner-evidence/${PARTNER_CAMPAIGN}.tar.gz" \
+  --derived-dir "${PARTNER_DERIVED_DIR}"
 ```
 
 **Portable Verification & Architecture Guarantees:**
@@ -193,4 +200,4 @@ python3 lab/verify_partner_handover.py \
 6. **Provenance & Derived Ledgers**: Validates `.provenance.json` sidecars (`provenance_status: "VERIFIED"`, `git_dirty: false`, `git_status: "VERIFIED"`) across `attempts.csv`, `connection_attempts.csv`, and `trial_timeline.csv`.
 7. **Fail-Closed Archive Extraction**: Prevents directory traversal attacks, rejecting path escaping, device nodes, or absolute paths during archive extraction. Requires companion `.sha256` checksum sidecar.
 
-Submit the verified archive (`${PARTNER_CAMPAIGN}.tar.gz`) and SHA-256 digest (`${PARTNER_CAMPAIGN}.tar.gz.sha256`) to the lead repository maintainer. The maintainer will inspect the authentic cryptographic evidence and update `docs/phase-cd/partner_replication_manifest.json` from `PENDING_AUTHENTIC_PARTNER_EVIDENCE` to `VERIFIED`.
+Submit the verified archive (`${HOME}/ps028-partner-evidence/${PARTNER_CAMPAIGN}.tar.gz`) and SHA-256 digest (`${HOME}/ps028-partner-evidence/${PARTNER_CAMPAIGN}.tar.gz.sha256`) to the lead repository maintainer. The maintainer will inspect the authentic cryptographic evidence and update `docs/phase-cd/partner_replication_manifest.json` from `PENDING_AUTHENTIC_PARTNER_EVIDENCE` to `VERIFIED`.

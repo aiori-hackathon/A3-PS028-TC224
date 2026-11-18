@@ -496,6 +496,51 @@ def export_attempts_ledger(
                 with open(failed_file, "r", encoding="utf-8") as ff:
                     fdata = json.load(ff)
 
+                # Require failure record to agree with manifest attempt
+                if fdata.get("trial_id") != trial_id:
+                    raise ValueError(
+                        f"Failed attempt record trial_id mismatch for {trial_id}: got {fdata.get('trial_id')}"
+                    )
+                if fdata.get("status") != status:
+                    raise ValueError(
+                        f"Failed attempt record status mismatch for {trial_id}: manifest has {status}, record has {fdata.get('status')}"
+                    )
+                if fdata.get("validity") != validity_cat:
+                    raise ValueError(
+                        f"Failed attempt record validity mismatch for {trial_id}: manifest has {validity_cat}, record has {fdata.get('validity')}"
+                    )
+                if att.get("execution_mode") and fdata.get("execution_mode") != att.get("execution_mode"):
+                    raise ValueError(
+                        f"Failed attempt record execution_mode mismatch for {trial_id}: manifest has {att.get('execution_mode')}, record has {fdata.get('execution_mode')}"
+                    )
+
+                # Reject unrelated or falsely successful result.json in failed attempt directory
+                res_json = campaign_dir / "trials" / trial_id / "result.json"
+                if res_json.is_file():
+                    with open(res_json, "r", encoding="utf-8") as rf:
+                        rdata = json.load(rf)
+                    if rdata.get("trial_id") and rdata.get("trial_id") != trial_id:
+                        raise ValueError(
+                            f"Unrelated result.json found in failed attempt directory for {trial_id}: got {rdata.get('trial_id')}"
+                        )
+                    r_clean = rdata.get("cleanup_status", {})
+                    r_pcap = rdata.get("capture_metadata", {})
+                    r_net = rdata.get("network_observations", {})
+                    r_classification = r_net.get("classification", "")
+                    r_val = rdata.get("validity") or ("VALID_LIVE" if rdata.get("status") == "COMPLETED" else None)
+                    if (
+                        r_clean.get("scenario_restored") is True
+                        and r_clean.get("baseline_verified") is True
+                        and not r_clean.get("errors")
+                        and r_pcap.get("pcap_valid") is True
+                        and r_pcap.get("packet_count", 0) > 0
+                        and r_classification not in ("", "INCONCLUSIVE")
+                        and r_val == "VALID_LIVE"
+                    ):
+                        raise ValueError(
+                            f"Falsely successful result.json found in failed attempt directory for {trial_id}"
+                        )
+
                 classification = FallbackClassification.INCONCLUSIVE.value
                 http_status = ""
                 t_connect_str = ""
@@ -1085,6 +1130,10 @@ def export_trial_timeline(
                     raise ValueError(
                         f"Trial {trial_id}: invalid JSON in failed attempt record at {rjson_path}: {e}"
                     )
+                if rdata.get("trial_id") != trial_id:
+                    raise ValueError(
+                        f"Trial {trial_id}: trial_id mismatch in failed attempt record: got {rdata.get('trial_id')}"
+                    )
                 ts_dict = rdata.get("timestamps")
                 if not isinstance(ts_dict, dict) or not ts_dict:
                     raise ValueError(
@@ -1097,9 +1146,14 @@ def export_trial_timeline(
                 if rjson_path.is_file():
                     with open(rjson_path, "r", encoding="utf-8") as rf:
                         rdata = json.load(rf)
+                    if rdata.get("trial_id") != trial_id:
+                        raise ValueError(
+                            f"Trial {trial_id}: trial_id mismatch in failed attempt record: got {rdata.get('trial_id')}"
+                        )
+                    ts_dict = rdata.get("timestamps", {})
                 else:
                     rdata = {}
-                ts_dict = rdata.get("timestamps", {})
+                    ts_dict = {}
                 pcap_path = tdir / "capture.pcap"
                 pcap_sha = ""
 

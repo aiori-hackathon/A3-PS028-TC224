@@ -97,8 +97,9 @@ def _normalize_browser_name(raw: str) -> str:
 
 def _verify_pcap(pcap_path: Path, expected_sha: Optional[str] = None) -> Tuple[str, int]:
     """
-    Validates PCAP header magic bytes, size >= 24, minimum packet count >= 1,
-    and SHA-256 match. Returns (sha256_hex, packet_count).
+    Rigorously validates PCAP header magic bytes, size, SHA-256 match,
+    and audits packet record boundaries using run_trial.validate_pcap_file.
+    Returns (sha256_hex, packet_count).
     """
     if not pcap_path.is_file():
         raise VerificationError(f"PCAP file does not exist: '{pcap_path}'")
@@ -116,41 +117,20 @@ def _verify_pcap(pcap_path: Path, expected_sha: Optional[str] = None) -> Tuple[s
 
     calc_sha = hashlib.sha256(data).hexdigest()
 
-    # Fast binary count for standard and nanosecond PCAPs
-    pkt_count = 0
-    fmt = None
-    if magic in (b"\xd4\xc3\xb2\xa1", b"\x4d\x3c\xb2\xa1"):
-        fmt = "<IIII"
-    elif magic in (b"\xa1\xb2\xc3\xd4", b"\xa1\xb2\x3c\x4d"):
-        fmt = ">IIII"
-
-    if fmt:
-        offset = 24
-        dlen = len(data)
-        try:
-            while offset + 16 <= dlen:
-                _, _, incl_len, _ = struct.unpack(fmt, data[offset : offset + 16])
-                pkt_count += 1
-                offset += 16 + incl_len
-        except Exception:
-            pkt_count = 0
-
-    if pkt_count == 0:
-        # Fallback to run_trial.validate_pcap_file (handles PCAP-NG and edge cases)
-        pcap_valid, _, _, pkt_count, msg = run_trial.validate_pcap_file(
-            pcap_path, min_packets=1
+    if expected_sha and calc_sha.lower() != expected_sha.lower():
+        raise VerificationError(
+            f"PCAP SHA-256 mismatch for '{pcap_path.name}': recorded {expected_sha}, computed {calc_sha}"
         )
-        if not pcap_valid:
-            raise VerificationError(f"PCAP validation failed for '{pcap_path.name}': {msg}")
+
+    valid, _, _, pkt_count, msg = run_trial.validate_pcap_file(
+        pcap_path, min_packets=1
+    )
+    if not valid:
+        raise VerificationError(f"PCAP validation failed for '{pcap_path.name}': {msg}")
 
     if pkt_count < 1:
         raise VerificationError(
             f"PCAP file '{pcap_path.name}' contains 0 packets; live trials must record real network traffic"
-        )
-
-    if expected_sha and calc_sha.lower() != expected_sha.lower():
-        raise VerificationError(
-            f"PCAP SHA-256 mismatch for '{pcap_path.name}': recorded {expected_sha}, computed {calc_sha}"
         )
 
     return calc_sha, pkt_count
@@ -262,26 +242,92 @@ def _verify_trial_evidence(
     else:
         # Preserved failed attempt
         failed_rec = trial_dir / "failed_attempt_record.json"
-        res_json = trial_dir / "result.json"
-
-        if not failed_rec.is_file() and not res_json.is_file():
+        if not failed_rec.is_file():
             raise VerificationError(
-                f"Preserved failure evidence missing in '{trial_dir}' for failed attempt '{trial_id}' in slot '{slot_id}'"
+                f"Preserved failure evidence missing: 'failed_attempt_record.json' not found in '{trial_dir}' for failed attempt '{trial_id}' in slot '{slot_id}'"
+            )
+        if failed_rec.stat().st_size == 0:
+            raise VerificationError(
+                f"Empty failed_attempt_record.json in '{trial_dir}' for failed attempt '{trial_id}'"
             )
 
-        if failed_rec.is_file():
+        try:
+            fdata = json.loads(failed_rec.read_text(encoding="utf-8"))
+        except Exception as exc:
+            raise VerificationError(f"Malformed failed_attempt_record.json for trial '{trial_id}': {exc}") from exc
+
+        f_status = fdata.get("status", "")
+        f_validity = fdata.get("validity", "")
+        if f_status == "COMPLETED" and f_validity == "VALID_LIVE":
+            raise VerificationError(
+                f"Failed attempt record in '{trial_dir}' contradicts failure status: records COMPLETED/VALID_LIVE"
+            )
+
+        # Require failure record to agree with manifest attempt
+        f_trial_id = fdata.get("trial_id")
+        if f_trial_id != trial_id:
+            raise VerificationError(
+                f"Trial ID mismatch in failed_attempt_record.json for '{trial_id}': expected '{trial_id}', got '{f_trial_id}'"
+            )
+
+        exp_status = attempt.get("status", "")
+        if f_status != exp_status:
+            raise VerificationError(
+                f"Status mismatch in failed_attempt_record.json for trial '{trial_id}': manifest has '{exp_status}', record has '{f_status}'"
+            )
+
+        f_validity = fdata.get("validity", "")
+        exp_validity = attempt.get("validity", "")
+        if f_validity != exp_validity:
+            raise VerificationError(
+                f"Validity mismatch in failed_attempt_record.json for trial '{trial_id}': manifest has '{exp_validity}', record has '{f_validity}'"
+            )
+
+        f_exec = fdata.get("execution_mode", "")
+        exp_exec = attempt.get("execution_mode", "")
+        if exp_exec and f_exec != exp_exec:
+            raise VerificationError(
+                f"Execution mode mismatch in failed_attempt_record.json for trial '{trial_id}': manifest has '{exp_exec}', record has '{f_exec}'"
+            )
+
+        if f_status == "COMPLETED" and f_validity == "VALID_LIVE":
+            raise VerificationError(
+                f"Failed attempt record in '{trial_dir}' contradicts failure status: records COMPLETED/VALID_LIVE"
+            )
+
+        # Do not accept an unrelated or falsely successful result.json as proof of a failed attempt
+        res_json = trial_dir / "result.json"
+        if res_json.is_file():
             try:
-                fdata = json.loads(failed_rec.read_text(encoding="utf-8"))
-                f_status = fdata.get("status", "")
-                f_validity = fdata.get("validity", "")
-                if f_status == "COMPLETED" and f_validity == "VALID_LIVE":
-                    raise VerificationError(
-                        f"Failed attempt record in '{trial_dir}' contradicts failure status: records COMPLETED/VALID_LIVE"
-                    )
+                rdata = json.loads(res_json.read_text(encoding="utf-8"))
             except Exception as exc:
-                if isinstance(exc, VerificationError):
-                    raise
-                raise VerificationError(f"Malformed failed_attempt_record.json for trial '{trial_id}': {exc}") from exc
+                raise VerificationError(f"Malformed result.json in failed attempt directory '{trial_dir}': {exc}") from exc
+
+            r_tid = rdata.get("trial_id")
+            if r_tid and r_tid != trial_id:
+                raise VerificationError(
+                    f"Unrelated result.json found in failed attempt directory '{trial_dir}': expected trial_id '{trial_id}', got '{r_tid}'"
+                )
+
+            r_cleanup = rdata.get("cleanup_status", {})
+            r_pcap = rdata.get("capture_metadata", {})
+            r_net = rdata.get("network_observations", {})
+            r_classification = r_net.get("classification", "")
+            r_validity = rdata.get("validity") or ("VALID_LIVE" if rdata.get("status") == "COMPLETED" else None)
+
+            is_falsely_successful = (
+                r_cleanup.get("scenario_restored") is True
+                and r_cleanup.get("baseline_verified") is True
+                and not r_cleanup.get("errors")
+                and r_pcap.get("pcap_valid") is True
+                and r_pcap.get("packet_count", 0) > 0
+                and r_classification not in ("", "INCONCLUSIVE")
+                and r_validity == "VALID_LIVE"
+            )
+            if is_falsely_successful:
+                raise VerificationError(
+                    f"Falsely successful result.json found in failed attempt directory '{trial_dir}' for attempt '{trial_id}'"
+                )
 
 
 def _verify_derived_directory(
@@ -289,7 +335,8 @@ def _verify_derived_directory(
     campaign_id: str,
     all_campaign_trial_ids: Set[str],
     total_attempts_count: int,
-    valid_trial_ids: Set[str]
+    valid_trial_ids: Set[str],
+    expected_attempts: Optional[Dict[str, Dict[str, Any]]] = None
 ) -> Dict[str, Any]:
     """
     Rigorously audits derived ledgers and provenance sidecars.
@@ -360,6 +407,7 @@ def _verify_derived_directory(
                 raise VerificationError(
                     f"attempts.csv row count mismatch: expected {total_attempts_count} reconciled attempts, got {row_count}"
                 )
+            seen_csv_trials = set()
             for idx, r in enumerate(rows, start=1):
                 r_cid = r.get("campaign_id")
                 if r_cid != campaign_id:
@@ -367,20 +415,102 @@ def _verify_derived_directory(
                         f"attempts.csv row {idx} campaign_id '{r_cid}' does not match campaign '{campaign_id}'"
                     )
                 r_tid = r.get("trial_id")
+                if not r_tid:
+                    raise VerificationError(f"attempts.csv row {idx} missing trial_id")
+                if r_tid in seen_csv_trials:
+                    raise VerificationError(
+                        f"Duplicate trial_id '{r_tid}' in attempts.csv at row {idx}"
+                    )
+                seen_csv_trials.add(r_tid)
+
                 if r_tid not in all_campaign_trial_ids:
                     raise VerificationError(
                         f"attempts.csv row {idx} references unknown trial_id '{r_tid}'"
                     )
 
-        elif ledger in ("connection_attempts.csv", "trial_timeline.csv"):
+                if expected_attempts and r_tid in expected_attempts:
+                    exp = expected_attempts[r_tid]
+                    if exp.get("scenario_id") and r.get("scenario_id") != exp["scenario_id"]:
+                        raise VerificationError(
+                            f"attempts.csv row {idx} scenario_id mismatch for trial '{r_tid}': expected '{exp['scenario_id']}', got '{r.get('scenario_id')}'"
+                        )
+                    if exp.get("browser") and _normalize_browser_name(r.get("browser", "")) != exp["browser"]:
+                        raise VerificationError(
+                            f"attempts.csv row {idx} browser mismatch for trial '{r_tid}': expected '{exp['browser']}', got '{r.get('browser')}'"
+                        )
+                    if exp.get("status") and r.get("status") != exp["status"]:
+                        raise VerificationError(
+                            f"attempts.csv row {idx} status mismatch for trial '{r_tid}': expected '{exp['status']}', got '{r.get('status')}'"
+                        )
+                    if exp.get("validity") and r.get("validity_category") != exp["validity"]:
+                        raise VerificationError(
+                            f"attempts.csv row {idx} validity mismatch for trial '{r_tid}': expected '{exp['validity']}', got '{r.get('validity_category')}'"
+                        )
+                    if exp.get("repetition") is not None and r.get("repetition"):
+                        try:
+                            if int(r.get("repetition")) != int(exp["repetition"]):
+                                raise VerificationError(
+                                    f"attempts.csv row {idx} repetition mismatch for trial '{r_tid}': expected {exp['repetition']}, got {r.get('repetition')}"
+                                )
+                        except ValueError:
+                            pass
+                    if exp.get("attempt_number") is not None and r.get("attempt_number"):
+                        try:
+                            if int(r.get("attempt_number")) != int(exp["attempt_number"]):
+                                raise VerificationError(
+                                    f"attempts.csv row {idx} attempt_number mismatch for trial '{r_tid}': expected {exp['attempt_number']}, got {r.get('attempt_number')}"
+                                )
+                        except ValueError:
+                            pass
+
+            if expected_attempts:
+                missing_trials = set(expected_attempts.keys()) - seen_csv_trials
+                if missing_trials:
+                    raise VerificationError(
+                        f"attempts.csv is missing {len(missing_trials)} campaign attempts: {sorted(list(missing_trials))[:3]}"
+                    )
+
+        elif ledger == "connection_attempts.csv":
             if row_count == 0:
                 raise VerificationError(f"Derived ledger '{ledger}' contains 0 data rows")
+            seen_conn_trials = set()
             for idx, r in enumerate(rows, start=1):
                 r_tid = r.get("trial_id")
+                if not r_tid:
+                    raise VerificationError(f"{ledger} row {idx} missing trial_id")
                 if r_tid not in all_campaign_trial_ids:
                     raise VerificationError(
                         f"{ledger} row {idx} references unknown trial_id '{r_tid}'"
                     )
+                seen_conn_trials.add(r_tid)
+
+            # Every valid live trial must have representation in connection_attempts.csv
+            missing_valid = valid_trial_ids - seen_conn_trials
+            if missing_valid:
+                raise VerificationError(
+                    f"connection_attempts.csv is missing connection data for {len(missing_valid)} valid live trials: {sorted(list(missing_valid))[:3]}"
+                )
+
+        elif ledger == "trial_timeline.csv":
+            if row_count == 0:
+                raise VerificationError(f"Derived ledger '{ledger}' contains 0 data rows")
+            seen_timeline_trials = set()
+            for idx, r in enumerate(rows, start=1):
+                r_tid = r.get("trial_id")
+                if not r_tid:
+                    raise VerificationError(f"{ledger} row {idx} missing trial_id")
+                if r_tid not in all_campaign_trial_ids:
+                    raise VerificationError(
+                        f"{ledger} row {idx} references unknown trial_id '{r_tid}'"
+                    )
+                seen_timeline_trials.add(r_tid)
+
+            # Every trial (valid live trials and preserved failed attempts) must have timeline events
+            missing_campaign_trials = all_campaign_trial_ids - seen_timeline_trials
+            if missing_campaign_trials:
+                raise VerificationError(
+                    f"trial_timeline.csv is missing events for {len(missing_campaign_trials)} campaign trials: {sorted(list(missing_campaign_trials))[:3]}"
+                )
 
     return {
         "path": str(dpath),
@@ -497,6 +627,8 @@ def verify_partner_campaign_directory(
     if not trials_root.is_dir():
         raise VerificationError(f"Missing 'trials/' directory in campaign root: '{trials_root}'")
 
+    expected_attempts: Dict[str, Dict[str, Any]] = {}
+
     for slot in matrix_slots:
         sid = slot.get("slot_id")
         if not sid:
@@ -561,6 +693,17 @@ def verify_partner_campaign_directory(
             att_validity = att.get("validity")
             att_sim = att.get("is_simulation")
             att_mode = att.get("execution_mode")
+
+            expected_attempts[tid] = {
+                "slot_id": sid,
+                "scenario_id": sc,
+                "browser": br_norm,
+                "repetition": rep,
+                "attempt_number": att.get("attempt_number"),
+                "status": att_status,
+                "validity": att_validity,
+                "execution_mode": att_mode,
+            }
 
             # Mandatory 2: Reject simulation attempts
             if att_sim is not False:
@@ -680,7 +823,8 @@ def verify_partner_campaign_directory(
             campaign_id=campaign_id,
             all_campaign_trial_ids=seen_all_trial_ids,
             total_attempts_count=total_attempts_count,
-            valid_trial_ids=valid_trial_ids
+            valid_trial_ids=valid_trial_ids,
+            expected_attempts=expected_attempts,
         )
 
     return {

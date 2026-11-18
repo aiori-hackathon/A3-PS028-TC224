@@ -791,6 +791,171 @@ class TestExportCampaignEvidenceProvenanceHardenings(unittest.TestCase):
         self.assertEqual(exp_evidence.get_tshark_version(), "UNAVAILABLE")
         self.assertEqual(exp_evidence.get_tcpdump_version(), "UNAVAILABLE")
 
+def _make_280_slot_manifest(campaign_dir: Path, failed_tid: Optional[str] = None, failed_slot_idx: int = 1):
+    slots = []
+    trials_dir = campaign_dir / "trials"
+    trials_dir.mkdir(parents=True, exist_ok=True)
+    idx = 1
+    for rep in range(1, 21):
+        for sc in ["S0", "S1", "S2", "S3", "S4", "S5", "S6"]:
+            for br in ["google-chrome", "firefox"]:
+                slot_id = f"slot-{idx:04d}-{sc}-{br}-rep{rep:02d}"
+                tid = f"trial-synth-{idx:04d}-01"
+                tdir = trials_dir / tid
+                tdir.mkdir(parents=True, exist_ok=True)
+                pcap_file = tdir / "capture.pcap"
+                pcap_file.write_bytes(b"\xd4\xc3\xb2\xa1\x02\x00\x04\x00" + b"\x00" * 16)
+                res_file = tdir / "result.json"
+                res_data = {
+                    "schema_version": "1.1.0",
+                    "trial_id": tid,
+                    "scenario_id": sc,
+                    "browser": br,
+                    "execution_mode": "LIVE",
+                    "is_simulation": False,
+                    "timestamps": {"start_time": "2026-11-18T00:00:00Z", "end_time": "2026-11-18T00:00:01Z"},
+                    "network_observations": {"classification": "DIRECT_IPV6"},
+                    "cleanup_status": {"scenario_restored": True, "baseline_verified": True, "errors": []}
+                }
+                res_file.write_text(json.dumps(res_data), encoding="utf-8")
+
+                if failed_tid and idx == failed_slot_idx:
+                    att = {
+                        "attempt_number": 1,
+                        "trial_id": failed_tid,
+                        "status": "FAILED",
+                        "validity": "CLEANUP_FAILURE",
+                        "execution_mode": "LIVE",
+                        "is_simulation": False
+                    }
+                else:
+                    att = {
+                        "attempt_number": 1,
+                        "trial_id": tid,
+                        "status": "COMPLETED",
+                        "validity": "VALID_LIVE",
+                        "execution_mode": "LIVE",
+                        "is_simulation": False
+                    }
+                slots.append({
+                    "slot_id": slot_id,
+                    "slot_index": idx,
+                    "scenario_id": sc,
+                    "browser": br,
+                    "repetition": rep,
+                    "status": "COMPLETED",
+                    "current_trial_id": tid,
+                    "attempts": [att]
+                })
+                idx += 1
+
+    manifest = {
+        "schema_version": "1.1.0",
+        "campaign_id": "ps028-synth-clean-01",
+        "status": "COMPLETED",
+        "execution_mode": "LIVE",
+        "is_simulation": False,
+        "matrix_slots": slots
+    }
+    (campaign_dir / "campaign_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+
+class TestExportCampaignEvidenceFailureAndCleanProvenance(unittest.TestCase):
+    """Verifies provenance sidecar integrity, external paths, and failure record validations."""
+
+    @patch("lab.export_campaign_evidence.get_git_info")
+    def test_export_clean_external_directories_preserves_verified_provenance(self, mock_git_info):
+        """Blocker B: External campaign and derived directories preserve clean git provenance."""
+        mock_git_info.return_value = {
+            "git_commit": "e" * 40,
+            "git_branch": "fix/clean-provenance",
+            "git_dirty": False,
+            "git_status": "VERIFIED",
+            "staged_diff_sha256": None,
+            "unstaged_diff_sha256": None,
+            "untracked_diff_sha256": None,
+            "dependency_lock_sha256": None,
+            "composite_source_digest": "clean_digest",
+        }
+        with tempfile.TemporaryDirectory(prefix="ps028_ext_camp_") as ext_camp, \
+             tempfile.TemporaryDirectory(prefix="ps028_ext_derived_") as ext_derived:
+            camp_dir = Path(ext_camp)
+            derived_dir = Path(ext_derived)
+            _make_280_slot_manifest(camp_dir)
+
+            # Run export
+            exp_evidence.export_attempts_ledger(camp_dir, derived_dir)
+            prov_file = derived_dir / "attempts.csv.provenance.json"
+            self.assertTrue(prov_file.is_file())
+            prov_data = json.loads(prov_file.read_text(encoding="utf-8"))
+            self.assertEqual(prov_data["provenance_status"], "VERIFIED")
+            self.assertFalse(prov_data["git_dirty"])
+            self.assertEqual(prov_data["git_status"], "VERIFIED")
+
+    def test_export_attempts_fails_when_failed_attempt_record_mismatches_manifest(self):
+        """Blocker A: Export fails if failed_attempt_record.json mismatches manifest status or validity."""
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            camp_dir = tmp / "camp"
+            tid = "trial-synth-fail-mismatch"
+            _make_280_slot_manifest(camp_dir, failed_tid=tid, failed_slot_idx=1)
+            tdir = camp_dir / "trials" / tid
+            tdir.mkdir(parents=True, exist_ok=True)
+
+            # Record has status FAILED but validity MEASUREMENT_FAILURE
+            frec_data = {
+                "attempt_number": 1,
+                "trial_id": tid,
+                "status": "FAILED",
+                "validity": "MEASUREMENT_FAILURE",
+                "execution_mode": "LIVE",
+                "timestamps": {"start_time": "2026-11-18T00:00:00Z", "end_time": "2026-11-18T00:00:01Z"}
+            }
+            (tdir / "failed_attempt_record.json").write_text(json.dumps(frec_data), encoding="utf-8")
+
+            with self.assertRaises(ValueError) as ctx:
+                exp_evidence.export_attempts_ledger(camp_dir, tmp / "out")
+            self.assertIn("validity mismatch", str(ctx.exception).lower())
+
+    def test_export_attempts_fails_when_falsely_successful_result_json_in_failed_dir(self):
+        """Blocker A: Export fails if a falsely successful result.json is planted in a failed attempt dir."""
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            camp_dir = tmp / "camp"
+            tid = "trial-synth-false-succ"
+            _make_280_slot_manifest(camp_dir, failed_tid=tid, failed_slot_idx=1)
+            tdir = camp_dir / "trials" / tid
+            tdir.mkdir(parents=True, exist_ok=True)
+
+            frec_data = {
+                "attempt_number": 1,
+                "trial_id": tid,
+                "status": "FAILED",
+                "validity": "CLEANUP_FAILURE",
+                "execution_mode": "LIVE",
+                "timestamps": {"start_time": "2026-11-18T00:00:00Z", "end_time": "2026-11-18T00:00:01Z"}
+            }
+            (tdir / "failed_attempt_record.json").write_text(json.dumps(frec_data), encoding="utf-8")
+
+            false_succ_result = {
+                "schema_version": "1.1.0",
+                "trial_id": tid,
+                "scenario_id": "S0",
+                "browser": "google-chrome",
+                "execution_mode": "LIVE",
+                "is_simulation": False,
+                "timestamps": {"start_time": "2026-11-18T00:00:00Z", "end_time": "2026-11-18T00:00:01Z"},
+                "capture_metadata": {"pcap_valid": True, "packet_count": 5},
+                "network_observations": {"classification": "DIRECT_IPV6"},
+                "cleanup_status": {"scenario_restored": True, "baseline_verified": True, "errors": []},
+                "validity": "VALID_LIVE"
+            }
+            (tdir / "result.json").write_text(json.dumps(false_succ_result), encoding="utf-8")
+
+            with self.assertRaises(ValueError) as ctx:
+                exp_evidence.export_attempts_ledger(camp_dir, tmp / "out")
+            self.assertIn("falsely successful result.json", str(ctx.exception).lower())
+
 
 if __name__ == "__main__":
     unittest.main()

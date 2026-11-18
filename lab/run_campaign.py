@@ -57,6 +57,7 @@ DEFAULT_SCENARIOS = ["S0", "S1", "S2", "S3", "S4", "S5", "S6"]
 DEFAULT_CAMPAIGNS_DIR = SCRIPT_DIR / "campaigns"
 MANIFEST_FILENAME = "campaign_manifest.json"
 LOCK_FILENAME = ".campaign.lock"
+FAILURE_RECORD_FILENAME = "failed_attempt_record.json"
 
 # Documented mismatch between initial README text and canonical lab/scenarios.yaml
 # Per PS-028 specification, canonical scenarios are NEVER silently modified and evidence is not relabeled.
@@ -302,6 +303,34 @@ class ExecutionAttempt:
             cleanup_status=data.get("cleanup_status", {}),
             error_message=data.get("error_message")
         )
+
+
+def write_failed_attempt_record(
+    trial_dir: Union[str, Path],
+    attempt: Union[ExecutionAttempt, Dict[str, Any]]
+) -> Path:
+    """
+    Atomically writes a durable failed_attempt_record.json to trial_dir:
+    - Writes to a temporary file in trial_dir.
+    - Flushes and fsyncs to ensure durability on disk.
+    - Atomically renames to failed_attempt_record.json.
+    - Preserves attempt number, trial ID, status, validity, execution mode,
+      timestamps, cleanup information, and error details.
+    """
+    tdir = Path(trial_dir).resolve()
+    tdir.mkdir(parents=True, exist_ok=True)
+    target_path = tdir / FAILURE_RECORD_FILENAME
+    tmp_path = tdir / f"{FAILURE_RECORD_FILENAME}.tmp.{os.getpid()}_{time.time_ns()}"
+
+    data = attempt.to_dict() if isinstance(attempt, ExecutionAttempt) else dict(attempt)
+
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
+
+    os.replace(tmp_path, target_path)
+    return target_path
 
 
 class MatrixSlot:
@@ -841,6 +870,8 @@ class CampaignRunner:
                 lock_file=self.lab_lock_file,
                 lock_timeout=self.lock_timeout
             )
+        except KeyboardInterrupt as ki:
+            exec_error = f"Trial interrupted by KeyboardInterrupt: {ki}"
         except Exception as exc:
             exec_error = str(exc)
 
@@ -885,21 +916,47 @@ class CampaignRunner:
         # Check for cleanup/baseline failure
         if not scenario_restored or not baseline_verified or len(cleanup_errors) > 0:
             err_details = "; ".join(cleanup_errors) if cleanup_errors else "Baseline not verified"
+            timestamps = (
+                trial_result.get("timestamps", {})
+                if trial_result and trial_result.get("timestamps")
+                else {"start_time": start_iso, "end_time": end_iso, "duration_ms": duration_ms}
+            )
+            evidence_paths = (
+                trial_result.get("evidence_paths", {})
+                if trial_result and trial_result.get("evidence_paths")
+                else {"trial_dir": str(trial_dir)}
+            )
+            capture_metadata = (
+                trial_result.get("capture_metadata", {})
+                if trial_result
+                else {}
+            )
+            http_outcome = (
+                trial_result.get("http_outcome", {})
+                if trial_result
+                else {}
+            )
+            network_observations = (
+                trial_result.get("network_observations", {})
+                if trial_result
+                else {}
+            )
             attempt = ExecutionAttempt(
                 attempt_number=attempt_number,
                 trial_id=trial_id,
                 execution_mode="SIMULATION" if self.is_simulation else "LIVE",
                 is_simulation=self.is_simulation,
-                timestamps={"start_time": start_iso, "end_time": end_iso, "duration_ms": duration_ms},
+                timestamps=timestamps,
                 status="FAILED",
                 validity="CLEANUP_FAILURE",
-                evidence_paths={"trial_dir": str(trial_dir)},
-                capture_metadata={},
-                http_outcome={},
-                network_observations={},
+                evidence_paths=evidence_paths,
+                capture_metadata=capture_metadata,
+                http_outcome=http_outcome,
+                network_observations=network_observations,
                 cleanup_status=cleanup_status,
                 error_message=f"CLEANUP OR BASELINE FAILURE: {err_details}"
             )
+            write_failed_attempt_record(trial_dir, attempt)
             return attempt
 
         # If trial errored out during execution
@@ -919,6 +976,7 @@ class CampaignRunner:
                 cleanup_status=cleanup_status,
                 error_message=exec_error
             )
+            write_failed_attempt_record(trial_dir, attempt)
             return attempt
 
         # Validate evidence using existing A7 rules
@@ -954,6 +1012,8 @@ class CampaignRunner:
             cleanup_status=cleanup_status,
             error_message=exec_error
         )
+        if status == "FAILED" or validity in ("CLEANUP_FAILURE", "MEASUREMENT_FAILURE"):
+            write_failed_attempt_record(trial_dir, attempt)
         return attempt
 
     def run(self) -> Dict[str, Any]:

@@ -816,6 +816,266 @@ class TestVerifyPartnerHandover(unittest.TestCase):
             verify_partner_handover.verify_partner_campaign_directory(camp)
         self.assertIn("contradicts failure status", str(ctx.exception).lower())
 
+    def test_failed_attempt_record_trial_id_mismatch_rejected(self):
+        """Failed attempt record whose trial_id does not match manifest attempt is rejected."""
+        camp = make_synthetic_campaign(self.temp_dir, repetitions=20, include_retried_slot=True)
+        mpath = camp / "campaign_manifest.json"
+        data = json.loads(mpath.read_text(encoding="utf-8"))
+        fail_tid = data["matrix_slots"][1]["attempts"][0]["trial_id"]
+        frec_path = camp / "trials" / fail_tid / "failed_attempt_record.json"
+        fdata = json.loads(frec_path.read_text(encoding="utf-8"))
+        fdata["trial_id"] = "trial-synth-mismatched-tid"
+        frec_path.write_text(json.dumps(fdata), encoding="utf-8")
+
+        with self.assertRaises(verify_partner_handover.VerificationError) as ctx:
+            verify_partner_handover.verify_partner_campaign_directory(camp)
+        self.assertIn("trial id mismatch", str(ctx.exception).lower())
+
+    def test_failed_attempt_record_status_mismatch_rejected(self):
+        """Failed attempt record whose status does not match manifest attempt is rejected."""
+        camp = make_synthetic_campaign(self.temp_dir, repetitions=20, include_retried_slot=True)
+        mpath = camp / "campaign_manifest.json"
+        data = json.loads(mpath.read_text(encoding="utf-8"))
+        fail_tid = data["matrix_slots"][1]["attempts"][0]["trial_id"]
+        frec_path = camp / "trials" / fail_tid / "failed_attempt_record.json"
+        fdata = json.loads(frec_path.read_text(encoding="utf-8"))
+        fdata["status"] = "ABORTED"
+        frec_path.write_text(json.dumps(fdata), encoding="utf-8")
+
+        with self.assertRaises(verify_partner_handover.VerificationError) as ctx:
+            verify_partner_handover.verify_partner_campaign_directory(camp)
+        self.assertIn("status mismatch", str(ctx.exception).lower())
+
+    def test_failed_attempt_record_validity_mismatch_rejected(self):
+        """Failed attempt record whose validity does not match manifest attempt is rejected."""
+        camp = make_synthetic_campaign(self.temp_dir, repetitions=20, include_retried_slot=True)
+        mpath = camp / "campaign_manifest.json"
+        data = json.loads(mpath.read_text(encoding="utf-8"))
+        fail_tid = data["matrix_slots"][1]["attempts"][0]["trial_id"]
+        frec_path = camp / "trials" / fail_tid / "failed_attempt_record.json"
+        fdata = json.loads(frec_path.read_text(encoding="utf-8"))
+        fdata["validity"] = "MEASUREMENT_FAILURE"
+        frec_path.write_text(json.dumps(fdata), encoding="utf-8")
+
+        with self.assertRaises(verify_partner_handover.VerificationError) as ctx:
+            verify_partner_handover.verify_partner_campaign_directory(camp)
+        self.assertIn("validity mismatch", str(ctx.exception).lower())
+
+    def test_failed_attempt_record_execution_mode_mismatch_rejected(self):
+        """Failed attempt record whose execution_mode does not match manifest attempt is rejected."""
+        camp = make_synthetic_campaign(self.temp_dir, repetitions=20, include_retried_slot=True)
+        mpath = camp / "campaign_manifest.json"
+        data = json.loads(mpath.read_text(encoding="utf-8"))
+        fail_tid = data["matrix_slots"][1]["attempts"][0]["trial_id"]
+        frec_path = camp / "trials" / fail_tid / "failed_attempt_record.json"
+        fdata = json.loads(frec_path.read_text(encoding="utf-8"))
+        fdata["execution_mode"] = "SIMULATION"
+        frec_path.write_text(json.dumps(fdata), encoding="utf-8")
+
+        with self.assertRaises(verify_partner_handover.VerificationError) as ctx:
+            verify_partner_handover.verify_partner_campaign_directory(camp)
+        self.assertIn("execution mode mismatch", str(ctx.exception).lower())
+
+    def test_failed_attempt_with_falsely_successful_result_json_rejected(self):
+        """Failed attempt directory containing a falsely successful result.json is rejected."""
+        camp = make_synthetic_campaign(self.temp_dir, repetitions=20, include_retried_slot=True)
+        mpath = camp / "campaign_manifest.json"
+        data = json.loads(mpath.read_text(encoding="utf-8"))
+        fail_tid = data["matrix_slots"][1]["attempts"][0]["trial_id"]
+        tdir = camp / "trials" / fail_tid
+
+        # Plant a falsely successful result.json claiming 100% success
+        false_success_result = {
+            "schema_version": "1.0.0",
+            "trial_id": fail_tid,
+            "scenario_id": "S0",
+            "execution_mode": "LIVE",
+            "is_simulation": False,
+            "browser": {"name": "firefox"},
+            "capture_metadata": {"pcap_valid": True, "packet_count": 5},
+            "network_observations": {"classification": "DIRECT_IPV6"},
+            "cleanup_status": {"scenario_restored": True, "baseline_verified": True, "errors": []},
+            "validity": "VALID_LIVE",
+            "status": "COMPLETED"
+        }
+        (tdir / "result.json").write_text(json.dumps(false_success_result), encoding="utf-8")
+
+        with self.assertRaises(verify_partner_handover.VerificationError) as ctx:
+            verify_partner_handover.verify_partner_campaign_directory(camp)
+        self.assertIn("falsely successful result.json", str(ctx.exception).lower())
+
+    def test_failed_attempt_with_unrelated_result_json_rejected(self):
+        """Failed attempt directory containing result.json from an unrelated trial is rejected."""
+        camp = make_synthetic_campaign(self.temp_dir, repetitions=20, include_retried_slot=True)
+        mpath = camp / "campaign_manifest.json"
+        data = json.loads(mpath.read_text(encoding="utf-8"))
+        fail_tid = data["matrix_slots"][1]["attempts"][0]["trial_id"]
+        tdir = camp / "trials" / fail_tid
+
+        unrelated_result = {
+            "schema_version": "1.0.0",
+            "trial_id": "trial-synth-unrelated-999",
+            "cleanup_status": {"scenario_restored": False, "errors": ["Mock error"]}
+        }
+        (tdir / "result.json").write_text(json.dumps(unrelated_result), encoding="utf-8")
+
+        with self.assertRaises(verify_partner_handover.VerificationError) as ctx:
+            verify_partner_handover.verify_partner_campaign_directory(camp)
+        self.assertIn("unrelated result.json", str(ctx.exception).lower())
+
+    def test_derived_attempts_csv_duplicate_trial_id_rejected(self):
+        """attempts.csv containing duplicate trial IDs (even with matching row count) is rejected."""
+        camp = make_synthetic_campaign(self.temp_dir, repetitions=20)
+        derived = make_synthetic_derived_directory(camp, self.temp_dir / "derived")
+
+        # Read attempts.csv, duplicate first row and replace second row
+        att_csv = derived / "attempts.csv"
+        with open(att_csv, "r", encoding="utf-8") as rf:
+            rows = list(csv.DictReader(rf))
+        rows[1]["trial_id"] = rows[0]["trial_id"]
+        fieldnames = list(rows[0].keys())
+        with open(att_csv, "w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
+
+        # Update provenance sha256 to isolate to ledger reconciliation check
+        prov_file = derived / "attempts.csv.provenance.json"
+        pdata = json.loads(prov_file.read_text(encoding="utf-8"))
+        pdata["sha256"] = verify_partner_handover.sha256_file(att_csv)
+        prov_file.write_text(json.dumps(pdata), encoding="utf-8")
+
+        with self.assertRaises(verify_partner_handover.VerificationError) as ctx:
+            verify_partner_handover.verify_partner_campaign_directory(camp, derived_dir=derived)
+        self.assertIn("duplicate trial_id", str(ctx.exception).lower())
+
+    def test_derived_attempts_csv_misclassified_attempt_rejected(self):
+        """attempts.csv containing misclassified attempt status or validity is rejected."""
+        camp = make_synthetic_campaign(self.temp_dir, repetitions=20, include_retried_slot=True)
+        derived = make_synthetic_derived_directory(camp, self.temp_dir / "derived")
+
+        att_csv = derived / "attempts.csv"
+        with open(att_csv, "r", encoding="utf-8") as rf:
+            rows = list(csv.DictReader(rf))
+        # Find failed attempt row and misclassify its validity
+        for r in rows:
+            if r.get("validity_category") == "CLEANUP_FAILURE":
+                r["validity_category"] = "MEASUREMENT_FAILURE"
+                break
+        fieldnames = list(rows[0].keys())
+        with open(att_csv, "w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
+
+        prov_file = derived / "attempts.csv.provenance.json"
+        pdata = json.loads(prov_file.read_text(encoding="utf-8"))
+        pdata["sha256"] = verify_partner_handover.sha256_file(att_csv)
+        prov_file.write_text(json.dumps(pdata), encoding="utf-8")
+
+        with self.assertRaises(verify_partner_handover.VerificationError) as ctx:
+            verify_partner_handover.verify_partner_campaign_directory(camp, derived_dir=derived)
+        self.assertIn("validity mismatch", str(ctx.exception).lower())
+
+    def test_derived_connection_attempts_missing_valid_live_trial_rejected(self):
+        """connection_attempts.csv missing a valid live trial is rejected."""
+        camp = make_synthetic_campaign(self.temp_dir, repetitions=20)
+        derived = make_synthetic_derived_directory(camp, self.temp_dir / "derived")
+
+        conn_csv = derived / "connection_attempts.csv"
+        with open(conn_csv, "r", encoding="utf-8") as rf:
+            rows = list(csv.DictReader(rf))
+        omitted_tid = rows[0]["trial_id"]
+        filtered_rows = [r for r in rows if r["trial_id"] != omitted_tid]
+        fieldnames = list(rows[0].keys())
+        with open(conn_csv, "w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(filtered_rows)
+
+        prov_file = derived / "connection_attempts.csv.provenance.json"
+        pdata = json.loads(prov_file.read_text(encoding="utf-8"))
+        pdata["sha256"] = verify_partner_handover.sha256_file(conn_csv)
+        prov_file.write_text(json.dumps(pdata), encoding="utf-8")
+
+        with self.assertRaises(verify_partner_handover.VerificationError) as ctx:
+            verify_partner_handover.verify_partner_campaign_directory(camp, derived_dir=derived)
+        self.assertIn("missing connection data", str(ctx.exception).lower())
+
+    def test_derived_trial_timeline_missing_campaign_trial_rejected(self):
+        """trial_timeline.csv missing events for a campaign trial is rejected."""
+        camp = make_synthetic_campaign(self.temp_dir, repetitions=20)
+        derived = make_synthetic_derived_directory(camp, self.temp_dir / "derived")
+
+        time_csv = derived / "trial_timeline.csv"
+        with open(time_csv, "r", encoding="utf-8") as rf:
+            rows = list(csv.DictReader(rf))
+        omitted_tid = rows[0]["trial_id"]
+        filtered_rows = [r for r in rows if r["trial_id"] != omitted_tid]
+        fieldnames = list(rows[0].keys())
+        with open(time_csv, "w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(filtered_rows)
+
+        prov_file = derived / "trial_timeline.csv.provenance.json"
+        pdata = json.loads(prov_file.read_text(encoding="utf-8"))
+        pdata["sha256"] = verify_partner_handover.sha256_file(time_csv)
+        prov_file.write_text(json.dumps(pdata), encoding="utf-8")
+
+        with self.assertRaises(verify_partner_handover.VerificationError) as ctx:
+            verify_partner_handover.verify_partner_campaign_directory(camp, derived_dir=derived)
+        self.assertIn("missing events", str(ctx.exception).lower())
+
+    def test_pcap_with_truncated_packet_record_rejected(self):
+        """PCAP with a truncated packet record header is rejected."""
+        camp = make_synthetic_campaign(self.temp_dir, repetitions=20)
+        mpath = camp / "campaign_manifest.json"
+        data = json.loads(mpath.read_text(encoding="utf-8"))
+        first_tid = data["matrix_slots"][0]["attempts"][0]["trial_id"]
+        pcap_file = camp / "trials" / first_tid / "capture.pcap"
+
+        header = struct.pack("<IHHIIII", 0xa1b2c3d4, 2, 4, 0, 0, 65535, 1)
+        # 24-byte header + 8 bytes truncated record header
+        corrupt_pcap = header + b"\x00" * 8
+        pcap_file.write_bytes(corrupt_pcap)
+
+        # Update result.json SHA to point to corrupt bytes so SHA check passes and record audit runs
+        rpath = camp / "trials" / first_tid / "result.json"
+        rdata = json.loads(rpath.read_text(encoding="utf-8"))
+        new_sha = hashlib.sha256(corrupt_pcap).hexdigest()
+        rdata["capture_metadata"]["pcap_sha256"] = new_sha
+        rpath.write_text(json.dumps(rdata), encoding="utf-8")
+
+        with self.assertRaises(verify_partner_handover.VerificationError) as ctx:
+            verify_partner_handover.verify_partner_campaign_directory(camp)
+        self.assertIn("pcap validation failed", str(ctx.exception).lower())
+        self.assertIn("truncated packet record header", str(ctx.exception).lower())
+
+    def test_pcap_with_impossible_packet_length_rejected(self):
+        """PCAP declaring impossible captured packet length is rejected."""
+        camp = make_synthetic_campaign(self.temp_dir, repetitions=20)
+        mpath = camp / "campaign_manifest.json"
+        data = json.loads(mpath.read_text(encoding="utf-8"))
+        first_tid = data["matrix_slots"][0]["attempts"][0]["trial_id"]
+        pcap_file = camp / "trials" / first_tid / "capture.pcap"
+
+        header = struct.pack("<IHHIIII", 0xa1b2c3d4, 2, 4, 0, 0, 65535, 1)
+        pkt_hdr = struct.pack("<IIII", 1729000000, 0, 300000, 300000)
+        corrupt_pcap = header + pkt_hdr + b"\x00" * 100
+        pcap_file.write_bytes(corrupt_pcap)
+
+        rpath = camp / "trials" / first_tid / "result.json"
+        rdata = json.loads(rpath.read_text(encoding="utf-8"))
+        new_sha = hashlib.sha256(corrupt_pcap).hexdigest()
+        rdata["capture_metadata"]["pcap_sha256"] = new_sha
+        rpath.write_text(json.dumps(rdata), encoding="utf-8")
+
+        with self.assertRaises(verify_partner_handover.VerificationError) as ctx:
+            verify_partner_handover.verify_partner_campaign_directory(camp)
+        self.assertIn("pcap validation failed", str(ctx.exception).lower())
+        self.assertIn("impossible packet captured length", str(ctx.exception).lower())
+
     def test_archive_device_node_rejected(self):
         """Archive containing special device node is rejected."""
         arch_path = self.temp_dir / "device_node.tar.gz"
