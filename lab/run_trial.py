@@ -30,6 +30,8 @@ Coordinates one complete, reproducible, and evidence-backed measurement trial:
 
 import argparse
 import contextlib
+import ctypes
+import ctypes.util
 import datetime
 import errno
 import hashlib
@@ -4313,6 +4315,89 @@ class DescendantScanResult:
         return f"DescendantScanResult(pids={self.pids}, is_complete={self.is_complete}, scan_error={self.scan_error!r})"
 
 
+PR_SET_CHILD_SUBREAPER = 36
+PR_GET_CHILD_SUBREAPER = 37
+
+
+def _get_libc():
+    """Returns ctypes handle to libc or None."""
+    try:
+        return ctypes.CDLL(None)
+    except Exception:
+        try:
+            lib = ctypes.util.find_library("c")
+            if lib:
+                return ctypes.CDLL(lib)
+        except Exception:
+            pass
+    return None
+
+
+def is_subreaper_available() -> bool:
+    """
+    Checks whether the Linux subreaper capability (PR_SET_CHILD_SUBREAPER) is supported.
+    Explicitly probes libc prctl with PR_GET_CHILD_SUBREAPER.
+    """
+    if sys.platform != "linux":
+        return False
+    libc = _get_libc()
+    if libc is None or not hasattr(libc, "prctl"):
+        return False
+    try:
+        subreaper_val = ctypes.c_int(0)
+        res = libc.prctl(PR_GET_CHILD_SUBREAPER, ctypes.byref(subreaper_val), 0, 0, 0)
+        return res == 0
+    except Exception:
+        return False
+
+
+def ensure_subreaper() -> bool:
+    """
+    Enables PR_SET_CHILD_SUBREAPER for the current process so detached descendants
+    reparent to this process instead of init/PID 1.
+    Returns True if successfully active, False otherwise.
+    """
+    if sys.platform != "linux":
+        return False
+    libc = _get_libc()
+    if libc is None or not hasattr(libc, "prctl"):
+        return False
+    try:
+        subreaper_val = ctypes.c_int(0)
+        if libc.prctl(PR_GET_CHILD_SUBREAPER, ctypes.byref(subreaper_val), 0, 0, 0) == 0:
+            if subreaper_val.value == 1:
+                return True
+        res = libc.prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0)
+        return res == 0
+    except Exception:
+        return False
+
+
+def get_direct_child_pids(
+    parent_pid: int,
+    proc_dir: Optional[Union[str, Path]] = None
+) -> List[int]:
+    """
+    Returns list of direct child PIDs of parent_pid by inspecting /proc.
+    """
+    base_proc = Path(proc_dir) if proc_dir is not None else Path("/proc")
+    if not base_proc.is_dir():
+        return []
+    children: List[int] = []
+    try:
+        entries = os.listdir(base_proc)
+    except Exception:
+        return []
+    for entry in entries:
+        if not entry.isdigit():
+            continue
+        pid = int(entry)
+        ident = get_process_identity(pid, proc_dir=base_proc)
+        if ident and ident.get("valid", True) and ident.get("ppid") == parent_pid:
+            children.append(pid)
+    return children
+
+
 def get_process_identity(
     pid: int,
     proc_dir: Optional[Union[str, Path]] = None
@@ -4320,35 +4405,109 @@ def get_process_identity(
     """
     Reads process identity from /proc/<pid>/stat.
     Returns dict with pid, ppid, pgrp, session, state, and starttime (field 22),
-    or None if process does not exist or stat is unreadable.
+    or None if process does not exist.
+    Fails closed (returns dict with valid=False, error=...) for malformed, truncated,
+    missing starttime, or unreadable stat records of an existing process.
     """
     if not isinstance(pid, int) or pid <= 1:
         return None
     base_proc = Path(proc_dir) if proc_dir is not None else Path("/proc")
-    stat_file = base_proc / str(pid) / "stat"
+    proc_entry = base_proc / str(pid)
+    stat_file = proc_entry / "stat"
+
+    if not stat_file.is_file() and not proc_entry.exists():
+        return None
+
     try:
         content = stat_file.read_text(encoding="utf-8", errors="replace").strip()
-        rparen = content.rfind(")")
-        if rparen == -1 or rparen + 2 >= len(content):
+    except (FileNotFoundError, ProcessLookupError):
+        if not proc_entry.exists():
             return None
-        fields = content[rparen + 2 :].split()
-        if len(fields) < 2:
-            return None
-        state = fields[0]
-        ppid = int(fields[1])
-        pgrp = int(fields[2]) if len(fields) > 2 else 0
-        session = int(fields[3]) if len(fields) > 3 else 0
-        starttime = fields[19] if len(fields) >= 20 else None
         return {
             "pid": pid,
+            "valid": False,
+            "error": f"Process directory exists but stat file not found for PID {pid}",
+            "state": "UNKNOWN",
+            "ppid": None,
+            "pgrp": None,
+            "session": None,
+            "starttime": None,
+        }
+    except (PermissionError, OSError) as exc:
+        return {
+            "pid": pid,
+            "valid": False,
+            "error": f"Permission or OS error reading {stat_file}: {exc}",
+            "state": "UNKNOWN",
+            "ppid": None,
+            "pgrp": None,
+            "session": None,
+            "starttime": None,
+        }
+
+    rparen = content.rfind(")")
+    if rparen == -1 or rparen + 2 >= len(content):
+        return {
+            "pid": pid,
+            "valid": False,
+            "error": f"Malformed stat record for PID {pid}: missing closing parenthesis or empty tail",
+            "state": "UNKNOWN",
+            "ppid": None,
+            "pgrp": None,
+            "session": None,
+            "starttime": None,
+        }
+
+    fields = content[rparen + 2 :].split()
+    if len(fields) < 20:
+        return {
+            "pid": pid,
+            "valid": False,
+            "error": f"Truncated stat record for PID {pid}: expected at least 20 fields after comm, got {len(fields)}",
+            "state": fields[0] if len(fields) > 0 else "UNKNOWN",
+            "ppid": int(fields[1]) if len(fields) > 1 and fields[1].isdigit() else None,
+            "pgrp": int(fields[2]) if len(fields) > 2 and fields[2].isdigit() else None,
+            "session": int(fields[3]) if len(fields) > 3 and fields[3].isdigit() else None,
+            "starttime": None,
+        }
+
+    try:
+        state = fields[0]
+        ppid = int(fields[1])
+        pgrp = int(fields[2])
+        session = int(fields[3])
+        starttime = fields[19]
+        if not starttime.isdigit() or int(starttime) < 0:
+            return {
+                "pid": pid,
+                "valid": False,
+                "error": f"Invalid starttime field for PID {pid}: {starttime!r}",
+                "state": state,
+                "ppid": ppid,
+                "pgrp": pgrp,
+                "session": session,
+                "starttime": None,
+            }
+        return {
+            "pid": pid,
+            "valid": True,
             "state": state,
             "ppid": ppid,
             "pgrp": pgrp,
             "session": session,
             "starttime": starttime,
         }
-    except Exception:
-        return None
+    except (ValueError, IndexError) as exc:
+        return {
+            "pid": pid,
+            "valid": False,
+            "error": f"Failed to parse stat fields for PID {pid}: {exc}",
+            "state": "UNKNOWN",
+            "ppid": None,
+            "pgrp": None,
+            "session": None,
+            "starttime": None,
+        }
 
 
 def is_same_alive_process(
@@ -4358,29 +4517,133 @@ def is_same_alive_process(
 ) -> bool:
     """
     Verifies that pid is alive, not in zombie/dead state, and (if original_identity was
-    recorded with starttime) still matches the original process starttime (preventing
+    recorded with valid starttime) still matches the original process starttime (preventing
     signalling recycled PIDs).
+    Treats unreadable, truncated, or indeterminate liveness as unknown (alive), never as proof of death.
     """
     curr = get_process_identity(pid, proc_dir=proc_dir)
     if curr is None:
         return False
+    if not curr.get("valid", True):
+        # Indeterminate liveness is treated as unknown/alive, never as proof of death
+        return True
     if curr.get("state", "").upper() in ("Z", "X"):
         return False
-    if original_identity is not None and original_identity.get("starttime") is not None:
-        curr_start = curr.get("starttime")
-        if curr_start is not None and curr_start != original_identity.get("starttime"):
-            return False
+    # Require a valid starttime identity before relying on PID-reuse protection
+    if original_identity is not None and original_identity.get("valid", True):
+        orig_start = original_identity.get("starttime")
+        if orig_start is not None:
+            curr_start = curr.get("starttime")
+            if curr_start is not None and curr_start != orig_start:
+                return False
     return True
+
+
+def is_valid_verified_pgid(
+    target_pgid: int,
+    leader_pid: Optional[int],
+    leader_starttime: Optional[str],
+    proc_dir: Optional[Union[str, Path]] = None
+) -> Tuple[bool, Optional[str]]:
+    """
+    Verifies that target_pgid belongs to the original isolated process session
+    and has not been reused by an unrelated process group.
+    """
+    if not isinstance(target_pgid, int) or target_pgid <= 1:
+        return False, f"Invalid numeric PGID {target_pgid}"
+    if target_pgid == os.getpid() or target_pgid == os.getpgrp():
+        return False, f"Target PGID {target_pgid} matches current process or group"
+
+    # If leader starttime is missing, attempt to read from leader if still alive
+    if leader_starttime is None and leader_pid is not None:
+        l_ident = get_process_identity(leader_pid, proc_dir=proc_dir)
+        if l_ident and l_ident.get("valid", True) and l_ident.get("starttime"):
+            leader_starttime = l_ident["starttime"]
+
+    # If leader is still alive, check its identity
+    if leader_pid is not None:
+        l_ident = get_process_identity(leader_pid, proc_dir=proc_dir)
+        if l_ident is not None and l_ident.get("valid", True):
+            if l_ident.get("state") not in ("Z", "X"):
+                curr_start = l_ident.get("starttime")
+                if curr_start != leader_starttime:
+                    return False, f"Leader PID {leader_pid} reused: starttime mismatch ({curr_start} != {leader_starttime})"
+                if l_ident.get("pgrp") != target_pgid:
+                    return False, f"Leader PID {leader_pid} is no longer in target PGID {target_pgid} (now in {l_ident.get('pgrp')})"
+                return True, None
+
+    # Leader has exited or was reaped. Verify that any living members in target_pgid belong to session
+    # and have starttime >= leader_starttime.
+    base_proc = Path(proc_dir) if proc_dir is not None else Path("/proc")
+    if not base_proc.is_dir():
+        return False, f"Proc directory {base_proc} does not exist"
+
+    try:
+        entries = os.listdir(base_proc)
+    except Exception as exc:
+        return False, f"Cannot list {base_proc} to verify PGID {target_pgid}: {exc}"
+
+    group_members: List[Dict[str, Any]] = []
+    for entry in entries:
+        if not entry.isdigit():
+            continue
+        c_pid = int(entry)
+        ident = get_process_identity(c_pid, proc_dir=base_proc)
+        if ident and ident.get("valid", True) and ident.get("pgrp") == target_pgid:
+            group_members.append(ident)
+
+    if not group_members:
+        # Check kernel via killpg(target_pgid, 0)
+        if proc_dir is None:
+            try:
+                os.killpg(target_pgid, 0)
+                return False, f"PGID {target_pgid} exists in kernel but no member found in /proc"
+            except ProcessLookupError:
+                return False, f"PGID {target_pgid} does not exist"
+            except (PermissionError, OSError) as exc:
+                return False, f"Error checking PGID {target_pgid}: {exc}"
+        else:
+            return False, f"PGID {target_pgid} does not exist in {proc_dir}"
+
+    if leader_starttime is None:
+        # Leader starttime was not recorded at launch.
+        # Fall back to verifying that all group members belong to the exact session matching target_pgid.
+        if all(m.get("session") == target_pgid for m in group_members):
+            return True, None
+        return False, f"Leader starttime was never established and group members have inconsistent session"
+
+    try:
+        leader_start_int = int(leader_starttime)
+    except (ValueError, TypeError):
+        return False, f"Invalid leader starttime format {leader_starttime!r}"
+
+    for m in group_members:
+        m_start = m.get("starttime")
+        if m_start is None:
+            return False, f"PGID member {m.get('pid')} has missing starttime"
+        try:
+            if int(m_start) < leader_start_int:
+                return False, f"PGID member {m.get('pid')} started before leader ({m_start} < {leader_starttime}); group reused"
+        except (ValueError, TypeError):
+            return False, f"PGID member {m.get('pid')} has malformed starttime {m_start}"
+
+        if m.get("session") is not None and m.get("session") != target_pgid:
+            return False, f"PGID member {m.get('pid')} has unexpected session {m.get('session')}"
+
+    return True, None
 
 
 def find_descendant_pids(
     parent_pid: int,
     proc_dir: Optional[Union[str, Path]] = None,
-    target_pgid: Optional[int] = None
+    target_pgid: Optional[int] = None,
+    proc: Optional[Any] = None
 ) -> DescendantScanResult:
     """
     Finds all descendant PIDs of a given parent PID and/or target process group by scanning /proc.
-    Returns DescendantScanResult distinguishing complete vs incomplete/failed scans.
+    When subreaper containment is enabled on proc, discovers orphaned descendants that reparented
+    to the runner process after parent exit.
+    Fails closed if descendant discovery was incomplete or unverified.
     """
     if not isinstance(parent_pid, int) or parent_pid <= 1:
         return DescendantScanResult(pids=[], is_complete=False, scan_error=f"Invalid parent PID: {parent_pid}")
@@ -4403,40 +4666,53 @@ def find_descendant_pids(
         if not entry.isdigit():
             continue
         pid = int(entry)
-        stat_path = base_proc / entry / "stat"
-        try:
-            content = stat_path.read_text(encoding="utf-8", errors="replace").strip()
-            rparen = content.rfind(")")
-            if rparen != -1 and rparen + 2 < len(content):
-                fields = content[rparen + 2 :].split()
-                if len(fields) >= 2:
-                    state = fields[0]
-                    ppid = int(fields[1])
-                    pgrp = int(fields[2]) if len(fields) > 2 else 0
-                    session = int(fields[3]) if len(fields) > 3 else 0
-                    starttime = fields[19] if len(fields) >= 20 else None
-                    ident = {
-                        "pid": pid,
-                        "state": state,
-                        "ppid": ppid,
-                        "pgrp": pgrp,
-                        "session": session,
-                        "starttime": starttime,
-                    }
-                    all_identities[pid] = ident
-                    children_map.setdefault(ppid, []).append(pid)
-                    if target_pgid is not None and pgrp == target_pgid and pid != parent_pid:
-                        group_members.append(pid)
-        except (FileNotFoundError, ProcessLookupError):
+        ident = get_process_identity(pid, proc_dir=base_proc)
+        if ident is None:
+            # Process exited between listdir and read (normal exit race)
             continue
-        except PermissionError as p_err:
-            scan_errors.append(f"Permission denied reading {stat_path}: {p_err}")
-        except Exception as exc:
-            scan_errors.append(f"Error reading {stat_path}: {exc}")
+        if not ident.get("valid", True):
+            scan_errors.append(ident.get("error", f"Unreadable stat for PID {pid}"))
+            continue
+
+        all_identities[pid] = ident
+        ppid = ident["ppid"]
+        children_map.setdefault(ppid, []).append(pid)
+        if target_pgid is not None and ident.get("pgrp") == target_pgid and pid != parent_pid:
+            group_members.append(pid)
 
     descendants: List[int] = []
     queue = [parent_pid]
     visited = {parent_pid}
+
+    # Discover reparented orphan descendants if subreaper was active
+    if proc is not None:
+        subreaper_enabled = getattr(proc, "_ps028_subreaper_enabled", None)
+        if subreaper_enabled is None:
+            subreaper_enabled = is_subreaper_available()
+        baseline_children = set(getattr(proc, "_ps028_baseline_children", set()) or set())
+        leader_starttime = getattr(proc, "_ps028_leader_starttime", None)
+
+        if subreaper_enabled:
+            for c_pid in children_map.get(os.getpid(), []):
+                if c_pid != parent_pid and c_pid not in baseline_children:
+                    c_ident = all_identities.get(c_pid)
+                    if c_ident:
+                        c_start = c_ident.get("starttime")
+                        if leader_starttime is None:
+                            if c_pid not in visited:
+                                visited.add(c_pid)
+                                descendants.append(c_pid)
+                                queue.append(c_pid)
+                        else:
+                            try:
+                                if int(c_start) >= int(leader_starttime):
+                                    if c_pid not in visited:
+                                        visited.add(c_pid)
+                                        descendants.append(c_pid)
+                                        queue.append(c_pid)
+                            except (ValueError, TypeError):
+                                pass
+
     while queue:
         curr = queue.pop(0)
         for child in children_map.get(curr, []):
@@ -4449,6 +4725,22 @@ def find_descendant_pids(
         if gpid not in visited:
             visited.add(gpid)
             descendants.append(gpid)
+
+    # Subreaper fail-closed fallback:
+    # If subreaper is not active and parent already exited before cleanup was invoked,
+    # post-exit /proc scan alone cannot guarantee discovering detached children calling setsid().
+    if proc is not None:
+        s_enabled = getattr(proc, "_ps028_subreaper_enabled", None)
+        if s_enabled is None:
+            s_enabled = is_subreaper_available()
+        if not s_enabled:
+            poll_fn = getattr(proc, "poll", None)
+            parent_exited = (poll_fn() is not None) if callable(poll_fn) else (parent_pid not in all_identities)
+            if parent_exited:
+                scan_errors.append(
+                    "Subreaper containment unavailable; parent process already exited before cleanup, "
+                    "cannot guarantee complete discovery of detached descendants"
+                )
 
     descendant_identities = {pid: all_identities[pid] for pid in descendants if pid in all_identities}
 
@@ -4479,13 +4771,15 @@ def terminate_process_group(
     """
     Safely terminates an isolated process group and all remaining descendant processes.
     - Preserves and checks isolated process-group identity (start_new_session PGID).
+    - Verifies PGID identity and starttime against PID/PGID reuse before signaling.
     - Enumerates and retains descendant PIDs and starttime identities before signaling.
+    - Handles EPERM and unexpected signaling errors without swallowing them.
     - Sends SIGTERM to isolated process group and identified descendants outside that group.
     - Bounded wait for the complete relevant process set (not just Popen parent).
     - Escalates to SIGKILL against any surviving group members and surviving descendants.
     - Rechecks process existence and state after escalation.
-    - Reaps the Popen parent.
-    - Fails closed if descendant discovery was incomplete or any child remains alive.
+    - Reaps the Popen parent and reparented orphan processes.
+    - Fails closed if descendant discovery was incomplete, signaling errors occurred, or any child remains alive.
     Returns True only when the parent has been reaped and no relevant live descendants remain.
     """
     if proc is None:
@@ -4524,8 +4818,13 @@ def terminate_process_group(
             pass
         return True
 
+    # Ensure subreaper is set so any orphaned descendants reparent to us
+    if not hasattr(proc, "_ps028_subreaper_enabled"):
+        proc._ps028_subreaper_enabled = ensure_subreaper()
+
     current_pid = os.getpid()
     current_pgid = os.getpgrp()
+    signaling_errors: List[str] = []
 
     # 2. Preserve & resolve isolated process-group identity
     resolved_pgid = target_pgid
@@ -4556,11 +4855,60 @@ def terminate_process_group(
         and resolved_pgid != current_pgid
     )
 
+    pgid_exists = False
+    if valid_target_pgid:
+        if proc_dir is not None:
+            base_p = Path(proc_dir)
+            if (base_p / str(resolved_pgid)).is_dir():
+                pgid_exists = True
+            else:
+                try:
+                    for entry in os.listdir(base_p):
+                        if entry.isdigit():
+                            ident = get_process_identity(int(entry), proc_dir=base_p)
+                            if ident and ident.get("pgrp") == resolved_pgid:
+                                pgid_exists = True
+                                break
+                except Exception:
+                    pass
+        else:
+            try:
+                os.killpg(resolved_pgid, 0)
+                pgid_exists = True
+            except ProcessLookupError:
+                pgid_exists = False
+            except PermissionError as p_err:
+                pgid_exists = True
+                signaling_errors.append(f"Permission denied checking existence of PGID {resolved_pgid}: {p_err}")
+            except OSError as o_err:
+                if o_err.errno == errno.ESRCH:
+                    pgid_exists = False
+                elif o_err.errno == errno.EPERM:
+                    pgid_exists = True
+                    signaling_errors.append(f"Permission denied checking existence of PGID {resolved_pgid}: {o_err}")
+                else:
+                    pgid_exists = True
+                    signaling_errors.append(f"Unexpected error checking PGID {resolved_pgid}: {o_err}")
+
+    pgid_verified = False
+    if valid_target_pgid and pgid_exists:
+        leader_starttime = getattr(proc, "_ps028_leader_starttime", None)
+        pgid_verified, pgid_reason = is_valid_verified_pgid(
+            target_pgid=resolved_pgid,
+            leader_pid=pid,
+            leader_starttime=leader_starttime,
+            proc_dir=proc_dir
+        )
+        if not pgid_verified:
+            signaling_errors.append(f"Refusing to signal unverified or reused PGID {resolved_pgid}: {pgid_reason}")
+            valid_target_pgid = False
+
     # 4. Enumerate and retain descendant PID identities before termination
     scan_res = find_descendant_pids(
         pid,
         proc_dir=proc_dir,
-        target_pgid=resolved_pgid if valid_target_pgid else None
+        target_pgid=resolved_pgid if (valid_target_pgid and pgid_verified) else None,
+        proc=proc
     )
     retained_pids = set(scan_res.pids)
     retained_identities = dict(scan_res.identities)
@@ -4583,14 +4931,29 @@ def terminate_process_group(
             surviving.append(pid)
 
         # Check isolated process group
-        if valid_target_pgid:
-            try:
-                os.killpg(resolved_pgid, 0)
-                surviving.append(resolved_pgid)
-            except ProcessLookupError:
-                pass
-            except OSError:
-                pass
+        if valid_target_pgid and pgid_verified:
+            if proc_dir is not None:
+                base_p = Path(proc_dir)
+                if (base_p / str(resolved_pgid)).is_dir():
+                    surviving.append(resolved_pgid)
+            else:
+                try:
+                    os.killpg(resolved_pgid, 0)
+                    surviving.append(resolved_pgid)
+                except ProcessLookupError:
+                    pass
+                except PermissionError as p_err:
+                    surviving.append(resolved_pgid)
+                    signaling_errors.append(f"Permission denied checking liveness of PGID {resolved_pgid}: {p_err}")
+                except OSError as o_err:
+                    if o_err.errno == errno.ESRCH:
+                        pass
+                    elif o_err.errno == errno.EPERM:
+                        surviving.append(resolved_pgid)
+                        signaling_errors.append(f"Permission denied checking liveness of PGID {resolved_pgid}: {o_err}")
+                    else:
+                        surviving.append(resolved_pgid)
+                        signaling_errors.append(f"Unexpected error checking liveness of PGID {resolved_pgid}: {o_err}")
 
         # Check retained descendants
         for dpid in retained_pids:
@@ -4602,16 +4965,34 @@ def terminate_process_group(
         return (len(surviving) > 0, surviving)
 
     # 5. Send SIGTERM to isolated group and identified descendants outside that group
-    if valid_target_pgid:
+    if valid_target_pgid and pgid_verified and pgid_exists:
         try:
             os.killpg(resolved_pgid, signal.SIGTERM)
-        except (ProcessLookupError, OSError):
+        except ProcessLookupError:
             pass
+        except PermissionError as p_err:
+            signaling_errors.append(f"Permission denied sending SIGTERM to PGID {resolved_pgid}: {p_err}")
+        except OSError as o_err:
+            if o_err.errno == errno.ESRCH:
+                pass
+            elif o_err.errno == errno.EPERM:
+                signaling_errors.append(f"Permission denied sending SIGTERM to PGID {resolved_pgid}: {o_err}")
+            else:
+                signaling_errors.append(f"Unexpected error sending SIGTERM to PGID {resolved_pgid}: {o_err}")
     elif pid > 1 and pid != current_pid and pid != current_pgid:
         try:
             os.kill(pid, signal.SIGTERM)
-        except (ProcessLookupError, OSError):
+        except ProcessLookupError:
             pass
+        except PermissionError as p_err:
+            signaling_errors.append(f"Permission denied sending SIGTERM to PID {pid}: {p_err}")
+        except OSError as o_err:
+            if o_err.errno == errno.ESRCH:
+                pass
+            elif o_err.errno == errno.EPERM:
+                signaling_errors.append(f"Permission denied sending SIGTERM to PID {pid}: {o_err}")
+            else:
+                signaling_errors.append(f"Unexpected error sending SIGTERM to PID {pid}: {o_err}")
 
     for dpid in retained_pids:
         if dpid > 1 and dpid != current_pid and dpid != current_pgid:
@@ -4619,8 +5000,17 @@ def terminate_process_group(
             if is_same_alive_process(dpid, orig_ident, proc_dir=proc_dir):
                 try:
                     os.kill(dpid, signal.SIGTERM)
-                except (ProcessLookupError, OSError):
+                except ProcessLookupError:
                     pass
+                except PermissionError as p_err:
+                    signaling_errors.append(f"Permission denied sending SIGTERM to PID {dpid}: {p_err}")
+                except OSError as o_err:
+                    if o_err.errno == errno.ESRCH:
+                        pass
+                    elif o_err.errno == errno.EPERM:
+                        signaling_errors.append(f"Permission denied sending SIGTERM to PID {dpid}: {o_err}")
+                    else:
+                        signaling_errors.append(f"Unexpected error sending SIGTERM to PID {dpid}: {o_err}")
 
     # 6. Wait for complete relevant process set
     t_end = time.time() + timeout
@@ -4633,22 +5023,41 @@ def terminate_process_group(
     # 7. Escalate to SIGKILL if still alive
     any_alive, surviving = check_any_alive()
     if any_alive and escalate_to_kill:
-        if valid_target_pgid:
+        if valid_target_pgid and pgid_verified:
             try:
                 os.killpg(resolved_pgid, signal.SIGKILL)
-            except (ProcessLookupError, OSError):
+            except ProcessLookupError:
                 pass
+            except PermissionError as p_err:
+                signaling_errors.append(f"Permission denied sending SIGKILL to PGID {resolved_pgid}: {p_err}")
+            except OSError as o_err:
+                if o_err.errno == errno.ESRCH:
+                    pass
+                elif o_err.errno == errno.EPERM:
+                    signaling_errors.append(f"Permission denied sending SIGKILL to PGID {resolved_pgid}: {o_err}")
+                else:
+                    signaling_errors.append(f"Unexpected error sending SIGKILL to PGID {resolved_pgid}: {o_err}")
         elif pid > 1 and pid != current_pid and pid != current_pgid:
             try:
                 os.kill(pid, signal.SIGKILL)
-            except (ProcessLookupError, OSError):
+            except ProcessLookupError:
                 pass
+            except PermissionError as p_err:
+                signaling_errors.append(f"Permission denied sending SIGKILL to PID {pid}: {p_err}")
+            except OSError as o_err:
+                if o_err.errno == errno.ESRCH:
+                    pass
+                elif o_err.errno == errno.EPERM:
+                    signaling_errors.append(f"Permission denied sending SIGKILL to PID {pid}: {o_err}")
+                else:
+                    signaling_errors.append(f"Unexpected error sending SIGKILL to PID {pid}: {o_err}")
 
         # Rescan for any new children spawned during grace interval
         rescan = find_descendant_pids(
             pid,
             proc_dir=proc_dir,
-            target_pgid=resolved_pgid if valid_target_pgid else None
+            target_pgid=resolved_pgid if (valid_target_pgid and pgid_verified) else None,
+            proc=proc
         )
         for dpid in rescan.pids:
             if dpid not in retained_pids:
@@ -4665,8 +5074,17 @@ def terminate_process_group(
                 if is_same_alive_process(dpid, orig_ident, proc_dir=proc_dir):
                     try:
                         os.kill(dpid, signal.SIGKILL)
-                    except (ProcessLookupError, OSError):
+                    except ProcessLookupError:
                         pass
+                    except PermissionError as p_err:
+                        signaling_errors.append(f"Permission denied sending SIGKILL to PID {dpid}: {p_err}")
+                    except OSError as o_err:
+                        if o_err.errno == errno.ESRCH:
+                            pass
+                        elif o_err.errno == errno.EPERM:
+                            signaling_errors.append(f"Permission denied sending SIGKILL to PID {dpid}: {o_err}")
+                        else:
+                            signaling_errors.append(f"Unexpected error sending SIGKILL to PID {dpid}: {o_err}")
 
         # Bounded wait for SIGKILL effect
         t_kill_end = time.time() + 0.5
@@ -4676,7 +5094,7 @@ def terminate_process_group(
                 break
             time.sleep(0.05)
 
-    # 9. Reap the Popen parent
+    # 9. Reap the Popen parent and reparented orphans
     if callable(wait_fn):
         try:
             wait_fn(timeout=0.5)
@@ -4686,6 +5104,12 @@ def terminate_process_group(
         os.waitpid(pid, os.WNOHANG)
     except (ChildProcessError, OSError):
         pass
+
+    for dpid in retained_pids:
+        try:
+            os.waitpid(dpid, os.WNOHANG)
+        except (ChildProcessError, OSError):
+            pass
 
     # Close any open stdout/stderr streams to prevent unclosed pipe warnings
     for stream_name in ("stdout", "stderr"):
@@ -4699,6 +5123,12 @@ def terminate_process_group(
     # 8 & 10. Recheck process existence and state after escalation
     any_alive, surviving = check_any_alive()
     parent_reaped = (poll_fn() is not None) if callable(poll_fn) else not _is_pid_alive(pid, proc_dir=proc_dir)
+
+    if signaling_errors:
+        err_msg = "Process termination encountered signaling/permission errors: " + "; ".join(signaling_errors[:5])
+        if coordinator is not None and hasattr(coordinator, "record_termination_error"):
+            coordinator.record_termination_error(err_msg)
+        return False
 
     if any_alive or not parent_reaped:
         err_msg = f"Failed to terminate and reap process {pid} (alive={any_alive}, surviving={surviving}, parent_reaped={parent_reaped})"
@@ -4715,6 +5145,31 @@ def terminate_process_group(
     return True
 
 
+def create_contained_subprocess(
+    cmd: List[str],
+    *popen_args,
+    start_new_session: bool = True,
+    **popen_kwargs
+) -> subprocess.Popen:
+    """
+    Spawns a subprocess with subreaper tracking, session isolation, and identity capture.
+    """
+    subreaper_active = ensure_subreaper()
+    baseline_children = set(get_direct_child_pids(os.getpid()))
+    if start_new_session:
+        popen_kwargs["start_new_session"] = True
+    proc = subprocess.Popen(cmd, *popen_args, **popen_kwargs)
+    proc._ps028_subreaper_enabled = subreaper_active
+    proc._ps028_baseline_children = baseline_children
+    if start_new_session:
+        proc._ps028_pgid = proc.pid
+        proc._ps028_session_leader = True
+    l_ident = get_process_identity(proc.pid)
+    proc._ps028_leader_starttime = l_ident.get("starttime") if (l_ident and l_ident.get("valid", True)) else None
+    proc._ps028_leader_ident = l_ident
+    return proc
+
+
 def execute_browser_subprocess(
     cmd: List[str],
     env: Optional[Dict[str, str]] = None,
@@ -4723,10 +5178,12 @@ def execute_browser_subprocess(
     start_new_session: bool = True
 ) -> Tuple[int, str, str, bool]:
     """
-    Executes a browser subprocess with controlled lifecycle, process-group isolation,
-    and InterruptionCoordinator tracking.
+    Executes a browser subprocess with controlled lifecycle, subreaper containment,
+    process-group isolation, and InterruptionCoordinator tracking.
     Returns: (exit_code, stdout, stderr, timed_out)
     """
+    subreaper_active = ensure_subreaper()
+    baseline_children = set(get_direct_child_pids(os.getpid()))
     proc = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
@@ -4735,9 +5192,14 @@ def execute_browser_subprocess(
         env=env,
         start_new_session=start_new_session
     )
+    proc._ps028_subreaper_enabled = subreaper_active
+    proc._ps028_baseline_children = baseline_children
     if start_new_session:
         proc._ps028_pgid = proc.pid
         proc._ps028_session_leader = True
+    l_ident = get_process_identity(proc.pid)
+    proc._ps028_leader_starttime = l_ident.get("starttime") if (l_ident and l_ident.get("valid", True)) else None
+    proc._ps028_leader_ident = l_ident
 
     if coordinator is not None and hasattr(coordinator, "register_process"):
         coordinator.register_process(proc)
@@ -4772,7 +5234,9 @@ def execute_browser_subprocess(
             coordinator=coordinator
         )
         if not reaped and coordinator is not None and hasattr(coordinator, "record_termination_error"):
-            coordinator.record_termination_error(f"Failed to terminate and reap browser process {getattr(proc, 'pid', 'unknown')}")
+            existing = coordinator.get_termination_errors()
+            if not existing:
+                coordinator.record_termination_error(f"Failed to terminate and reap browser process {getattr(proc, 'pid', 'unknown')}")
         if coordinator is not None and hasattr(coordinator, "unregister_process"):
             coordinator.unregister_process(proc)
 

@@ -1813,6 +1813,81 @@ class TestInterruptionLifecycleAndSignalSafety(unittest.TestCase):
             coord.handle_signal(signal.SIGINT, None)
         self.assertEqual(ctx.exception.code, 130)
 
+    @patch("lab.impair.self_test_baseline", return_value=True)
+    def test_incomplete_descendant_discovery_end_to_end_cleanup_failure(self, mock_base):
+        """End-to-end CampaignRunner test forcing incomplete descendant discovery verifies fail-stop and durable error persistence."""
+        camp_dir = self.td_path / "camp_incomplete_desc"
+        camp_dir.mkdir(parents=True, exist_ok=True)
+
+        runner = run_campaign.CampaignRunner(
+            scenarios=["S0", "S1"],
+            browsers=["chrome"],
+            repetitions=1,
+            output_dir=camp_dir,
+            is_simulation=True,
+            exit_on_interruption=False
+        )
+
+        def mock_trial_with_incomplete_discovery(**kwargs):
+            runner.coordinator.record_termination_error(
+                "Descendant discovery incomplete (Permission denied reading /proc/999/stat); cannot verify detached descendants for PID 999"
+            )
+            return {
+                "status": "COMPLETED",
+                "validity": "VALID_LIVE",
+                "cleanup_status": {
+                    "scenario_restored": True,
+                    "baseline_verified": True,
+                    "profile_cleaned": True,
+                    "lock_released": True,
+                    "errors": []
+                },
+                "capture_metadata": {"pcap_valid": True, "packet_count": 10},
+                "network_observations": {"classification": "HAPPY_EYEBALLS_V6_FALLBACK"},
+                "evidence_paths": {},
+                "timestamps": {
+                    "start_time": "2026-11-18T10:00:00Z",
+                    "end_time": "2026-11-18T10:00:01Z",
+                    "duration_ms": 1000.0
+                }
+            }
+
+        with patch("lab.run_trial.run_trial", side_effect=mock_trial_with_incomplete_discovery):
+            with self.assertRaises(run_campaign.CampaignHaltedError):
+                runner.run()
+
+        mpath = camp_dir / run_campaign.MANIFEST_FILENAME
+        self.assertTrue(mpath.is_file())
+        mdata = json.loads(mpath.read_text(encoding="utf-8"))
+
+        self.assertEqual(mdata["status"], "HALTED_ON_FAILURE")
+        self.assertIn("FAIL-STOP", mdata.get("summary", {}).get("halt_reason", ""))
+
+        self.assertEqual(len(mdata["matrix_slots"]), 2)
+        slot0 = mdata["matrix_slots"][0]
+        slot1 = mdata["matrix_slots"][1]
+
+        self.assertEqual(len(slot0["attempts"]), 1)
+        att0 = slot0["attempts"][0]
+
+        self.assertEqual(att0["status"], "FAILED")
+        self.assertEqual(att0["validity"], "CLEANUP_FAILURE")
+
+        c_errors = att0.get("cleanup_status", {}).get("errors", [])
+        self.assertTrue(len(c_errors) > 0)
+        self.assertIn("Descendant discovery incomplete", c_errors[0])
+
+        rec_path = camp_dir / "trials" / att0["trial_id"] / "failed_attempt_record.json"
+        self.assertTrue(rec_path.is_file())
+        rec_data = json.loads(rec_path.read_text(encoding="utf-8"))
+        self.assertEqual(rec_data["trial_id"], att0["trial_id"])
+        self.assertEqual(rec_data["validity"], "CLEANUP_FAILURE")
+        rec_errors = rec_data.get("cleanup_status", {}).get("errors", [])
+        self.assertTrue(len(rec_errors) > 0)
+        self.assertIn("Descendant discovery incomplete", rec_errors[0])
+
+        self.assertEqual(len(slot1["attempts"]), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -7824,6 +7824,280 @@ except Exception:
             self.assertIn("--new-instance", ff_cmd_str)
             self.assertNotIn("--dump-dom", ff_cmd_str)
 
+    def test_22_detached_descendant_surviving_parent_exit_reaped_closed_pipes(self):
+        """Detached descendant calling setsid() whose parent exits before cleanup is terminated and reaped (closed pipes)."""
+        child_pid_file = self.td_path / "detached_closed.pid"
+        child_starttime_file = self.td_path / "detached_closed.start"
+        child_ready_file = self.td_path / "detached_closed.ready"
+        parent_ready_file = self.td_path / "parent_closed.ready"
+
+        child_script = f"""
+import os, time, signal, pathlib, sys
+os.setsid()
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+cpid = os.getpid()
+pathlib.Path({repr(str(child_pid_file))}).write_text(str(cpid))
+try:
+    with open('/proc/self/stat') as f:
+        fields = f.read().split(')')[1].split()
+        pathlib.Path({repr(str(child_starttime_file))}).write_text(fields[19])
+except Exception:
+    pathlib.Path({repr(str(child_starttime_file))}).write_text('unknown')
+pathlib.Path({repr(str(child_ready_file))}).write_text('ready')
+time.sleep(60)
+"""
+        parent_script = f"""
+import subprocess, sys, time, pathlib
+child = subprocess.Popen([sys.executable, "-c", {repr(child_script)}])
+pathlib.Path({repr(str(parent_ready_file))}).write_text('parent_ready')
+sys.exit(0)
+"""
+        proc = run_trial.create_contained_subprocess(
+            [sys.executable, "-c", parent_script],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True
+        )
+
+        t0 = time.time()
+        while (not child_ready_file.exists() or not parent_ready_file.exists()) and time.time() - t0 < 5.0:
+            time.sleep(0.05)
+        self.assertTrue(child_ready_file.exists())
+
+        child_pid = int(child_pid_file.read_text().strip())
+        self.assertTrue(run_trial._is_pid_alive(child_pid))
+
+        # 4. Wait for parent to exit before cleanup helper is invoked
+        proc.wait(timeout=2.0)
+        self.assertIsNotNone(proc.poll())
+        self.assertTrue(run_trial._is_pid_alive(child_pid))
+
+        # 7. Verify cleanup cannot return success when the child is still alive
+        reaped_sigterm_only = run_trial.terminate_process_group(proc, timeout=0.2, escalate_to_kill=False)
+        self.assertFalse(reaped_sigterm_only)
+        self.assertTrue(run_trial._is_pid_alive(child_pid))
+
+        # 5 & 6. Invoke cleanup with escalation and verify child is terminated and reaped
+        reaped = run_trial.terminate_process_group(proc, timeout=1.0, escalate_to_kill=True)
+        self.assertTrue(reaped)
+        self.assertFalse(run_trial._is_pid_alive(child_pid))
+
+    def test_23_detached_descendant_surviving_parent_exit_reaped_inherited_pipes(self):
+        """Detached descendant calling setsid() whose parent exits before cleanup with inherited pipes."""
+        child_pid_file = self.td_path / "detached_inh.pid"
+        child_ready_file = self.td_path / "detached_inh.ready"
+        parent_ready_file = self.td_path / "parent_inh.ready"
+
+        child_script = f"""
+import os, time, signal, pathlib, sys
+os.setsid()
+pathlib.Path({repr(str(child_pid_file))}).write_text(str(os.getpid()))
+pathlib.Path({repr(str(child_ready_file))}).write_text('ready')
+time.sleep(60)
+"""
+        parent_script = f"""
+import subprocess, sys, time, pathlib
+child = subprocess.Popen([sys.executable, "-c", {repr(child_script)}])
+pathlib.Path({repr(str(parent_ready_file))}).write_text('parent_ready')
+sys.exit(0)
+"""
+        proc = run_trial.create_contained_subprocess(
+            [sys.executable, "-c", parent_script],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True
+        )
+
+        t0 = time.time()
+        while (not child_ready_file.exists() or not parent_ready_file.exists()) and time.time() - t0 < 5.0:
+            time.sleep(0.05)
+        self.assertTrue(child_ready_file.exists())
+
+        child_pid = int(child_pid_file.read_text().strip())
+        self.assertTrue(run_trial._is_pid_alive(child_pid))
+
+        # Parent exits before cleanup
+        proc.wait(timeout=2.0)
+        self.assertIsNotNone(proc.poll())
+        self.assertTrue(run_trial._is_pid_alive(child_pid))
+
+        # Cleanup terminates and reaps detached child
+        reaped = run_trial.terminate_process_group(proc, timeout=1.0, escalate_to_kill=True)
+        self.assertTrue(reaped)
+        self.assertFalse(run_trial._is_pid_alive(child_pid))
+
+    def test_24_eperm_handling_in_process_group_liveness_and_signaling(self):
+        """EPERM during group-liveness, SIGTERM, and SIGKILL fails closed and reaches InterruptionCoordinator."""
+        import lab.run_campaign as run_campaign
+        coord = run_campaign.InterruptionCoordinator()
+
+        mock_proc = MagicMock()
+        mock_proc.pid = 54321
+        mock_proc.poll.return_value = 0
+        mock_proc._ps028_pgid = 54321
+        mock_proc._ps028_leader_starttime = "12345"
+
+        # Case 1: EPERM during liveness check killpg(pgid, 0)
+        with patch("lab.run_trial.is_valid_verified_pgid", return_value=(True, None)), \
+             patch("lab.run_trial.find_descendant_pids", return_value=run_trial.DescendantScanResult(pids=[], is_complete=True)), \
+             patch("os.killpg", side_effect=PermissionError(errno.EPERM, "Operation not permitted")):
+            coord.clear_termination_errors()
+            reaped = run_trial.terminate_process_group(mock_proc, timeout=0.1, coordinator=coord)
+            self.assertFalse(reaped)
+            errs = coord.get_termination_errors()
+            self.assertTrue(len(errs) > 0)
+            self.assertIn("Permission denied", errs[0])
+
+        # Case 2: EPERM during SIGTERM
+        def _mock_killpg_term(pgid, sig):
+            if sig == 0:
+                return None
+            if sig == signal.SIGTERM:
+                raise PermissionError(errno.EPERM, "Permission denied sending SIGTERM")
+            return None
+
+        with patch("lab.run_trial.is_valid_verified_pgid", return_value=(True, None)), \
+             patch("lab.run_trial.find_descendant_pids", return_value=run_trial.DescendantScanResult(pids=[], is_complete=True)), \
+             patch("os.killpg", side_effect=_mock_killpg_term):
+            coord.clear_termination_errors()
+            reaped = run_trial.terminate_process_group(mock_proc, timeout=0.1, escalate_to_kill=False, coordinator=coord)
+            self.assertFalse(reaped)
+            errs = coord.get_termination_errors()
+            self.assertTrue(len(errs) > 0)
+            self.assertIn("Permission denied sending SIGTERM", errs[0])
+
+        # Case 3: EPERM during SIGKILL
+        def _mock_killpg_kill(pgid, sig):
+            if sig == 0:
+                return None
+            if sig == signal.SIGTERM:
+                return None
+            if sig == signal.SIGKILL:
+                raise PermissionError(errno.EPERM, "Permission denied sending SIGKILL")
+            return None
+
+        with patch("lab.run_trial.is_valid_verified_pgid", return_value=(True, None)), \
+             patch("lab.run_trial.find_descendant_pids", return_value=run_trial.DescendantScanResult(pids=[], is_complete=True)), \
+             patch("os.killpg", side_effect=_mock_killpg_kill):
+            coord.clear_termination_errors()
+            reaped = run_trial.terminate_process_group(mock_proc, timeout=0.1, escalate_to_kill=True, coordinator=coord)
+            self.assertFalse(reaped)
+            errs = coord.get_termination_errors()
+            self.assertTrue(len(errs) > 0)
+            self.assertIn("Permission denied sending SIGKILL", errs[0])
+
+    def test_25_proc_stat_malformed_truncated_and_permission_fail_closed(self):
+        """Malformed stat content, truncated fields, missing starttime, and permission errors fail closed."""
+        fake_proc = self.td_path / "fake_proc"
+        fake_proc.mkdir(parents=True, exist_ok=True)
+
+        # 1. Malformed content (no closing parenthesis)
+        p1 = fake_proc / "101"
+        p1.mkdir()
+        (p1 / "stat").write_text("101 malformed_no_paren 1 101 101")
+        ident1 = run_trial.get_process_identity(101, proc_dir=fake_proc)
+        self.assertIsNotNone(ident1)
+        self.assertFalse(ident1["valid"])
+        self.assertIn("missing closing parenthesis", ident1["error"])
+
+        # 2. Truncated fields (< 20 fields after comm)
+        p2 = fake_proc / "102"
+        p2.mkdir()
+        (p2 / "stat").write_text("102 (test) S 1 102 102 0 0")
+        ident2 = run_trial.get_process_identity(102, proc_dir=fake_proc)
+        self.assertIsNotNone(ident2)
+        self.assertFalse(ident2["valid"])
+        self.assertIn("Truncated stat record", ident2["error"])
+
+        # 3. Missing / invalid starttime
+        p3 = fake_proc / "103"
+        p3.mkdir()
+        fields20 = ["S", "1", "103", "103"] + ["0"] * 15 + ["NOT_NUMERIC_STARTTIME"]
+        (p3 / "stat").write_text(f"103 (test) {' '.join(fields20)}")
+        ident3 = run_trial.get_process_identity(103, proc_dir=fake_proc)
+        self.assertIsNotNone(ident3)
+        self.assertFalse(ident3["valid"])
+        self.assertIn("Invalid starttime", ident3["error"])
+
+        # 4. Permission error reading stat
+        p4 = fake_proc / "104"
+        p4.mkdir()
+        stat4 = p4 / "stat"
+        stat4.write_text("104 (test) S 1 104 104")
+        with patch("pathlib.Path.read_text", side_effect=PermissionError(errno.EPERM, "Permission denied")):
+            ident4 = run_trial.get_process_identity(104, proc_dir=fake_proc)
+            self.assertIsNotNone(ident4)
+            self.assertFalse(ident4["valid"])
+            self.assertIn("Permission or OS error", ident4["error"])
+
+        # 5. Process disappearing during enumeration (normal exit race)
+        ident5 = run_trial.get_process_identity(105, proc_dir=fake_proc)
+        self.assertIsNone(ident5)
+
+        # 6. Unreadable or indeterminate liveness in is_same_alive_process returns True
+        self.assertTrue(run_trial.is_same_alive_process(101, None, proc_dir=fake_proc))
+        self.assertTrue(run_trial.is_same_alive_process(102, None, proc_dir=fake_proc))
+        self.assertTrue(run_trial.is_same_alive_process(103, None, proc_dir=fake_proc))
+
+        # find_descendant_pids fails closed when errors exist
+        scan = run_trial.find_descendant_pids(1, proc_dir=fake_proc)
+        self.assertFalse(scan.is_complete)
+        self.assertIsNotNone(scan.scan_error)
+
+    def test_26_pgid_reuse_protection_never_signals_unrelated_group(self):
+        """PGID/PID reuse protection refuses to signal unrelated process groups and fails closed."""
+        import lab.run_campaign as run_campaign
+        coord = run_campaign.InterruptionCoordinator()
+
+        fake_proc = self.td_path / "reuse_proc"
+        fake_proc.mkdir(parents=True, exist_ok=True)
+
+        # Leader 201 was launched with starttime 1000; reused leader 201 now has starttime 2000
+        p_leader = fake_proc / "201"
+        p_leader.mkdir()
+        fields_leader = ["S", "1", "201", "201"] + ["0"] * 15 + ["2000"]
+        (p_leader / "stat").write_text(f"201 (reused) {' '.join(fields_leader)}")
+
+        verified, reason = run_trial.is_valid_verified_pgid(
+            target_pgid=201,
+            leader_pid=201,
+            leader_starttime="1000",
+            proc_dir=fake_proc
+        )
+        self.assertFalse(verified)
+        self.assertIn("reused: starttime mismatch", reason)
+
+        # Leader died, but group member 202 started BEFORE leader (starttime 500 < 1000)
+        p_member = fake_proc / "202"
+        p_member.mkdir()
+        fields_member = ["S", "1", "202", "202"] + ["0"] * 15 + ["500"]
+        (p_member / "stat").write_text(f"202 (old) {' '.join(fields_member)}")
+
+        verified2, reason2 = run_trial.is_valid_verified_pgid(
+            target_pgid=202,
+            leader_pid=999,
+            leader_starttime="1000",
+            proc_dir=fake_proc
+        )
+        self.assertFalse(verified2)
+        self.assertIn("started before leader", reason2)
+
+        # terminate_process_group refuses to signal reused PGID and fails closed
+        mock_proc = MagicMock()
+        mock_proc.pid = 201
+        mock_proc._ps028_pgid = 201
+        mock_proc._ps028_leader_starttime = "1000"
+        mock_proc.poll.return_value = 0
+
+        with patch("os.killpg") as mock_killpg:
+            reaped = run_trial.terminate_process_group(mock_proc, coordinator=coord, proc_dir=fake_proc)
+            self.assertFalse(reaped)
+            mock_killpg.assert_not_called()
+            errs = coord.get_termination_errors()
+            self.assertTrue(len(errs) > 0)
+            self.assertIn("Refusing to signal unverified or reused PGID", errs[0])
+
 
 if __name__ == "__main__":
     unittest.main()

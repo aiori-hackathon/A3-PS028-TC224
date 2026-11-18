@@ -1308,6 +1308,11 @@ class CampaignRunner:
                 baseline_verified = False
                 cleanup_errors.append(f"Post-trial self_test_baseline exception: {b_err}")
 
+            # Persist updated cleanup and termination errors in cleanup_status
+            cleanup_status["scenario_restored"] = scenario_restored
+            cleanup_status["baseline_verified"] = baseline_verified
+            cleanup_status["errors"] = list(cleanup_errors)
+
             # Interruption payload if signal was caught
             interruption_info = None
             if self.coordinator.interrupted:
