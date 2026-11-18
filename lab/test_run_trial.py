@@ -7181,12 +7181,11 @@ class TestBrowserProcessLifecycleExecution(unittest.TestCase):
         self.assertIsNotNone(target_proc.poll(), "Child process was not reaped after SIGTERM")
         self.assertFalse(run_trial._is_pid_alive(target_proc.pid))
 
-    def test_04_descendants_killed_without_orphans(self):
-        """4. Process spawning grandchild processes has all descendants killed without leaving orphans."""
-        grandchild_pid_file = self.td_path / "grandchild.pid"
-        parent_ready_file = self.td_path / "parent.ready"
+    def test_04_parent_and_grandchild_both_exit_normally_after_sigterm(self):
+        """1. Parent and grandchild both exit normally after SIGTERM."""
+        grandchild_pid_file = self.td_path / "gc_normal.pid"
+        parent_ready_file = self.td_path / "parent_normal.ready"
 
-        # Parent process spawns a grandchild process and sleeps
         parent_script = f"""
 import subprocess, sys, time, pathlib
 gc = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])
@@ -7194,14 +7193,15 @@ pathlib.Path({repr(str(grandchild_pid_file))}).write_text(str(gc.pid))
 pathlib.Path({repr(str(parent_ready_file))}).write_text('ready')
 time.sleep(60)
 """
-        cmd = [sys.executable, "-c", parent_script]
         proc = subprocess.Popen(
-            cmd,
+            [sys.executable, "-c", parent_script],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
             start_new_session=True
         )
+        proc._ps028_pgid = proc.pid
+        proc._ps028_session_leader = True
 
         t0 = time.time()
         while not parent_ready_file.exists() and time.time() - t0 < 5.0:
@@ -7211,24 +7211,323 @@ time.sleep(60)
         gc_pid = int(grandchild_pid_file.read_text().strip())
         parent_pid = proc.pid
 
-        # Both parent and grandchild should be running
         self.assertTrue(run_trial._is_pid_alive(parent_pid))
         self.assertTrue(run_trial._is_pid_alive(gc_pid))
 
-        # Terminate the process group
         reaped = run_trial.terminate_process_group(proc, timeout=1.5, escalate_to_kill=True)
         self.assertTrue(reaped)
-        if proc.stdout:
-            proc.stdout.close()
-        if proc.stderr:
-            proc.stderr.close()
+        self.assertFalse(run_trial._is_pid_alive(parent_pid))
+        self.assertFalse(run_trial._is_pid_alive(gc_pid))
 
-        # Verify BOTH parent and grandchild are dead
-        self.assertFalse(run_trial._is_pid_alive(parent_pid), "Parent PID still alive!")
-        self.assertFalse(run_trial._is_pid_alive(gc_pid), "Grandchild orphan PID still alive!")
+    def test_05_grandchild_ignores_sigterm_while_parent_exits(self):
+        """2. Grandchild ignores SIGTERM while parent exits."""
+        grandchild_pid_file = self.td_path / "gc_ign.pid"
+        grandchild_ready_file = self.td_path / "gc_ign.ready"
+        parent_ready_file = self.td_path / "parent_ign.ready"
 
-    def test_05_timeout_group_termination(self):
-        """5. Subprocess timeout terminates process group, reaps parent, and returns exit code 124."""
+        parent_script = f"""
+import subprocess, sys, time, pathlib, signal
+
+gc_script = '''
+import time, signal, pathlib, os
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+pathlib.Path({repr(str(grandchild_pid_file))}).write_text(str(os.getpid()))
+pathlib.Path({repr(str(grandchild_ready_file))}).write_text('ready')
+time.sleep(60)
+'''
+gc = subprocess.Popen([sys.executable, '-c', gc_script])
+pathlib.Path({repr(str(parent_ready_file))}).write_text('ready')
+
+def on_term(sig, frame):
+    sys.exit(0)
+signal.signal(signal.SIGTERM, on_term)
+time.sleep(60)
+"""
+        proc = subprocess.Popen(
+            [sys.executable, "-c", parent_script],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True
+        )
+        proc._ps028_pgid = proc.pid
+        proc._ps028_session_leader = True
+
+        t0 = time.time()
+        while (not parent_ready_file.exists() or not grandchild_ready_file.exists()) and time.time() - t0 < 5.0:
+            time.sleep(0.05)
+        self.assertTrue(parent_ready_file.exists())
+        self.assertTrue(grandchild_ready_file.exists())
+
+        gc_pid = int(grandchild_pid_file.read_text().strip())
+        parent_pid = proc.pid
+
+        self.assertTrue(run_trial._is_pid_alive(parent_pid))
+        self.assertTrue(run_trial._is_pid_alive(gc_pid))
+
+        reaped = run_trial.terminate_process_group(proc, timeout=0.3, escalate_to_kill=True)
+        self.assertTrue(reaped)
+        self.assertFalse(run_trial._is_pid_alive(parent_pid))
+        self.assertFalse(run_trial._is_pid_alive(gc_pid))
+
+    def test_06_detached_descendant_setsid_ignores_sigterm(self):
+        """3. Detached descendant calls setsid() and ignores SIGTERM."""
+        child_pid_file = self.td_path / "detached_child.pid"
+        child_ready_file = self.td_path / "detached_child.ready"
+        parent_ready_file = self.td_path / "parent_detached.ready"
+
+        parent_script = f"""
+import subprocess, sys, time, pathlib, os, signal
+
+child_script = '''
+import os, time, signal, pathlib, sys
+os.setsid()
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+pathlib.Path({repr(str(child_pid_file))}).write_text(str(os.getpid()))
+pathlib.Path({repr(str(child_ready_file))}).write_text("ready")
+time.sleep(60)
+'''
+
+child = subprocess.Popen([sys.executable, "-c", child_script])
+pathlib.Path({repr(str(parent_ready_file))}).write_text("ready")
+time.sleep(60)
+"""
+        proc = subprocess.Popen(
+            [sys.executable, "-c", parent_script],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True
+        )
+        proc._ps028_pgid = proc.pid
+        proc._ps028_session_leader = True
+
+        t0 = time.time()
+        while (not parent_ready_file.exists() or not child_ready_file.exists()) and time.time() - t0 < 5.0:
+            time.sleep(0.05)
+        self.assertTrue(parent_ready_file.exists())
+        self.assertTrue(child_ready_file.exists())
+
+        child_pid = int(child_pid_file.read_text().strip())
+        parent_pid = proc.pid
+
+        self.assertTrue(run_trial._is_pid_alive(parent_pid))
+        self.assertTrue(run_trial._is_pid_alive(child_pid))
+
+        reaped = run_trial.terminate_process_group(proc, timeout=0.4, escalate_to_kill=True)
+        self.assertTrue(reaped)
+        self.assertFalse(run_trial._is_pid_alive(parent_pid))
+        self.assertFalse(run_trial._is_pid_alive(child_pid))
+
+    def test_07_parent_exits_before_termination_child_remains(self):
+        """4. Parent exits before termination helper is invoked, but its child remains alive in the group."""
+        child_pid_file = self.td_path / "orphan_child.pid"
+        child_ready_file = self.td_path / "orphan_child.ready"
+
+        parent_script = f"""
+import subprocess, sys, time, pathlib, os
+
+child_script = '''
+import os, time, pathlib
+pathlib.Path({repr(str(child_pid_file))}).write_text(str(os.getpid()))
+pathlib.Path({repr(str(child_ready_file))}).write_text("ready")
+time.sleep(60)
+'''
+
+child = subprocess.Popen([sys.executable, "-c", child_script])
+sys.exit(0)
+"""
+        proc = subprocess.Popen(
+            [sys.executable, "-c", parent_script],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True
+        )
+        proc._ps028_pgid = proc.pid
+        proc._ps028_session_leader = True
+
+        t0 = time.time()
+        while not child_ready_file.exists() and time.time() - t0 < 5.0:
+            time.sleep(0.05)
+        self.assertTrue(child_ready_file.exists())
+
+        child_pid = int(child_pid_file.read_text().strip())
+
+        # Wait until parent process has exited
+        proc.wait(timeout=2.0)
+        self.assertIsNotNone(proc.poll())
+        self.assertTrue(run_trial._is_pid_alive(child_pid))
+
+        reaped = run_trial.terminate_process_group(proc, timeout=1.0, escalate_to_kill=True)
+        self.assertTrue(reaped)
+        self.assertFalse(run_trial._is_pid_alive(child_pid))
+
+    def test_08_sigkill_escalation_terminates_surviving_descendants(self):
+        """5. SIGKILL escalation terminates surviving descendants."""
+        child_pid_file = self.td_path / "esc_child.pid"
+        child_ready_file = self.td_path / "esc_child.ready"
+
+        child_script = f"""
+import time, signal, pathlib, os
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+pathlib.Path({repr(str(child_pid_file))}).write_text(str(os.getpid()))
+pathlib.Path({repr(str(child_ready_file))}).write_text('ready')
+time.sleep(60)
+"""
+        proc = subprocess.Popen(
+            [sys.executable, "-c", child_script],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True
+        )
+
+        t0 = time.time()
+        while not child_ready_file.exists() and time.time() - t0 < 5.0:
+            time.sleep(0.05)
+        self.assertTrue(child_ready_file.exists())
+
+        child_pid = int(child_pid_file.read_text().strip())
+        self.assertTrue(run_trial._is_pid_alive(child_pid))
+
+        # escalate_to_kill=False returns False because child ignores SIGTERM
+        reaped_no_esc = run_trial.terminate_process_group(proc, timeout=0.2, escalate_to_kill=False)
+        self.assertFalse(reaped_no_esc)
+        self.assertTrue(run_trial._is_pid_alive(child_pid))
+
+        # escalate_to_kill=True returns True by delivering SIGKILL
+        reaped_esc = run_trial.terminate_process_group(proc, timeout=0.2, escalate_to_kill=True)
+        self.assertTrue(reaped_esc)
+        self.assertFalse(run_trial._is_pid_alive(child_pid))
+
+    def test_09_timeout_cannot_return_success_while_group_member_alive(self):
+        """6. Timeout cannot return success while an isolated process-group member remains alive."""
+        child_pid_file = self.td_path / "timeout_child.pid"
+        child_ready_file = self.td_path / "timeout_child.ready"
+
+        child_script = f"""
+import time, signal, pathlib, os
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+pathlib.Path({repr(str(child_pid_file))}).write_text(str(os.getpid()))
+pathlib.Path({repr(str(child_ready_file))}).write_text('ready')
+time.sleep(60)
+"""
+        proc = subprocess.Popen(
+            [sys.executable, "-c", child_script],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True
+        )
+
+        t0 = time.time()
+        while not child_ready_file.exists() and time.time() - t0 < 5.0:
+            time.sleep(0.05)
+        self.assertTrue(child_ready_file.exists())
+
+        child_pid = int(child_pid_file.read_text().strip())
+        try:
+            reaped = run_trial.terminate_process_group(proc, timeout=0.2, escalate_to_kill=False)
+            self.assertFalse(reaped)
+            self.assertTrue(run_trial._is_pid_alive(child_pid))
+        finally:
+            try:
+                os.kill(child_pid, signal.SIGKILL)
+            except Exception:
+                pass
+            proc.wait(timeout=1.0)
+
+    def test_10_pid_reuse_or_identity_mismatch_not_signalled(self):
+        """7. Process-group PID reuse or identity mismatch is not signalled."""
+        my_ident = run_trial.get_process_identity(os.getpid())
+        self.assertIsNotNone(my_ident)
+        self.assertIn("starttime", my_ident)
+
+        self.assertTrue(run_trial.is_same_alive_process(os.getpid(), my_ident))
+        reused_ident = dict(my_ident)
+        reused_ident["starttime"] = "999999999_mismatch"
+        self.assertFalse(run_trial.is_same_alive_process(os.getpid(), reused_ident))
+
+        mock_proc = MagicMock()
+        mock_proc.pid = 98765
+        mock_proc.poll.return_value = 0
+        mock_proc._ps028_pgid = None
+
+        mismatched_pid = 98766
+        scan_res = run_trial.DescendantScanResult(
+            pids=[mismatched_pid],
+            is_complete=True,
+            identities={mismatched_pid: {"pid": mismatched_pid, "starttime": "1000", "state": "S"}}
+        )
+
+        with patch("lab.run_trial.find_descendant_pids", return_value=scan_res), \
+             patch("lab.run_trial.is_same_alive_process", return_value=False), \
+             patch("os.kill") as mock_kill:
+            reaped = run_trial.terminate_process_group(mock_proc, timeout=0.1)
+            for call in mock_kill.call_args_list:
+                signalled_pid = call[0][0]
+                self.assertNotEqual(signalled_pid, mismatched_pid)
+
+    def test_11_incomplete_proc_discovery_fails_closed(self):
+        """8. Incomplete /proc discovery does not falsely report success."""
+        res = run_trial.find_descendant_pids(1234, proc_dir=self.td_path / "nonexistent_proc")
+        self.assertFalse(res.is_complete)
+        self.assertIn("does not exist", res.scan_error)
+
+        mock_proc = MagicMock()
+        mock_proc.pid = 98765
+        mock_proc.poll.return_value = 0
+        mock_proc._ps028_pgid = None
+
+        incomplete_res = run_trial.DescendantScanResult(
+            pids=[],
+            is_complete=False,
+            scan_error="Simulated /proc read failure"
+        )
+        with patch("lab.run_trial.find_descendant_pids", return_value=incomplete_res):
+            reaped = run_trial.terminate_process_group(mock_proc, timeout=0.1)
+            self.assertFalse(reaped)
+
+    def test_12_failure_to_verify_descendant_becomes_coordinator_cleanup_failure(self):
+        """9. Failure to verify descendant termination becomes coordinator cleanup failure."""
+        import lab.run_campaign as run_campaign
+        coord = run_campaign.InterruptionCoordinator()
+        mock_proc = MagicMock()
+        mock_proc.pid = 98765
+        mock_proc.poll.return_value = 0
+        mock_proc._ps028_pgid = None
+
+        incomplete_res = run_trial.DescendantScanResult(
+            pids=[],
+            is_complete=False,
+            scan_error="Proc permission error"
+        )
+        with patch("lab.run_trial.find_descendant_pids", return_value=incomplete_res):
+            reaped = run_trial.terminate_process_group(mock_proc, timeout=0.1, coordinator=coord)
+            self.assertFalse(reaped)
+
+        errs = coord.get_termination_errors()
+        self.assertTrue(len(errs) > 0)
+        self.assertIn("Descendant discovery incomplete", errs[0])
+
+    def test_13_normal_browser_completion_unregisters_cleanly(self):
+        """10. Existing normal browser completion still unregisters the process cleanly."""
+        import lab.run_campaign as run_campaign
+        coord = run_campaign.InterruptionCoordinator()
+        code, out, err, timed_out = run_trial.execute_browser_subprocess(
+            cmd=[sys.executable, "-c", "import sys; sys.exit(0)"],
+            timeout=5.0,
+            coordinator=coord,
+            start_new_session=True
+        )
+        self.assertEqual(code, 0)
+        self.assertFalse(timed_out)
+        self.assertEqual(len(coord._tracked_processes), 0)
+        self.assertEqual(len(coord.get_termination_errors()), 0)
+
+    def test_14_timeout_group_termination(self):
+        """Subprocess timeout terminates process group, reaps parent, and returns exit code 124."""
         cmd = [sys.executable, "-c", "import time; time.sleep(30)"]
         code, out, err, timed_out = run_trial.execute_browser_subprocess(
             cmd=cmd,
@@ -7239,8 +7538,8 @@ time.sleep(60)
         self.assertTrue(timed_out)
         self.assertEqual(code, 124)
 
-    def test_06_stdout_stderr_preservation(self):
-        """6. Subprocess stdout and stderr are preserved completely without truncation or distortion."""
+    def test_15_stdout_stderr_preservation(self):
+        """Subprocess stdout and stderr are preserved completely without truncation or distortion."""
         cmd = [
             sys.executable, "-c",
             "import sys; sys.stdout.write('BROWSER_OUT_CONTENT\\n'); sys.stderr.write('BROWSER_ERR_CONTENT\\n')"
@@ -7256,24 +7555,9 @@ time.sleep(60)
         self.assertIn("BROWSER_OUT_CONTENT", out)
         self.assertIn("BROWSER_ERR_CONTENT", err)
 
-    def test_07_normal_unregistration(self):
-        """7. Process unregisters cleanly from coordinator upon normal completion."""
+    def test_16_exceptional_unregistration(self):
+        """Process unregisters cleanly in finally block when execution encounters an exception."""
         mock_coord = MagicMock()
-        cmd = [sys.executable, "-c", "pass"]
-        code, out, err, timed_out = run_trial.execute_browser_subprocess(
-            cmd=cmd,
-            timeout=5.0,
-            coordinator=mock_coord,
-            start_new_session=True
-        )
-        self.assertEqual(code, 0)
-        mock_coord.register_process.assert_called_once()
-        mock_coord.unregister_process.assert_called_once()
-
-    def test_08_exceptional_unregistration(self):
-        """8. Process unregisters cleanly in finally block when execution encounters an exception."""
-        mock_coord = MagicMock()
-        # Mock communicate raising an exception
         with patch("subprocess.Popen.communicate", side_effect=RuntimeError("Simulated communicate error")):
             with self.assertRaises(RuntimeError):
                 run_trial.execute_browser_subprocess(
@@ -7285,8 +7569,8 @@ time.sleep(60)
         mock_coord.register_process.assert_called_once()
         mock_coord.unregister_process.assert_called_once()
 
-    def test_09_capture_plus_browser_dual_reaping(self):
-        """9. Both capture and browser processes registered with coordinator are terminated and reaped."""
+    def test_17_capture_plus_browser_dual_reaping(self):
+        """Both capture and browser processes registered with coordinator are terminated and reaped."""
         import lab.run_campaign as run_campaign
         coord = run_campaign.InterruptionCoordinator()
 
@@ -7305,34 +7589,8 @@ time.sleep(60)
         self.assertIsNotNone(p1.poll())
         self.assertIsNotNone(p2.poll())
 
-    def test_10_termination_failure_produces_cleanup_failure(self):
-        """10. Failure to terminate/reap tracked process surfaces as cleanup failure and halts campaign fail-stop."""
-        import lab.run_campaign as run_campaign
-        runner = run_campaign.CampaignRunner(
-            scenarios=["S0"],
-            browsers=["google-chrome"],
-            repetitions=1,
-            output_dir=self.td_path / "camp_fail_reap",
-            is_simulation=True,
-            exit_on_interruption=False
-        )
-
-        # Inject an unkillable process into coordinator termination
-        mock_unkillable = MagicMock()
-        mock_unkillable.pid = 9999999
-        mock_unkillable.poll.return_value = None
-        mock_unkillable.wait.side_effect = subprocess.TimeoutExpired(cmd="fake", timeout=1.0)
-        runner.coordinator.register_process(mock_unkillable)
-
-        with patch("lab.run_trial.terminate_process_group", return_value=False):
-            runner.coordinator.terminate_tracked_processes()
-
-        errors = runner.coordinator.get_termination_errors()
-        self.assertTrue(len(errors) > 0)
-        self.assertIn("Failed to terminate and reap", errors[0])
-
-    def test_11_interrupted_attempt_manifest_matches_failure_record(self):
-        """11. Interrupted attempt in campaign manifest matches physical failed_attempt_record.json."""
+    def test_18_interrupted_attempt_manifest_matches_failure_record(self):
+        """Interrupted attempt in campaign manifest matches physical failed_attempt_record.json."""
         import lab.run_campaign as run_campaign
         camp_dir = self.td_path / "camp_match_test"
         flag_file = self.td_path / "match_ready.flag"
@@ -7348,7 +7606,6 @@ time.sleep(60)
             browser_cmd_override=[sys.executable, "-c", child_script]
         )
 
-        # Simulate interruption during trial execution
         def _interrupt_after_flag():
             t0 = time.time()
             while not flag_file.exists() and time.time() - t0 < 5.0:
@@ -7373,8 +7630,144 @@ time.sleep(60)
         self.assertEqual(rec["validity"], attempt.validity)
         self.assertEqual(rec["interruption"]["signal_name"], "SIGINT")
 
-    def test_12_unchanged_chrome_firefox_command_construction(self):
-        """12. Chrome and Firefox command construction flags and env are unchanged."""
+    def test_19_subprocess_integration_real_os_sigint(self):
+        """Subprocess harness: real OS SIGINT delivered to process running coordinator terminates child and grandchild."""
+        harness_ready = self.td_path / "harness_int_ready.flag"
+        gc_pid_file = self.td_path / "harness_int_gc.pid"
+        worker_pid_file = self.td_path / "harness_int_worker.pid"
+
+        harness_script = f"""
+import sys, os, time, signal, pathlib, subprocess
+import lab.run_campaign as run_campaign
+import lab.run_trial as run_trial
+
+coord = run_campaign.InterruptionCoordinator()
+coord.install()
+
+worker_script = '''
+import sys, os, time, pathlib, subprocess
+pathlib.Path({repr(str(worker_pid_file))}).write_text(str(os.getpid()))
+gc_script = "import time; time.sleep(60)"
+gc = subprocess.Popen([sys.executable, "-c", gc_script])
+pathlib.Path({repr(str(gc_pid_file))}).write_text(str(gc.pid))
+pathlib.Path({repr(str(harness_ready))}).write_text("ready")
+time.sleep(60)
+'''
+
+try:
+    code, out, err, timed_out = run_trial.execute_browser_subprocess(
+        cmd=[sys.executable, "-c", worker_script],
+        timeout=30.0,
+        coordinator=coord,
+        start_new_session=True
+    )
+    sys.exit(code)
+except KeyboardInterrupt:
+    sys.exit(130)
+except Exception:
+    sys.exit(1)
+"""
+        harness_proc = subprocess.Popen(
+            [sys.executable, "-c", harness_script],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True
+        )
+
+        t0 = time.time()
+        while not harness_ready.exists() and time.time() - t0 < 5.0:
+            time.sleep(0.05)
+        self.assertTrue(harness_ready.exists())
+
+        worker_pid = int(worker_pid_file.read_text().strip())
+        gc_pid = int(gc_pid_file.read_text().strip())
+
+        self.assertTrue(run_trial._is_pid_alive(worker_pid))
+        self.assertTrue(run_trial._is_pid_alive(gc_pid))
+
+        # Send real OS SIGINT
+        os.kill(harness_proc.pid, signal.SIGINT)
+        harness_proc.wait(timeout=5.0)
+        if harness_proc.stdout:
+            harness_proc.stdout.close()
+        if harness_proc.stderr:
+            harness_proc.stderr.close()
+
+        self.assertEqual(harness_proc.returncode, 130)
+        self.assertFalse(run_trial._is_pid_alive(worker_pid))
+        self.assertFalse(run_trial._is_pid_alive(gc_pid))
+
+    def test_20_subprocess_integration_real_os_sigterm(self):
+        """Subprocess harness: real OS SIGTERM delivered to process running coordinator terminates child and grandchild."""
+        harness_ready = self.td_path / "harness_term_ready.flag"
+        gc_pid_file = self.td_path / "harness_term_gc.pid"
+        worker_pid_file = self.td_path / "harness_term_worker.pid"
+
+        harness_script = f"""
+import sys, os, time, signal, pathlib, subprocess
+import lab.run_campaign as run_campaign
+import lab.run_trial as run_trial
+
+coord = run_campaign.InterruptionCoordinator()
+coord.install()
+
+worker_script = '''
+import sys, os, time, pathlib, subprocess
+pathlib.Path({repr(str(worker_pid_file))}).write_text(str(os.getpid()))
+gc_script = "import time; time.sleep(60)"
+gc = subprocess.Popen([sys.executable, "-c", gc_script])
+pathlib.Path({repr(str(gc_pid_file))}).write_text(str(gc.pid))
+pathlib.Path({repr(str(harness_ready))}).write_text("ready")
+time.sleep(60)
+'''
+
+try:
+    code, out, err, timed_out = run_trial.execute_browser_subprocess(
+        cmd=[sys.executable, "-c", worker_script],
+        timeout=30.0,
+        coordinator=coord,
+        start_new_session=True
+    )
+    sys.exit(code)
+except KeyboardInterrupt:
+    sys.exit(143)
+except Exception:
+    sys.exit(1)
+"""
+        harness_proc = subprocess.Popen(
+            [sys.executable, "-c", harness_script],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True
+        )
+
+        t0 = time.time()
+        while not harness_ready.exists() and time.time() - t0 < 5.0:
+            time.sleep(0.05)
+        self.assertTrue(harness_ready.exists())
+
+        worker_pid = int(worker_pid_file.read_text().strip())
+        gc_pid = int(gc_pid_file.read_text().strip())
+
+        self.assertTrue(run_trial._is_pid_alive(worker_pid))
+        self.assertTrue(run_trial._is_pid_alive(gc_pid))
+
+        # Send real OS SIGTERM
+        os.kill(harness_proc.pid, signal.SIGTERM)
+        harness_proc.wait(timeout=5.0)
+        if harness_proc.stdout:
+            harness_proc.stdout.close()
+        if harness_proc.stderr:
+            harness_proc.stderr.close()
+
+        self.assertEqual(harness_proc.returncode, 143)
+        self.assertFalse(run_trial._is_pid_alive(worker_pid))
+        self.assertFalse(run_trial._is_pid_alive(gc_pid))
+
+    def test_21_unchanged_chrome_firefox_command_construction(self):
+        """21. Chrome and Firefox command construction flags and env are unchanged."""
         mock_home = self.td_path / "mock_home"
         mock_home.mkdir(parents=True, exist_ok=True)
         synth_user = "synth_test_user"

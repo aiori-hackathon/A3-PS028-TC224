@@ -895,12 +895,17 @@ class InterruptionCoordinator:
 
         for proc in procs:
             try:
-                reaped = run_trial.terminate_process_group(proc, timeout=1.5, escalate_to_kill=True)
+                reaped = run_trial.terminate_process_group(
+                    proc,
+                    timeout=1.5,
+                    escalate_to_kill=True,
+                    coordinator=self
+                )
                 if not reaped:
                     with self._lock:
-                        self._termination_errors.append(
-                            f"Failed to terminate and reap tracked process {getattr(proc, 'pid', 'unknown')}"
-                        )
+                        err = f"Failed to terminate and reap tracked process {getattr(proc, 'pid', 'unknown')}"
+                        if err not in self._termination_errors:
+                            self._termination_errors.append(err)
             except Exception as exc:
                 with self._lock:
                     self._termination_errors.append(
