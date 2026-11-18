@@ -789,6 +789,9 @@ class CaptureProcess:
         self._ps028_handle = handle or {}
         self._ps028_start_time = start_time
         self.returncode: Optional[int] = None
+        l_ident = get_process_identity(pid)
+        self._ps028_leader_starttime = l_ident.get("starttime") if (l_ident and l_ident.get("valid", True)) else None
+        self._ps028_leader_ident = l_ident
 
     def to_handle(self) -> Dict[str, Any]:
         """Returns a JSON-serializable capture handle dictionary."""
@@ -4548,17 +4551,23 @@ def is_valid_verified_pgid(
     """
     Verifies that target_pgid belongs to the original isolated process session
     and has not been reused by an unrelated process group.
+    Requires proof of original session leader identity established at launch.
     """
     if not isinstance(target_pgid, int) or target_pgid <= 1:
         return False, f"Invalid numeric PGID {target_pgid}"
     if target_pgid == os.getpid() or target_pgid == os.getpgrp():
         return False, f"Target PGID {target_pgid} matches current process or group"
 
-    # If leader starttime is missing, attempt to read from leader if still alive
-    if leader_starttime is None and leader_pid is not None:
-        l_ident = get_process_identity(leader_pid, proc_dir=proc_dir)
-        if l_ident and l_ident.get("valid", True) and l_ident.get("starttime"):
-            leader_starttime = l_ident["starttime"]
+    # Strict launch-identity requirement:
+    # Never attempt to infer or obtain leader starttime later from whatever process currently
+    # occupies leader_pid; that creates a vulnerability where PID reuse after launch goes undetected.
+    if leader_starttime is None or not str(leader_starttime).strip():
+        return False, f"Leader starttime was not established at launch; refusing to verify PGID {target_pgid} without proven launch identity"
+
+    try:
+        leader_start_int = int(leader_starttime)
+    except (ValueError, TypeError):
+        return False, f"Invalid leader starttime format {leader_starttime!r}"
 
     # If leader is still alive, check its identity
     if leader_pid is not None:
@@ -4604,18 +4613,6 @@ def is_valid_verified_pgid(
                 return False, f"Error checking PGID {target_pgid}: {exc}"
         else:
             return False, f"PGID {target_pgid} does not exist in {proc_dir}"
-
-    if leader_starttime is None:
-        # Leader starttime was not recorded at launch.
-        # Fall back to verifying that all group members belong to the exact session matching target_pgid.
-        if all(m.get("session") == target_pgid for m in group_members):
-            return True, None
-        return False, f"Leader starttime was never established and group members have inconsistent session"
-
-    try:
-        leader_start_int = int(leader_starttime)
-    except (ValueError, TypeError):
-        return False, f"Invalid leader starttime format {leader_starttime!r}"
 
     for m in group_members:
         m_start = m.get("starttime")
@@ -4693,25 +4690,47 @@ def find_descendant_pids(
         leader_starttime = getattr(proc, "_ps028_leader_starttime", None)
 
         if subreaper_enabled:
-            for c_pid in children_map.get(os.getpid(), []):
-                if c_pid != parent_pid and c_pid not in baseline_children:
-                    c_ident = all_identities.get(c_pid)
-                    if c_ident:
-                        c_start = c_ident.get("starttime")
-                        if leader_starttime is None:
-                            if c_pid not in visited:
-                                visited.add(c_pid)
-                                descendants.append(c_pid)
-                                queue.append(c_pid)
-                        else:
-                            try:
-                                if int(c_start) >= int(leader_starttime):
-                                    if c_pid not in visited:
-                                        visited.add(c_pid)
-                                        descendants.append(c_pid)
-                                        queue.append(c_pid)
-                            except (ValueError, TypeError):
-                                pass
+            if leader_starttime is None or not str(leader_starttime).strip():
+                # Safe fail-closed: do not infer ownership of direct children from the fact that they are new
+                # when leader identity was unavailable at launch.
+                direct_new = [
+                    c for c in children_map.get(os.getpid(), [])
+                    if c != parent_pid and c not in baseline_children
+                ]
+                if direct_new:
+                    scan_errors.append(
+                        f"Subreaper adopted {len(direct_new)} direct child(ren) but leader starttime was not established at launch; "
+                        "cannot safely verify child ownership without launch identity"
+                    )
+                else:
+                    poll_fn = getattr(proc, "poll", None)
+                    parent_exited = (poll_fn() is not None) if callable(poll_fn) else (parent_pid not in all_identities)
+                    if parent_exited:
+                        scan_errors.append(
+                            "Subreaper active but leader starttime unavailable at launch; "
+                            "cannot safely verify reparented orphan containment after parent exit"
+                        )
+            else:
+                try:
+                    leader_start_int = int(leader_starttime)
+                except (ValueError, TypeError):
+                    scan_errors.append(f"Malformed leader starttime {leader_starttime!r} at launch; cannot verify descendants")
+                    leader_start_int = None
+
+                if leader_start_int is not None:
+                    for c_pid in children_map.get(os.getpid(), []):
+                        if c_pid != parent_pid and c_pid not in baseline_children:
+                            c_ident = all_identities.get(c_pid)
+                            if c_ident:
+                                c_start = c_ident.get("starttime")
+                                try:
+                                    if int(c_start) >= leader_start_int:
+                                        if c_pid not in visited:
+                                            visited.add(c_pid)
+                                            descendants.append(c_pid)
+                                            queue.append(c_pid)
+                                except (ValueError, TypeError):
+                                    pass
 
     while queue:
         curr = queue.pop(0)
@@ -4825,6 +4844,7 @@ def terminate_process_group(
     current_pid = os.getpid()
     current_pgid = os.getpgrp()
     signaling_errors: List[str] = []
+    leader_starttime = getattr(proc, "_ps028_leader_starttime", None)
 
     # 2. Preserve & resolve isolated process-group identity
     resolved_pgid = target_pgid
@@ -4916,6 +4936,20 @@ def terminate_process_group(
     scan_error = scan_res.scan_error
 
     parent_identity = get_process_identity(pid, proc_dir=proc_dir)
+    orig_parent_ident = getattr(proc, "_ps028_leader_ident", None)
+    if orig_parent_ident is None and leader_starttime is not None:
+        orig_parent_ident = {"pid": pid, "starttime": leader_starttime, "valid": True}
+
+    can_signal_parent = False
+    if pid > 1 and pid != current_pid and pid != current_pgid:
+        if valid_target_pgid and not pgid_verified:
+            can_signal_parent = False
+        elif leader_starttime is None:
+            can_signal_parent = False
+        elif orig_parent_ident is not None and not is_same_alive_process(pid, orig_parent_ident, proc_dir=proc_dir):
+            can_signal_parent = False
+        else:
+            can_signal_parent = True
 
     def check_any_alive() -> Tuple[bool, List[int]]:
         surviving: List[int] = []
@@ -4925,9 +4959,9 @@ def terminate_process_group(
                 if poll_fn() is None:
                     surviving.append(pid)
             except Exception:
-                if is_same_alive_process(pid, parent_identity, proc_dir=proc_dir):
+                if is_same_alive_process(pid, orig_parent_ident or parent_identity, proc_dir=proc_dir):
                     surviving.append(pid)
-        elif is_same_alive_process(pid, parent_identity, proc_dir=proc_dir):
+        elif is_same_alive_process(pid, orig_parent_ident or parent_identity, proc_dir=proc_dir):
             surviving.append(pid)
 
         # Check isolated process group
@@ -4979,7 +5013,7 @@ def terminate_process_group(
                 signaling_errors.append(f"Permission denied sending SIGTERM to PGID {resolved_pgid}: {o_err}")
             else:
                 signaling_errors.append(f"Unexpected error sending SIGTERM to PGID {resolved_pgid}: {o_err}")
-    elif pid > 1 and pid != current_pid and pid != current_pgid:
+    elif can_signal_parent:
         try:
             os.kill(pid, signal.SIGTERM)
         except ProcessLookupError:
@@ -5037,7 +5071,7 @@ def terminate_process_group(
                     signaling_errors.append(f"Permission denied sending SIGKILL to PGID {resolved_pgid}: {o_err}")
                 else:
                     signaling_errors.append(f"Unexpected error sending SIGKILL to PGID {resolved_pgid}: {o_err}")
-        elif pid > 1 and pid != current_pid and pid != current_pgid:
+        elif can_signal_parent:
             try:
                 os.kill(pid, signal.SIGKILL)
             except ProcessLookupError:

@@ -865,6 +865,16 @@ class InterruptionCoordinator:
     def register_process(self, proc: Any) -> None:
         """Registers an active child process (capture or browser) for lifecycle management."""
         with self._lock:
+            if getattr(proc, "_ps028_leader_starttime", None) is None:
+                pid = getattr(proc, "pid", None)
+                if isinstance(pid, int) and pid > 0:
+                    try:
+                        ident = run_trial.get_process_identity(pid)
+                        if ident and ident.get("valid", True) and ident.get("starttime"):
+                            proc._ps028_leader_starttime = ident["starttime"]
+                            proc._ps028_leader_ident = ident
+                    except Exception:
+                        pass
             self._tracked_processes.add(proc)
 
     def unregister_process(self, proc: Any) -> None:

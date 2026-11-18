@@ -7193,15 +7193,13 @@ pathlib.Path({repr(str(grandchild_pid_file))}).write_text(str(gc.pid))
 pathlib.Path({repr(str(parent_ready_file))}).write_text('ready')
 time.sleep(60)
 """
-        proc = subprocess.Popen(
+        proc = run_trial.create_contained_subprocess(
             [sys.executable, "-c", parent_script],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
             start_new_session=True
         )
-        proc._ps028_pgid = proc.pid
-        proc._ps028_session_leader = True
 
         t0 = time.time()
         while not parent_ready_file.exists() and time.time() - t0 < 5.0:
@@ -7243,15 +7241,13 @@ def on_term(sig, frame):
 signal.signal(signal.SIGTERM, on_term)
 time.sleep(60)
 """
-        proc = subprocess.Popen(
+        proc = run_trial.create_contained_subprocess(
             [sys.executable, "-c", parent_script],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
             start_new_session=True
         )
-        proc._ps028_pgid = proc.pid
-        proc._ps028_session_leader = True
 
         t0 = time.time()
         while (not parent_ready_file.exists() or not grandchild_ready_file.exists()) and time.time() - t0 < 5.0:
@@ -7292,15 +7288,13 @@ child = subprocess.Popen([sys.executable, "-c", child_script])
 pathlib.Path({repr(str(parent_ready_file))}).write_text("ready")
 time.sleep(60)
 """
-        proc = subprocess.Popen(
+        proc = run_trial.create_contained_subprocess(
             [sys.executable, "-c", parent_script],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
             start_new_session=True
         )
-        proc._ps028_pgid = proc.pid
-        proc._ps028_session_leader = True
 
         t0 = time.time()
         while (not parent_ready_file.exists() or not child_ready_file.exists()) and time.time() - t0 < 5.0:
@@ -7337,15 +7331,13 @@ time.sleep(60)
 child = subprocess.Popen([sys.executable, "-c", child_script])
 sys.exit(0)
 """
-        proc = subprocess.Popen(
+        proc = run_trial.create_contained_subprocess(
             [sys.executable, "-c", parent_script],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
             start_new_session=True
         )
-        proc._ps028_pgid = proc.pid
-        proc._ps028_session_leader = True
 
         t0 = time.time()
         while not child_ready_file.exists() and time.time() - t0 < 5.0:
@@ -7375,7 +7367,7 @@ pathlib.Path({repr(str(child_pid_file))}).write_text(str(os.getpid()))
 pathlib.Path({repr(str(child_ready_file))}).write_text('ready')
 time.sleep(60)
 """
-        proc = subprocess.Popen(
+        proc = run_trial.create_contained_subprocess(
             [sys.executable, "-c", child_script],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -7413,7 +7405,7 @@ pathlib.Path({repr(str(child_pid_file))}).write_text(str(os.getpid()))
 pathlib.Path({repr(str(child_ready_file))}).write_text('ready')
 time.sleep(60)
 """
-        proc = subprocess.Popen(
+        proc = run_trial.create_contained_subprocess(
             [sys.executable, "-c", child_script],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -7880,6 +7872,17 @@ sys.exit(0)
         # 5 & 6. Invoke cleanup with escalation and verify child is terminated and reaped
         reaped = run_trial.terminate_process_group(proc, timeout=1.0, escalate_to_kill=True)
         self.assertTrue(reaped)
+
+        # Prove that cleanup reaped the adopted child independently of _is_pid_alive()
+        # Calling os.waitpid directly must raise ChildProcessError because child has already
+        # been reaped and is no longer an unreaped child/zombie of the runner process.
+        with self.assertRaises(ChildProcessError):
+            os.waitpid(child_pid, os.WNOHANG)
+        with self.assertRaises((ProcessLookupError, OSError)):
+            os.kill(child_pid, 0)
+        self.assertFalse((Path("/proc") / str(child_pid)).exists())
+
+        # Finally verify assertion helper confirms termination
         self.assertFalse(run_trial._is_pid_alive(child_pid))
 
     def test_23_detached_descendant_surviving_parent_exit_reaped_inherited_pipes(self):
@@ -7925,6 +7928,15 @@ sys.exit(0)
         # Cleanup terminates and reaps detached child
         reaped = run_trial.terminate_process_group(proc, timeout=1.0, escalate_to_kill=True)
         self.assertTrue(reaped)
+
+        # Prove that cleanup reaped the adopted child independently of _is_pid_alive()
+        with self.assertRaises(ChildProcessError):
+            os.waitpid(child_pid, os.WNOHANG)
+        with self.assertRaises((ProcessLookupError, OSError)):
+            os.kill(child_pid, 0)
+        self.assertFalse((Path("/proc") / str(child_pid)).exists())
+
+        # Finally verify assertion helper confirms termination
         self.assertFalse(run_trial._is_pid_alive(child_pid))
 
     def test_24_eperm_handling_in_process_group_liveness_and_signaling(self):
@@ -8097,6 +8109,70 @@ sys.exit(0)
             errs = coord.get_termination_errors()
             self.assertTrue(len(errs) > 0)
             self.assertIn("Refusing to signal unverified or reused PGID", errs[0])
+
+    def test_27_missing_at_launch_identity_fails_closed_under_pid_reuse(self):
+        """Missing-at-launch identity followed by PID reuse refuses verification, does not infer direct child ownership, and fails closed."""
+        import lab.run_campaign as run_campaign
+        coord = run_campaign.InterruptionCoordinator()
+
+        fake_proc = self.td_path / "missing_launch_proc"
+        fake_proc.mkdir(parents=True, exist_ok=True)
+
+        # Leader PID 301 had NO starttime established at launch (missing identity)
+        # Meanwhile, PID 301 is now occupied in /proc by a reused process with starttime 5000 and PGID 301
+        p_leader = fake_proc / "301"
+        p_leader.mkdir()
+        fields_leader = ["S", "1", "301", "301"] + ["0"] * 15 + ["5000"]
+        (p_leader / "stat").write_text(f"301 (reused_leader) {' '.join(fields_leader)}")
+
+        # An unrelated direct child PID 302 of the runner (PPID == os.getpid()) exists in /proc
+        # with starttime 6000
+        p_child = fake_proc / "302"
+        p_child.mkdir()
+        fields_child = ["S", str(os.getpid()), "302", "302"] + ["0"] * 15 + ["6000"]
+        (p_child / "stat").write_text(f"302 (unrelated_child) {' '.join(fields_child)}")
+
+        # 1. is_valid_verified_pgid MUST fail closed when leader_starttime is None
+        # It must NOT obtain 5000 from the current occupant of PID 301 to claim verification
+        verified, reason = run_trial.is_valid_verified_pgid(
+            target_pgid=301,
+            leader_pid=301,
+            leader_starttime=None,
+            proc_dir=fake_proc
+        )
+        self.assertFalse(verified)
+        self.assertIn("Leader starttime was not established at launch", reason)
+
+        # 2. find_descendant_pids MUST fail closed:
+        # It must NOT infer ownership of PID 302 just because it is a new direct child of the runner
+        mock_proc = MagicMock()
+        mock_proc.pid = 301
+        mock_proc._ps028_pgid = 301
+        mock_proc._ps028_leader_starttime = None  # Missing at launch
+        mock_proc._ps028_subreaper_enabled = True
+        mock_proc._ps028_baseline_children = set()  # PID 302 is not in baseline
+        mock_proc.poll.return_value = None
+
+        scan = run_trial.find_descendant_pids(301, proc_dir=fake_proc, target_pgid=301, proc=mock_proc)
+        # PID 302 must NOT be included in descendants
+        self.assertNotIn(302, scan.pids)
+        # Scan must fail closed
+        self.assertFalse(scan.is_complete)
+        self.assertIn("leader starttime was not established at launch", scan.scan_error)
+
+        # 3. terminate_process_group MUST refuse to signal the reused PGID or unrelated child,
+        # and must fail closed and record the error to the coordinator
+        with patch("os.killpg") as mock_killpg, patch("os.kill") as mock_kill:
+            reaped = run_trial.terminate_process_group(mock_proc, coordinator=coord, proc_dir=fake_proc)
+            self.assertFalse(reaped)
+            mock_killpg.assert_not_called()
+            for call in mock_kill.call_args_list:
+                signalled_pid = call[0][0]
+                self.assertNotEqual(signalled_pid, 302, "Never signal unverified adopted child")
+                self.assertNotEqual(signalled_pid, 301, "Never signal reused leader PID")
+            errs = coord.get_termination_errors()
+            self.assertTrue(len(errs) > 0)
+            self.assertTrue(any("Refusing to signal unverified or reused PGID" in e or "Descendant discovery incomplete" in e for e in errs))
 
 
 if __name__ == "__main__":
