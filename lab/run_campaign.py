@@ -29,6 +29,7 @@ Coordinates systematic, reproducible Happy Eyeballs measurement campaigns:
 import argparse
 import contextlib
 import datetime
+import errno
 import fcntl
 import hashlib
 import json
@@ -236,20 +237,52 @@ def generate_campaign_id(prefix: str = "campaign") -> str:
 
 def fsync_directory(dir_path: Union[str, Path]) -> None:
     """
-    Flushes directory changes to disk on POSIX systems so file additions
-    or atomic renames are durably recorded in the filesystem directory entry.
+    Durably flushes directory metadata changes to disk on POSIX systems so file additions,
+    unlinks, or atomic renames (os.replace) are committed to the directory table.
+
+    Fail-closed semantics:
+    - On POSIX, opens the directory with O_RDONLY | O_DIRECTORY and calls os.fsync(fd).
+    - Retries on EINTR (interrupted system call).
+    - Always ensures the directory file descriptor is closed in a finally block.
+    - Propagates genuine OSErrors (e.g. EIO, EROFS, EPERM, ENOSPC) to caller rather than silently ignoring.
+    - On non-POSIX platforms where directory fsync is unsupported, raises an explicit OSError(errno.ENOSYS).
     """
-    try:
-        flags = os.O_RDONLY
-        if hasattr(os, "O_DIRECTORY"):
-            flags |= os.O_DIRECTORY
-        fd = os.open(str(dir_path), flags)
+    path_str = str(dir_path)
+    if os.name != "posix":
+        raise OSError(errno.ENOSYS, f"Directory fsync is not supported on non-POSIX platform: {os.name}")
+
+    flags = os.O_RDONLY
+    if hasattr(os, "O_DIRECTORY"):
+        flags |= os.O_DIRECTORY
+
+    fd = -1
+    while True:
         try:
-            os.fsync(fd)
-        finally:
-            os.close(fd)
-    except OSError:
-        pass
+            fd = os.open(path_str, flags)
+            break
+        except InterruptedError:
+            continue
+        except OSError as err:
+            raise OSError(err.errno, f"Failed to open directory '{path_str}' for fsync: {err.strerror}") from err
+
+    try:
+        while True:
+            try:
+                os.fsync(fd)
+                break
+            except InterruptedError:
+                continue
+            except OSError as err:
+                raise OSError(err.errno, f"Failed to fsync directory '{path_str}': {err.strerror}") from err
+    finally:
+        while True:
+            try:
+                os.close(fd)
+                break
+            except InterruptedError:
+                continue
+            except OSError:
+                break
 
 
 class ExecutionAttempt:
@@ -768,6 +801,184 @@ def reconcile_manifest_for_resume(
 
 
 # ==============================================================================
+# Interruption Coordination Engine (Signal-Safe Attempt Lifecycle)
+# ==============================================================================
+
+class InterruptionCoordinator:
+    """
+    Coordinates process-wide signal interception, graceful termination,
+    and uninterrupted critical sections across campaign and trial execution.
+
+    Invariants:
+    1. First SIGINT or SIGTERM initiates controlled interruption.
+    2. Critical sections (cleanup, baseline restoration, evidence preservation,
+       manifest updates) run to completion without being aborted by signals.
+    3. Active child processes (capture, browser) registered with coordinator
+       are terminated and reaped when an interruption is signaled.
+    4. Second SIGINT/SIGTERM causes immediate forced exit (128 + signum).
+    5. Clean exit codes on interruption: SIGINT -> 130, SIGTERM -> 143.
+    """
+    def __init__(self):
+        self._interrupted: bool = False
+        self._interrupted_signum: Optional[int] = None
+        self._interrupted_signal_name: Optional[str] = None
+        self._signal_count: int = 0
+        self._critical_depth: int = 0
+        self._tracked_processes: Set[Any] = set()
+        self._lock = threading.RLock()
+        self._old_sigint = None
+        self._old_sigterm = None
+        self._installed: bool = False
+
+    @property
+    def interrupted(self) -> bool:
+        return self._interrupted
+
+    @property
+    def signum(self) -> Optional[int]:
+        return self._interrupted_signum
+
+    @property
+    def signal_name(self) -> Optional[str]:
+        return self._interrupted_signal_name
+
+    @property
+    def signal_count(self) -> int:
+        return self._signal_count
+
+    def record_interruption(self, signum: int, signal_name: Optional[str] = None) -> None:
+        """Manually records an interruption (e.g. from an exception or simulated signal)."""
+        with self._lock:
+            self._interrupted = True
+            self._interrupted_signum = signum
+            if signal_name:
+                self._interrupted_signal_name = signal_name
+            elif hasattr(signal, "Signals"):
+                try:
+                    self._interrupted_signal_name = signal.Signals(signum).name
+                except Exception:
+                    self._interrupted_signal_name = str(signum)
+            else:
+                self._interrupted_signal_name = str(signum)
+
+    def register_process(self, proc: Any) -> None:
+        """Registers an active child process (capture or browser) for lifecycle management."""
+        with self._lock:
+            self._tracked_processes.add(proc)
+
+    def unregister_process(self, proc: Any) -> None:
+        """Unregisters a finished or reaped child process."""
+        with self._lock:
+            self._tracked_processes.discard(proc)
+
+    def terminate_tracked_processes(self) -> None:
+        """Safely terminates and reaps all currently tracked child processes."""
+        with self._lock:
+            procs = list(self._tracked_processes)
+            self._tracked_processes.clear()
+
+        for proc in procs:
+            try:
+                poll_fn = getattr(proc, "poll", None)
+                if callable(poll_fn) and poll_fn() is not None:
+                    continue
+                term_fn = getattr(proc, "terminate", None)
+                if callable(term_fn):
+                    term_fn()
+                elif hasattr(proc, "send_signal"):
+                    proc.send_signal(signal.SIGTERM)
+            except (ProcessLookupError, OSError):
+                pass
+            except Exception:
+                pass
+
+        for proc in procs:
+            try:
+                wait_fn = getattr(proc, "wait", None)
+                if callable(wait_fn):
+                    try:
+                        wait_fn(timeout=0.5)
+                    except (subprocess.TimeoutExpired, Exception):
+                        kill_fn = getattr(proc, "kill", None)
+                        if callable(kill_fn):
+                            kill_fn()
+                            try:
+                                wait_fn(timeout=0.5)
+                            except Exception:
+                                pass
+            except Exception:
+                pass
+
+    @contextlib.contextmanager
+    def critical_section(self, section_name: str):
+        """
+        Guarantees that the enclosed code executes without being aborted by signals.
+        If a signal arrives during this block, it is latched into coordinator state
+        and child processes are terminated, but no KeyboardInterrupt is raised until
+        after the critical section finishes.
+        """
+        with self._lock:
+            self._critical_depth += 1
+        try:
+            yield
+        finally:
+            with self._lock:
+                self._critical_depth = max(0, self._critical_depth - 1)
+
+    def handle_signal(self, signum: int, frame: Any) -> None:
+        """Signal handler for SIGINT and SIGTERM."""
+        with self._lock:
+            self._signal_count += 1
+            if self._signal_count > 1:
+                print(
+                    f"\n[CRITICAL] Repeated signal {signum} received; forcing immediate process exit.",
+                    file=sys.stderr
+                )
+                sys.exit(128 + signum)
+
+            self._interrupted = True
+            self._interrupted_signum = signum
+            signame = signal.Signals(signum).name if hasattr(signal, "Signals") else str(signum)
+            self._interrupted_signal_name = signame
+            in_critical = self._critical_depth > 0
+
+        print(
+            f"\n[WARN] Campaign received {signame} ({signum}); requesting controlled interruption "
+            f"({'deferring until critical section completes' if in_critical else 'initiating controlled stop'})...",
+            file=sys.stderr
+        )
+
+        self.terminate_tracked_processes()
+
+        if not in_critical:
+            raise KeyboardInterrupt(f"Campaign interrupted by signal {signum} ({signame})")
+
+    def install(self) -> None:
+        """Installs the signal handlers for SIGINT and SIGTERM."""
+        with self._lock:
+            if not self._installed:
+                try:
+                    self._old_sigint = signal.signal(signal.SIGINT, self.handle_signal)
+                    self._old_sigterm = signal.signal(signal.SIGTERM, self.handle_signal)
+                    self._installed = True
+                except (ValueError, OSError):
+                    pass
+
+    def restore(self) -> None:
+        """Restores previous signal handlers."""
+        with self._lock:
+            if self._installed:
+                try:
+                    if self._old_sigint is not None:
+                        signal.signal(signal.SIGINT, self._old_sigint)
+                    if self._old_sigterm is not None:
+                        signal.signal(signal.SIGTERM, self._old_sigterm)
+                except (ValueError, OSError):
+                    pass
+                self._installed = False
+
+
+# ==============================================================================
 # Sequential Campaign Execution Engine
 # ==============================================================================
 
@@ -790,7 +1001,8 @@ class CampaignRunner:
         fail_fast_on_measurement: bool = False,
         lab_lock_file: Optional[Path] = None,
         lock_timeout: float = 10.0,
-        exit_on_interruption: bool = True
+        exit_on_interruption: bool = True,
+        coordinator: Optional[InterruptionCoordinator] = None
     ):
         self.scenarios = [s.upper() for s in (scenarios or DEFAULT_SCENARIOS)]
         for sc in self.scenarios:
@@ -810,11 +1022,8 @@ class CampaignRunner:
         self.lock_timeout = lock_timeout
         self.exit_on_interruption = exit_on_interruption
 
-        # Interruption tracking
-        self._interrupted: bool = False
-        self._interrupted_signum: Optional[int] = None
-        self._interrupted_signal_name: Optional[str] = None
-        self._signal_count: int = 0
+        # Interruption coordinator & tracking
+        self.coordinator = coordinator or InterruptionCoordinator()
         self._active_trial_id: Optional[str] = None
         self._active_trial_dir: Optional[Path] = None
         self._active_slot: Optional[MatrixSlot] = None
@@ -828,6 +1037,41 @@ class CampaignRunner:
         self.trials_dir = self.output_dir / "trials"
         self.manifest_path = self.output_dir / MANIFEST_FILENAME
         self.lock_path = self.output_dir / LOCK_FILENAME
+
+    @property
+    def _interrupted(self) -> bool:
+        return self.coordinator.interrupted
+
+    @_interrupted.setter
+    def _interrupted(self, val: bool) -> None:
+        if val:
+            self.coordinator.record_interruption(getattr(signal, "SIGINT", 2), "SIGINT")
+        else:
+            self.coordinator._interrupted = False
+
+    @property
+    def _interrupted_signum(self) -> Optional[int]:
+        return self.coordinator.signum
+
+    @_interrupted_signum.setter
+    def _interrupted_signum(self, val: Optional[int]) -> None:
+        self.coordinator._interrupted_signum = val
+
+    @property
+    def _interrupted_signal_name(self) -> Optional[str]:
+        return self.coordinator.signal_name
+
+    @_interrupted_signal_name.setter
+    def _interrupted_signal_name(self, val: Optional[str]) -> None:
+        self.coordinator._interrupted_signal_name = val
+
+    @property
+    def _signal_count(self) -> int:
+        return self.coordinator.signal_count
+
+    @_signal_count.setter
+    def _signal_count(self, val: int) -> None:
+        self.coordinator._signal_count = val
 
     def _resolve_browsers(self, requested: Optional[List[str]], is_simulation: bool) -> List[str]:
         """Resolves and validates available browsers."""
@@ -983,14 +1227,13 @@ class CampaignRunner:
                 skip_baseline_check=False,
                 lock_file=self.lab_lock_file,
                 lock_timeout=self.lock_timeout,
-                caller_manages_signals=True
+                caller_manages_signals=True,
+                coordinator=self.coordinator
             )
         except (KeyboardInterrupt, InterruptedError) as ki:
-            if not self._interrupted:
-                self._interrupted = True
-                self._interrupted_signum = getattr(signal, "SIGINT", 2)
-                self._interrupted_signal_name = "SIGINT"
-            exec_error = f"Campaign attempt interrupted by signal {self._interrupted_signum} ({self._interrupted_signal_name}): {ki}"
+            if not self.coordinator.interrupted:
+                self.coordinator.record_interruption(getattr(signal, "SIGINT", 2), "SIGINT")
+            exec_error = f"Campaign attempt interrupted by signal {self.coordinator.signum} ({self.coordinator.signal_name}): {ki}"
         except Exception as exc:
             exec_error = str(exc)
         finally:
@@ -998,131 +1241,174 @@ class CampaignRunner:
             self._active_trial_dir = None
             self._active_slot = None
 
-        end_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        duration_ms = round((time.time() - t_start) * 1000.0, 2)
+        with self.coordinator.critical_section("attempt_finalization"):
+            end_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            duration_ms = round((time.time() - t_start) * 1000.0, 2)
 
-        # Audit all genuine evidence physically written to trial_dir
-        disk_paths, disk_pcap_meta = self._collect_preserved_evidence(trial_dir)
+            # Audit all genuine evidence physically written to trial_dir
+            disk_paths, disk_pcap_meta = self._collect_preserved_evidence(trial_dir)
 
-        # ----------------------------------------------------------------------
-        # FAIL-STOP EVALUATION: Cleanup & Baseline Verification
-        # ----------------------------------------------------------------------
-        cleanup_status: Dict[str, Any] = {}
-        if trial_result:
-            cleanup_status = trial_result.get("cleanup_status", {})
-        else:
-            # Trial failed before writing result: check whether baseline is clean
-            baseline_ok = False
-            baseline_errs: List[str] = []
-            try:
-                baseline_ok = impair.self_test_baseline(dry_run=self.is_simulation)
-                if not baseline_ok:
-                    baseline_errs.append("Post-interruption baseline verification failed")
-            except Exception as b_exc:
-                baseline_errs.append(f"baseline check error: {b_exc}")
-
-            if not baseline_ok:
+            # ----------------------------------------------------------------------
+            # FAIL-STOP EVALUATION: Cleanup & Baseline Verification
+            # ----------------------------------------------------------------------
+            cleanup_status: Dict[str, Any] = {}
+            if trial_result:
+                cleanup_status = trial_result.get("cleanup_status", {})
+            else:
+                # Trial failed before writing result: check whether baseline is clean
+                baseline_ok = False
+                baseline_errs: List[str] = []
                 try:
-                    impair.clear_impairments(dry_run=self.is_simulation)
                     baseline_ok = impair.self_test_baseline(dry_run=self.is_simulation)
                     if not baseline_ok:
-                        baseline_errs.append("Baseline not clean after clear_impairments")
-                except Exception as c_err:
-                    baseline_errs.append(f"impairment clear error: {c_err}")
+                        baseline_errs.append("Post-interruption baseline verification failed")
+                except Exception as b_exc:
+                    baseline_errs.append(f"baseline check error: {b_exc}")
 
-            cleanup_status = {
-                "scenario_restored": baseline_ok,
-                "baseline_verified": baseline_ok,
-                "profile_cleaned": True,
-                "lock_released": True,
-                "errors": baseline_errs
-            }
+                if not baseline_ok:
+                    try:
+                        impair.clear_impairments(dry_run=self.is_simulation)
+                        baseline_ok = impair.self_test_baseline(dry_run=self.is_simulation)
+                        if not baseline_ok:
+                            baseline_errs.append("Baseline not clean after clear_impairments")
+                    except Exception as c_err:
+                        baseline_errs.append(f"impairment clear error: {c_err}")
 
-        scenario_restored = cleanup_status.get("scenario_restored", False)
-        baseline_verified = cleanup_status.get("baseline_verified", False)
-        cleanup_errors = list(cleanup_status.get("errors", []))
+                cleanup_status = {
+                    "scenario_restored": baseline_ok,
+                    "baseline_verified": baseline_ok,
+                    "profile_cleaned": True,
+                    "lock_released": True,
+                    "errors": baseline_errs
+                }
 
-        # Extra verification of baseline state using impair.self_test_baseline
-        try:
-            post_baseline_ok = impair.self_test_baseline(dry_run=self.is_simulation)
-            if not post_baseline_ok:
+            scenario_restored = cleanup_status.get("scenario_restored", False)
+            baseline_verified = cleanup_status.get("baseline_verified", False)
+            cleanup_errors = list(cleanup_status.get("errors", []))
+
+            # Extra verification of baseline state using impair.self_test_baseline
+            try:
+                post_baseline_ok = impair.self_test_baseline(dry_run=self.is_simulation)
+                if not post_baseline_ok:
+                    baseline_verified = False
+                    cleanup_errors.append("Post-trial self_test_baseline returned False")
+            except Exception as b_err:
                 baseline_verified = False
-                cleanup_errors.append("Post-trial self_test_baseline returned False")
-        except Exception as b_err:
-            baseline_verified = False
-            cleanup_errors.append(f"Post-trial self_test_baseline exception: {b_err}")
+                cleanup_errors.append(f"Post-trial self_test_baseline exception: {b_err}")
 
-        # Interruption payload if signal was caught
-        interruption_info = None
-        if self._interrupted:
-            interruption_info = {
-                "signal_number": self._interrupted_signum,
-                "signal_name": self._interrupted_signal_name,
-                "interrupted_at": end_iso,
-                "error_details": exec_error or "Campaign interrupted by signal"
-            }
+            # Interruption payload if signal was caught
+            interruption_info = None
+            if self.coordinator.interrupted:
+                interruption_info = {
+                    "signal_number": self.coordinator.signum,
+                    "signal_name": self.coordinator.signal_name,
+                    "interrupted_at": end_iso,
+                    "error_details": exec_error or "Campaign interrupted by signal"
+                }
 
-        # Check for cleanup/baseline failure
-        if not scenario_restored or not baseline_verified or len(cleanup_errors) > 0:
-            err_details = "; ".join(cleanup_errors) if cleanup_errors else "Baseline not verified"
-            timestamps = (
-                trial_result.get("timestamps", {})
-                if trial_result and trial_result.get("timestamps")
-                else {"start_time": start_iso, "end_time": end_iso, "duration_ms": duration_ms}
-            )
-            evidence_paths = (
-                trial_result.get("evidence_paths", {})
-                if trial_result and trial_result.get("evidence_paths")
-                else disk_paths
-            )
-            capture_metadata = (
-                trial_result.get("capture_metadata", {})
-                if trial_result and trial_result.get("capture_metadata")
-                else disk_pcap_meta
-            )
-            http_outcome = trial_result.get("http_outcome", {}) if trial_result else {}
-            network_observations = trial_result.get("network_observations", {}) if trial_result else {}
+            # Check for cleanup/baseline failure
+            if not scenario_restored or not baseline_verified or len(cleanup_errors) > 0:
+                err_details = "; ".join(cleanup_errors) if cleanup_errors else "Baseline not verified"
+                timestamps = (
+                    trial_result.get("timestamps", {})
+                    if trial_result and trial_result.get("timestamps")
+                    else {"start_time": start_iso, "end_time": end_iso, "duration_ms": duration_ms}
+                )
+                evidence_paths = (
+                    trial_result.get("evidence_paths", {})
+                    if trial_result and trial_result.get("evidence_paths")
+                    else disk_paths
+                )
+                capture_metadata = (
+                    trial_result.get("capture_metadata", {})
+                    if trial_result and trial_result.get("capture_metadata")
+                    else disk_pcap_meta
+                )
+                http_outcome = trial_result.get("http_outcome", {}) if trial_result else {}
+                network_observations = trial_result.get("network_observations", {}) if trial_result else {}
+
+                attempt = ExecutionAttempt(
+                    attempt_number=attempt_number,
+                    trial_id=trial_id,
+                    execution_mode="SIMULATION" if self.is_simulation else "LIVE",
+                    is_simulation=self.is_simulation,
+                    timestamps=timestamps,
+                    status="FAILED",
+                    validity="CLEANUP_FAILURE",
+                    evidence_paths=evidence_paths,
+                    capture_metadata=capture_metadata,
+                    http_outcome=http_outcome,
+                    network_observations=network_observations,
+                    cleanup_status=cleanup_status,
+                    error_message=f"CLEANUP OR BASELINE FAILURE: {err_details}",
+                    slot_id=slot.slot_id,
+                    scenario_id=slot.scenario_id,
+                    browser=slot.browser,
+                    repetition=slot.repetition,
+                    campaign_id=self.campaign_id,
+                    interruption=interruption_info
+                )
+                write_failed_attempt_record(trial_dir, attempt)
+                return attempt
+
+            # If trial errored out during execution or was interrupted
+            if trial_result is None or exec_error is not None:
+                attempt_status = "INTERRUPTED" if self.coordinator.interrupted else "FAILED"
+                attempt_validity = "INTERRUPTED" if self.coordinator.interrupted else "MEASUREMENT_FAILURE"
+                attempt = ExecutionAttempt(
+                    attempt_number=attempt_number,
+                    trial_id=trial_id,
+                    execution_mode="SIMULATION" if self.is_simulation else "LIVE",
+                    is_simulation=self.is_simulation,
+                    timestamps={"start_time": start_iso, "end_time": end_iso, "duration_ms": duration_ms},
+                    status=attempt_status,
+                    validity=attempt_validity,
+                    evidence_paths=disk_paths,
+                    capture_metadata=disk_pcap_meta,
+                    http_outcome={},
+                    network_observations={},
+                    cleanup_status=cleanup_status,
+                    error_message=exec_error,
+                    slot_id=slot.slot_id,
+                    scenario_id=slot.scenario_id,
+                    browser=slot.browser,
+                    repetition=slot.repetition,
+                    campaign_id=self.campaign_id,
+                    interruption=interruption_info
+                )
+                write_failed_attempt_record(trial_dir, attempt)
+                return attempt
+
+            # Validate evidence using existing A7 rules
+            pcap_meta = trial_result.get("capture_metadata", {})
+            pcap_valid = pcap_meta.get("pcap_valid", False)
+            packet_count = pcap_meta.get("packet_count", 0)
+            net_obs = trial_result.get("network_observations", {})
+            classification = net_obs.get("classification", "INCONCLUSIVE")
+
+            if self.is_simulation:
+                validity = "SIMULATION"
+                status = "COMPLETED"
+            elif pcap_valid and packet_count > 0 and classification != "INCONCLUSIVE":
+                validity = "VALID_LIVE"
+                status = "COMPLETED"
+            else:
+                validity = "MEASUREMENT_FAILURE"
+                status = "FAILED"
+                exec_error = pcap_meta.get("validation_message") or "Measurement classification failed or inconclusive"
 
             attempt = ExecutionAttempt(
                 attempt_number=attempt_number,
                 trial_id=trial_id,
-                execution_mode="SIMULATION" if self.is_simulation else "LIVE",
+                execution_mode=trial_result.get("execution_mode", "LIVE"),
                 is_simulation=self.is_simulation,
-                timestamps=timestamps,
-                status="FAILED",
-                validity="CLEANUP_FAILURE",
-                evidence_paths=evidence_paths,
-                capture_metadata=capture_metadata,
-                http_outcome=http_outcome,
-                network_observations=network_observations,
-                cleanup_status=cleanup_status,
-                error_message=f"CLEANUP OR BASELINE FAILURE: {err_details}",
-                slot_id=slot.slot_id,
-                scenario_id=slot.scenario_id,
-                browser=slot.browser,
-                repetition=slot.repetition,
-                campaign_id=self.campaign_id,
-                interruption=interruption_info
-            )
-            write_failed_attempt_record(trial_dir, attempt)
-            return attempt
-
-        # If trial errored out during execution or was interrupted
-        if trial_result is None or exec_error is not None:
-            attempt_status = "INTERRUPTED" if self._interrupted else "FAILED"
-            attempt_validity = "INTERRUPTED" if self._interrupted else "MEASUREMENT_FAILURE"
-            attempt = ExecutionAttempt(
-                attempt_number=attempt_number,
-                trial_id=trial_id,
-                execution_mode="SIMULATION" if self.is_simulation else "LIVE",
-                is_simulation=self.is_simulation,
-                timestamps={"start_time": start_iso, "end_time": end_iso, "duration_ms": duration_ms},
-                status=attempt_status,
-                validity=attempt_validity,
-                evidence_paths=disk_paths,
-                capture_metadata=disk_pcap_meta,
-                http_outcome={},
-                network_observations={},
+                timestamps=trial_result.get("timestamps", {}),
+                status=status,
+                validity=validity,
+                evidence_paths=trial_result.get("evidence_paths", {}),
+                capture_metadata=pcap_meta,
+                http_outcome=trial_result.get("http_outcome", {}),
+                network_observations=net_obs,
                 cleanup_status=cleanup_status,
                 error_message=exec_error,
                 slot_id=slot.slot_id,
@@ -1132,51 +1418,9 @@ class CampaignRunner:
                 campaign_id=self.campaign_id,
                 interruption=interruption_info
             )
-            write_failed_attempt_record(trial_dir, attempt)
+            if status == "FAILED" or validity in ("CLEANUP_FAILURE", "MEASUREMENT_FAILURE"):
+                write_failed_attempt_record(trial_dir, attempt)
             return attempt
-
-        # Validate evidence using existing A7 rules
-        pcap_meta = trial_result.get("capture_metadata", {})
-        pcap_valid = pcap_meta.get("pcap_valid", False)
-        packet_count = pcap_meta.get("packet_count", 0)
-        net_obs = trial_result.get("network_observations", {})
-        classification = net_obs.get("classification", "INCONCLUSIVE")
-
-        if self.is_simulation:
-            validity = "SIMULATION"
-            status = "COMPLETED"
-        elif pcap_valid and packet_count > 0 and classification != "INCONCLUSIVE":
-            validity = "VALID_LIVE"
-            status = "COMPLETED"
-        else:
-            validity = "MEASUREMENT_FAILURE"
-            status = "FAILED"
-            exec_error = pcap_meta.get("validation_message") or "Measurement classification failed or inconclusive"
-
-        attempt = ExecutionAttempt(
-            attempt_number=attempt_number,
-            trial_id=trial_id,
-            execution_mode=trial_result.get("execution_mode", "LIVE"),
-            is_simulation=self.is_simulation,
-            timestamps=trial_result.get("timestamps", {}),
-            status=status,
-            validity=validity,
-            evidence_paths=trial_result.get("evidence_paths", {}),
-            capture_metadata=pcap_meta,
-            http_outcome=trial_result.get("http_outcome", {}),
-            network_observations=net_obs,
-            cleanup_status=cleanup_status,
-            error_message=exec_error,
-            slot_id=slot.slot_id,
-            scenario_id=slot.scenario_id,
-            browser=slot.browser,
-            repetition=slot.repetition,
-            campaign_id=self.campaign_id,
-            interruption=interruption_info
-        )
-        if status == "FAILED" or validity in ("CLEANUP_FAILURE", "MEASUREMENT_FAILURE"):
-            write_failed_attempt_record(trial_dir, attempt)
-        return attempt
 
     def run(self) -> Dict[str, Any]:
         """
@@ -1192,37 +1436,10 @@ class CampaignRunner:
             manifest = self.initialize_manifest()
             self._manifest = manifest
 
-            # Signal interruption handler
-            self._interrupted = False
-            self._interrupted_signum = None
-            self._interrupted_signal_name = None
-            self._signal_count = 0
-
-            def _handle_signal(signum, frame):
-                self._signal_count += 1
-                if self._signal_count > 1:
-                    print(
-                        f"\n[CRITICAL] Repeated signal {signum} received; forcing immediate process exit.",
-                        file=sys.stderr
-                    )
-                    sys.exit(128 + signum)
-
-                self._interrupted = True
-                self._interrupted_signum = signum
-                signame = signal.Signals(signum).name if hasattr(signal, "Signals") else str(signum)
-                self._interrupted_signal_name = signame
-                print(
-                    f"\n[WARN] Campaign received {signame} ({signum}); requesting controlled interruption...",
-                    file=sys.stderr
-                )
-                raise KeyboardInterrupt(f"Campaign interrupted by signal {signum} ({signame})")
-
-            old_sigint = signal.signal(signal.SIGINT, _handle_signal)
-            old_sigterm = signal.signal(signal.SIGTERM, _handle_signal)
-
+            self.coordinator.install()
             try:
                 for slot in manifest.matrix_slots:
-                    if self._interrupted:
+                    if self.coordinator.interrupted:
                         break
 
                     if slot.is_completed():
@@ -1233,24 +1450,26 @@ class CampaignRunner:
                     attempt = self.execute_slot_attempt(slot, attempt_number=attempt_num)
                     slot.add_attempt(attempt)
 
-                    if self._interrupted:
-                        manifest.status = "INTERRUPTED"
-                        manifest.halt_reason = (
-                            f"Campaign interrupted by signal {self._interrupted_signum} "
-                            f"({self._interrupted_signal_name})"
-                        )
-                        manifest.save_atomically()
-                        break
-
-                    # Check FAIL-STOP condition: Cleanup or Baseline Failure
+                    # Check FAIL-STOP condition: Cleanup or Baseline Failure (paramount, even after signal)
                     if attempt.validity == "CLEANUP_FAILURE":
                         manifest.status = "HALTED_ON_FAILURE"
                         manifest.halt_reason = (
                             f"FAIL-STOP: Lab cleanup or baseline restoration failed at slot "
                             f"{slot.slot_id} (trial {attempt.trial_id}): {attempt.error_message}"
                         )
-                        manifest.save_atomically()
+                        with self.coordinator.critical_section("manifest_save"):
+                            manifest.save_atomically()
                         raise CampaignHaltedError(manifest.halt_reason)
+
+                    if self.coordinator.interrupted:
+                        manifest.status = "INTERRUPTED"
+                        manifest.halt_reason = (
+                            f"Campaign interrupted by signal {self.coordinator.signum} "
+                            f"({self.coordinator.signal_name})"
+                        )
+                        with self.coordinator.critical_section("manifest_save"):
+                            manifest.save_atomically()
+                        break
 
                     # Optional fail-fast on measurement failure
                     if self.fail_fast_on_measurement and attempt.status == "FAILED":
@@ -1259,20 +1478,23 @@ class CampaignRunner:
                             f"Fail-fast triggered on measurement failure at slot "
                             f"{slot.slot_id} (trial {attempt.trial_id}): {attempt.error_message}"
                         )
-                        manifest.save_atomically()
+                        with self.coordinator.critical_section("manifest_save"):
+                            manifest.save_atomically()
                         raise CampaignHaltedError(manifest.halt_reason)
 
                     # Save progress atomically after each attempt
-                    manifest.save_atomically()
+                    with self.coordinator.critical_section("manifest_save"):
+                        manifest.save_atomically()
 
                 # Finalize campaign status
-                if self._interrupted:
+                if self.coordinator.interrupted:
                     manifest.status = "INTERRUPTED"
                     manifest.halt_reason = (
-                        f"Campaign interrupted by signal {self._interrupted_signum} "
-                        f"({self._interrupted_signal_name})"
+                        f"Campaign interrupted by signal {self.coordinator.signum} "
+                        f"({self.coordinator.signal_name})"
                     )
-                    manifest.save_atomically()
+                    with self.coordinator.critical_section("manifest_save"):
+                        manifest.save_atomically()
                 else:
                     all_done = all(s.is_completed() for s in manifest.matrix_slots)
                     if all_done:
@@ -1291,27 +1513,28 @@ class CampaignRunner:
                     else:
                         if manifest.status not in ("HALTED_ON_FAILURE", "INTERRUPTED"):
                             manifest.status = "INCOMPLETE"
-                    manifest.save_atomically()
+                    with self.coordinator.critical_section("manifest_save"):
+                        manifest.save_atomically()
 
-                if self._interrupted and self.exit_on_interruption:
-                    sys.exit(128 + self._interrupted_signum)
+                if self.coordinator.interrupted and self.exit_on_interruption:
+                    sys.exit(128 + self.coordinator.signum)
 
                 return manifest.to_dict()
             except KeyboardInterrupt:
-                if self._interrupted:
+                if self.coordinator.interrupted:
                     manifest.status = "INTERRUPTED"
                     manifest.halt_reason = (
-                        f"Campaign interrupted by signal {self._interrupted_signum} "
-                        f"({self._interrupted_signal_name})"
+                        f"Campaign interrupted by signal {self.coordinator.signum} "
+                        f"({self.coordinator.signal_name})"
                     )
-                    manifest.save_atomically()
+                    with self.coordinator.critical_section("manifest_save"):
+                        manifest.save_atomically()
                     if self.exit_on_interruption:
-                        sys.exit(128 + self._interrupted_signum)
+                        sys.exit(128 + self.coordinator.signum)
                     return manifest.to_dict()
                 raise
             finally:
-                signal.signal(signal.SIGINT, old_sigint)
-                signal.signal(signal.SIGTERM, old_sigterm)
+                self.coordinator.restore()
 
 
 # ==============================================================================

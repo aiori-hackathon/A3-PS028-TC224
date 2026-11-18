@@ -31,6 +31,7 @@ Coordinates one complete, reproducible, and evidence-backed measurement trial:
 import argparse
 import contextlib
 import datetime
+import errno
 import hashlib
 import json
 import os
@@ -1371,20 +1372,76 @@ def validate_pcap_file(
 
 def fsync_directory(dir_path: Union[str, Path]) -> None:
     """
-    Flushes directory changes to disk on POSIX systems so file additions
-    or atomic renames are durably recorded in the filesystem directory entry.
+    Durably flushes directory metadata changes to disk on POSIX systems so file additions,
+    unlinks, or atomic renames (os.replace) are committed to the directory table.
+
+    Fail-closed semantics:
+    - On POSIX, opens the directory with O_RDONLY | O_DIRECTORY and calls os.fsync(fd).
+    - Retries on EINTR (interrupted system call).
+    - Always ensures the directory file descriptor is closed in a finally block.
+    - Propagates genuine OSErrors (e.g. EIO, EROFS, EPERM, ENOSPC) to caller rather than silently ignoring.
+    - On non-POSIX platforms where directory fsync is unsupported, raises an explicit OSError(errno.ENOSYS).
     """
-    try:
-        flags = os.O_RDONLY
-        if hasattr(os, "O_DIRECTORY"):
-            flags |= os.O_DIRECTORY
-        fd = os.open(str(dir_path), flags)
+    path_str = str(dir_path)
+    if os.name != "posix":
+        raise OSError(errno.ENOSYS, f"Directory fsync is not supported on non-POSIX platform: {os.name}")
+
+    flags = os.O_RDONLY
+    if hasattr(os, "O_DIRECTORY"):
+        flags |= os.O_DIRECTORY
+
+    fd = -1
+    while True:
         try:
-            os.fsync(fd)
-        finally:
-            os.close(fd)
-    except OSError:
-        pass
+            fd = os.open(path_str, flags)
+            break
+        except InterruptedError:
+            continue
+        except OSError as err:
+            raise OSError(err.errno, f"Failed to open directory '{path_str}' for fsync: {err.strerror}") from err
+
+    try:
+        while True:
+            try:
+                os.fsync(fd)
+                break
+            except InterruptedError:
+                continue
+            except OSError as err:
+                raise OSError(err.errno, f"Failed to fsync directory '{path_str}': {err.strerror}") from err
+    finally:
+        while True:
+            try:
+                os.close(fd)
+                break
+            except InterruptedError:
+                continue
+            except OSError:
+                break
+
+
+def _validate_pcapng_options(data: bytes, opt_start: int, opt_end: int, endian: str) -> Tuple[bool, str]:
+    """
+    Rigorously validates PCAP-NG block options:
+    - Verifies 4-byte option header (uint16 code, uint16 length)
+    - Verifies option value does not exceed block option boundary
+    - Verifies 32-bit alignment padding
+    - Verifies opt_endofopt (code 0) terminates options cleanly without trailing garbage
+    """
+    pos = opt_start
+    while pos < opt_end:
+        if pos + 4 > opt_end:
+            return False, f"Truncated option header at offset {pos} ({opt_end - pos} bytes < 4)"
+        opt_code, opt_len = struct.unpack(endian + "HH", data[pos : pos + 4])
+        opt_pad = (4 - (opt_len % 4)) % 4
+        if pos + 4 + opt_len + opt_pad > opt_end:
+            return False, f"Option {opt_code} length {opt_len} (with padding {opt_pad}) exceeds option boundary at offset {pos}"
+        pos += 4 + opt_len + opt_pad
+        if opt_code == 0:  # opt_endofopt
+            if pos < opt_end and any(b != 0 for b in data[pos:opt_end]):
+                return False, f"Unexpected non-zero bytes after opt_endofopt at offset {pos}"
+            break
+    return True, ""
 
 
 def _count_packets_pcapng(
@@ -1393,19 +1450,26 @@ def _count_packets_pcapng(
     check_tshark: bool = False
 ) -> Tuple[bool, int, str]:
     """
-    Rigorously parses and structurally validates PCAP-NG files:
-    - Validates Section Header Block (SHB), Byte Order Magic, endianness
-    - Validates Interface Description Blocks (IDB) and declared snaplens
-    - Validates Enhanced Packet Blocks (EPB) and Simple Packet Blocks (SPB)
+    Rigorously parses and structurally validates PCAP-NG files according to standard specification:
+    - Verifies Section Header Block (SHB, 0x0A0D0D0A) begins the file at offset 0
+    - Validates Byte Order Magic (BOM), endianness (< or >), major version 1
+    - Validates block options and boundaries for all supported blocks (SHB, IDB, EPB)
     - Validates 32-bit alignment and block length consistency (leading == trailing)
-    - Validates payload boundaries, packet captured lengths <= snaplen and <= 262144
-    - Rejects truncated blocks, corrupt data, and trailing unparsed bytes
+    - Enforces that no packet block (EPB or SPB) can precede a valid section and interface declaration
+    - Validates Interface Description Blocks (IDB) and declared snaplens (0 < snaplen <= 262144)
+    - Validates Enhanced Packet Blocks (EPB): interface ID exists in current section, captured length <= IDB snaplen and <= 262144, orig_len >= incl_len, exact payload boundaries
+    - Validates Simple Packet Blocks (SPB): interface 0 context exists, incl_len = min(orig_len, snaplen, 262144), exact payload padding and block boundary match
+    - Enforces multiple section isolation (interface list resets on each SHB)
+    - Rejects malformed blocks, truncated payloads, corrupt options, and trailing unparsed bytes
     - Derives packet count directly from validated packet blocks (never fake counts)
-    - Optionally cross-checks with TShark when requested and installed
+    - Optionally cross-checks with TShark when requested and installed (never fabricates success)
     """
     dlen = len(data)
     if dlen < 28:
         return False, 0, f"PCAP-NG file too small ({dlen} bytes < 28 bytes minimum section header)"
+
+    if data[:4] != b"\x0a\x0d\x0d\x0a":
+        return False, 0, "PCAP-NG file must begin with Section Header Block (SHB)"
 
     offset = 0
     count = 0
@@ -1421,7 +1485,7 @@ def _count_packets_pcapng(
         raw_type = data[offset : offset + 4]
         if raw_type == b"\x0a\x0d\x0d\x0a":
             section_count += 1
-            interfaces = []  # Reset interface list per section
+            interfaces = []  # Reset interface list per section for multi-section isolation
             if offset + 28 > dlen:
                 return False, count, f"Truncated Section Header Block at offset {offset} ({dlen - offset} bytes < 28)"
 
@@ -1436,7 +1500,17 @@ def _count_packets_pcapng(
             block_type, block_len = struct.unpack(endian + "II", data[offset : offset + 8])
             if block_len < 28:
                 return False, count, f"Invalid Section Header Block length {block_len} at offset {offset} (< 28)"
+
+            major, minor = struct.unpack(endian + "HH", data[offset + 12 : offset + 16])
+            if major != 1:
+                return False, count, f"Unsupported PCAP-NG section major version {major} at offset {offset} (expected 1)"
+
+            opt_ok, opt_err = _validate_pcapng_options(data, offset + 24, offset + block_len - 4, endian)
+            if not opt_ok:
+                return False, count, f"Malformed SHB options at offset {offset}: {opt_err}"
         else:
+            if section_count == 0:
+                return False, count, f"PCAP-NG block {raw_type.hex()} at offset {offset} precedes Section Header Block"
             block_type, block_len = struct.unpack(endian + "II", data[offset : offset + 8])
 
         if block_len < 12:
@@ -1458,35 +1532,49 @@ def _count_packets_pcapng(
             link_type, reserved, snaplen = struct.unpack(endian + "HHI", data[offset + 8 : offset + 16])
             if snaplen <= 0 or snaplen > 262144:
                 return False, count, f"Invalid PCAP-NG interface snaplen: {snaplen} (must be > 0 and <= 262144)"
+            opt_ok, opt_err = _validate_pcapng_options(data, offset + 16, offset + block_len - 4, endian)
+            if not opt_ok:
+                return False, count, f"Malformed IDB options at offset {offset}: {opt_err}"
             interfaces.append({"link_type": link_type, "snaplen": snaplen})
 
         elif block_type == 0x00000006:
             # Enhanced Packet Block (EPB)
             if block_len < 32:
                 return False, count, f"Truncated PCAP-NG EPB at offset {offset} (length {block_len} < 32)"
+            if len(interfaces) == 0:
+                return False, count, f"PCAP-NG EPB at offset {offset} precedes Interface Description Block (IDB)"
             if_id, ts_hi, ts_lo, incl_len, orig_len = struct.unpack(endian + "IIIII", data[offset + 8 : offset + 28])
-            if interfaces and if_id >= len(interfaces):
+            if if_id >= len(interfaces):
                 return False, count, f"PCAP-NG EPB at offset {offset} references non-existent interface {if_id} (known interfaces: {len(interfaces)})"
-            iface_snap = interfaces[if_id]["snaplen"] if (interfaces and if_id < len(interfaces)) else 262144
-            if incl_len > iface_snap or incl_len > 262144:
-                return False, count, f"PCAP-NG EPB packet captured length {incl_len} exceeds snaplen {iface_snap} or 262144"
+            iface_snap = interfaces[if_id]["snaplen"]
+            if incl_len > iface_snap:
+                return False, count, f"PCAP-NG EPB packet captured length {incl_len} exceeds snaplen {iface_snap}"
+            if incl_len > 262144:
+                return False, count, f"PCAP-NG EPB packet captured length {incl_len} exceeds standard cap 262144"
             if orig_len < incl_len:
                 return False, count, f"Inconsistent PCAP-NG EPB packet length: captured {incl_len} > original wire length {orig_len}"
             pad = (4 - (incl_len % 4)) % 4
             if 28 + incl_len + pad + 4 > block_len:
                 return False, count, f"Truncated PCAP-NG EPB payload: packet length {incl_len} exceeds block capacity ({block_len})"
+            opt_ok, opt_err = _validate_pcapng_options(data, offset + 28 + incl_len + pad, offset + block_len - 4, endian)
+            if not opt_ok:
+                return False, count, f"Malformed EPB options at offset {offset}: {opt_err}"
             count += 1
 
         elif block_type == 0x00000003:
             # Simple Packet Block (SPB)
             if block_len < 16:
                 return False, count, f"Truncated PCAP-NG SPB at offset {offset} (length {block_len} < 16)"
+            if len(interfaces) == 0:
+                return False, count, f"PCAP-NG SPB at offset {offset} precedes Interface Description Block (IDB)"
+            iface_snap = interfaces[0]["snaplen"]
             orig_len = struct.unpack(endian + "I", data[offset + 8 : offset + 12])[0]
-            data_len = block_len - 16
-            pad = (4 - (orig_len % 4)) % 4
-            incl_len = min(orig_len, data_len)
-            if incl_len > 262144:
-                return False, count, f"Inconsistent PCAP-NG SPB packet length: {incl_len}"
+            incl_len = min(orig_len, iface_snap, 262144)
+            block_data_len = block_len - 16
+            pad = (4 - (incl_len % 4)) % 4
+            expected_data_len = incl_len + pad
+            if block_data_len != expected_data_len:
+                return False, count, f"PCAP-NG SPB payload length mismatch at offset {offset}: block data {block_data_len} != expected {expected_data_len} (orig_len={orig_len}, snaplen={iface_snap})"
             if orig_len < incl_len:
                 return False, count, f"Inconsistent PCAP-NG SPB packet length: captured {incl_len} > wire length {orig_len}"
             count += 1
@@ -4167,7 +4255,8 @@ def run_browser(
     timeout: float = 15.0,
     netns: str = CLIENT_NETNS,
     is_simulation: bool = False,
-    extra_args: Optional[List[str]] = None
+    extra_args: Optional[List[str]] = None,
+    coordinator: Optional[Any] = None
 ) -> Dict[str, Any]:
     """
     Executes a real browser inside the client namespace with a clean process,
@@ -4365,6 +4454,13 @@ def run_browser(
             exit_code = 124
             stdout = (e.stdout or b"").decode("utf-8", errors="replace") if isinstance(e.stdout, bytes) else (e.stdout or "")
             stderr = (e.stderr or b"").decode("utf-8", errors="replace") if isinstance(e.stderr, bytes) else (e.stderr or "")
+    except KeyboardInterrupt:
+        if "firefox" in bname:
+            try:
+                subprocess.run(["pkill", "-f", str(profile_dir.resolve())], capture_output=True, check=False)
+            except Exception:
+                pass
+        raise
     except (SnapMountError, BrowserPreflightError):
         raise
     except Exception as e:
@@ -4635,6 +4731,7 @@ def run_trial(
     capture_filter: Optional[str] = None,
     capture_buffer_kb: Optional[int] = None,
     caller_manages_signals: bool = False,
+    coordinator: Optional[Any] = None
 ) -> Dict[str, Any]:
     """
     Executes one complete integrated measurement trial:
@@ -4713,9 +4810,15 @@ def run_trial(
         # Signal handling to ensure cleanup on SIGINT / SIGTERM
         old_sigint = None
         old_sigterm = None
+        standalone_signal_received = None
+        standalone_signal_count = 0
+
         if not caller_manages_signals:
             def _sig_handler(signum, frame):
-                # Baseline restoration will execute in finally block
+                nonlocal standalone_signal_count
+                standalone_signal_count += 1
+                if standalone_signal_count > 1:
+                    sys.exit(128 + signum)
                 raise KeyboardInterrupt(f"Interrupted by signal {signum}")
 
             old_sigint = signal.signal(signal.SIGINT, _sig_handler)
@@ -4764,6 +4867,8 @@ def run_trial(
 
                 # Confirm capture readiness before browser launch
                 confirm_capture_ready(tcpdump_proc, tcpdump_log)
+                if coordinator and tcpdump_proc is not None:
+                    coordinator.register_process(tcpdump_proc)
 
                 # 5. Run Genuine Browser
                 browser_start_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -4775,7 +4880,8 @@ def run_trial(
                     timeout=browser_timeout,
                     netns=CLIENT_NETNS,
                     is_simulation=False,
-                    extra_args=extra_browser_args
+                    extra_args=extra_browser_args,
+                    coordinator=coordinator
                 )
                 browser_end_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
@@ -4823,101 +4929,122 @@ def run_trial(
                 encoding="utf-8"
             )
 
-        except Exception as e:
-            cleanup_errors.append(f"Trial execution error: {e}")
+        except (Exception, KeyboardInterrupt) as e:
+            if not isinstance(e, KeyboardInterrupt):
+                cleanup_errors.append(f"Trial execution error: {e}")
             raise
         finally:
-            # Restore signal handlers if managed by this trial
-            if not caller_manages_signals:
-                if old_sigint is not None:
-                    signal.signal(signal.SIGINT, old_sigint)
-                if old_sigterm is not None:
-                    signal.signal(signal.SIGTERM, old_sigterm)
+            cleanup_crit_ctx = coordinator.critical_section("trial_cleanup") if coordinator else contextlib.nullcontext()
+            with cleanup_crit_ctx:
+                # If standalone, install protective cleanup handler so single signal cannot abort cleanup
+                if not caller_manages_signals:
+                    def _cleanup_sig_handler(signum, frame):
+                        nonlocal standalone_signal_received, standalone_signal_count
+                        standalone_signal_count += 1
+                        if standalone_signal_count > 1:
+                            sys.exit(128 + signum)
+                        standalone_signal_received = signum
+                        print(f"\n[WARN] Signal {signum} received during trial cleanup; completing cleanup before exit...", file=sys.stderr)
 
-            # 7. Unconditional Cleanup & Baseline Restoration
-            if tcpdump_proc is not None:
+                    signal.signal(signal.SIGINT, _cleanup_sig_handler)
+                    signal.signal(signal.SIGTERM, _cleanup_sig_handler)
+
+                # 7. Unconditional Cleanup & Baseline Restoration
+                if tcpdump_proc is not None:
+                    try:
+                        stop_packet_capture(
+                            tcpdump_proc,
+                            pcap_path=pcap_path,
+                            verify_pcap=False,
+                            caller_holds_lock=concurrency.is_lock_held_by_current_thread(target_lock),
+                            lock_file=target_lock
+                        )
+                    except Exception as ce:
+                        cleanup_errors.append(f"tcpdump stop error: {ce}")
+                    finally:
+                        if coordinator and tcpdump_proc is not None:
+                            coordinator.unregister_process(tcpdump_proc)
+
                 try:
-                    stop_packet_capture(
-                        tcpdump_proc,
-                        pcap_path=pcap_path,
-                        verify_pcap=False,
-                        caller_holds_lock=concurrency.is_lock_held_by_current_thread(target_lock),
-                        lock_file=target_lock
+                    impair.clear_impairments(
+                        dry_run=is_simulation,
+                        lock_file=target_lock,
+                        lock_timeout=lock_timeout
                     )
+                    scenario_restored = True
+                    baseline_restored_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
                 except Exception as ce:
-                    cleanup_errors.append(f"tcpdump stop error: {ce}")
+                    scenario_restored = False
+                    cleanup_errors.append(f"Impairment clear error: {ce}")
 
-            try:
-                impair.clear_impairments(
-                    dry_run=is_simulation,
-                    lock_file=target_lock,
-                    lock_timeout=lock_timeout
-                )
-                scenario_restored = True
-                baseline_restored_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
-            except Exception as ce:
-                scenario_restored = False
-                cleanup_errors.append(f"Impairment clear error: {ce}")
-
-            try:
-                baseline_verified = bool(impair.self_test_baseline(dry_run=is_simulation))
-                if not baseline_verified:
-                    cleanup_errors.append("Baseline self-test failed live verification")
-            except Exception as ce:
-                baseline_verified = False
-                cleanup_errors.append(f"Baseline verify error: {ce}")
-
-            # Preserve NetLog evidence into trial directory before cleaning temporary profile
-            trial_netlog_path = tdir / "netlog.json"
-            profile_netlog = profile_dir / "netlog.json"
-            if profile_netlog.is_file():
                 try:
-                    shutil.copy2(profile_netlog, trial_netlog_path)
+                    baseline_verified = bool(impair.self_test_baseline(dry_run=is_simulation))
+                    if not baseline_verified:
+                        cleanup_errors.append("Baseline self-test failed live verification")
+                except Exception as ce:
+                    baseline_verified = False
+                    cleanup_errors.append(f"Baseline verify error: {ce}")
+
+                # Preserve NetLog evidence into trial directory before cleaning temporary profile
+                trial_netlog_path = tdir / "netlog.json"
+                profile_netlog = profile_dir / "netlog.json"
+                if profile_netlog.is_file():
                     try:
-                        os.chmod(trial_netlog_path, 0o664)
-                    except OSError:
-                        pass
-                except Exception as ce:
-                    cleanup_errors.append(f"NetLog preservation error: {ce}")
+                        shutil.copy2(profile_netlog, trial_netlog_path)
+                        try:
+                            os.chmod(trial_netlog_path, 0o664)
+                        except OSError:
+                            pass
+                    except Exception as ce:
+                        cleanup_errors.append(f"NetLog preservation error: {ce}")
 
-            # Preserve Firefox telemetry evidence into trial directory before cleaning temporary profile
-            trial_telemetry_path = tdir / "browser_telemetry.log"
-            telemetry_candidates = [
-                profile_dir / "moz_telemetry.log.moz_log",
-                profile_dir / "moz_telemetry.log"
-            ] + list(profile_dir.glob("*moz*log*"))
-            found_telemetry = None
-            for tc in telemetry_candidates:
-                if tc.is_file() and tc.stat().st_size > 0:
-                    found_telemetry = tc
-                    break
-            if found_telemetry:
-                try:
-                    shutil.copy2(found_telemetry, trial_telemetry_path)
+                # Preserve Firefox telemetry evidence into trial directory before cleaning temporary profile
+                trial_telemetry_path = tdir / "browser_telemetry.log"
+                telemetry_candidates = [
+                    profile_dir / "moz_telemetry.log.moz_log",
+                    profile_dir / "moz_telemetry.log"
+                ] + list(profile_dir.glob("*moz*log*"))
+                found_telemetry = None
+                for tc in telemetry_candidates:
+                    if tc.is_file() and tc.stat().st_size > 0:
+                        found_telemetry = tc
+                        break
+                if found_telemetry:
                     try:
-                        os.chmod(trial_telemetry_path, 0o664)
-                    except OSError:
-                        pass
-                except Exception as ce:
-                    cleanup_errors.append(f"Telemetry preservation error: {ce}")
+                        shutil.copy2(found_telemetry, trial_telemetry_path)
+                        try:
+                            os.chmod(trial_telemetry_path, 0o664)
+                        except OSError:
+                            pass
+                    except Exception as ce:
+                        cleanup_errors.append(f"Telemetry preservation error: {ce}")
 
-            if profile_dir.is_dir():
-                try:
-                    shutil.rmtree(profile_dir, ignore_errors=True)
+                if profile_dir.is_dir():
+                    try:
+                        shutil.rmtree(profile_dir, ignore_errors=True)
+                        profile_cleaned = True
+                    except Exception as ce:
+                        cleanup_errors.append(f"Profile cleanup error: {ce}")
+                else:
                     profile_cleaned = True
-                except Exception as ce:
-                    cleanup_errors.append(f"Profile cleanup error: {ce}")
-            else:
-                profile_cleaned = True
 
-            for temp_resolv in [
-                Path("/run/ps028_resolv.conf"), Path("/tmp/.ps028_resolv.conf"),
-                Path("/run/ps028_outer_resolv.conf"), Path("/tmp/.ps028_outer_resolv.conf")
-            ]:
-                try:
-                    temp_resolv.unlink(missing_ok=True)
-                except OSError:
-                    pass
+                for temp_resolv in [
+                    Path("/run/ps028_resolv.conf"), Path("/tmp/.ps028_resolv.conf"),
+                    Path("/run/ps028_outer_resolv.conf"), Path("/tmp/.ps028_outer_resolv.conf")
+                ]:
+                    try:
+                        temp_resolv.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+
+                # Restore signal handlers if managed by this trial
+                if not caller_manages_signals:
+                    if old_sigint is not None:
+                        signal.signal(signal.SIGINT, old_sigint)
+                    if old_sigterm is not None:
+                        signal.signal(signal.SIGTERM, old_sigterm)
+                    if standalone_signal_received:
+                        sys.exit(128 + standalone_signal_received)
 
         # 8. Validate and Dissect Packet Capture
         pcap_valid, pcap_sha256, pcap_size, pkt_count, pcap_msg = validate_pcap_file(pcap_path)

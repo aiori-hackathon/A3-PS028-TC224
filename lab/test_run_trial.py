@@ -17,6 +17,7 @@ Tests:
 9. Full S0-S6 end-to-end simulated measurement runs with versioned JSON validation
 """
 
+import errno
 import hashlib
 import json
 import os
@@ -27,6 +28,7 @@ import stat
 import struct
 import subprocess
 import tempfile
+import time
 from typing import List, Optional
 from unittest.mock import MagicMock, patch
 import unittest
@@ -6688,6 +6690,264 @@ class TestPhaseC1HandshakeAndFlowCorrelationRegression(unittest.TestCase):
         self.assertIn("dns_transactions", dissection)
         self.assertIn("https_svcb_queries", dissection)
         self.assertIn("metrics", dissection)
+
+
+class TestFsyncDirectoryFailClosed(unittest.TestCase):
+    """
+    Validates fail-closed semantics for directory fsync in run_trial:
+    - Genuine OSErrors (EIO, ENOSPC, EACCES) propagate.
+    - File descriptors are unconditionally closed even when fsync fails.
+    - Interrupted system calls (EINTR) are retried until completion.
+    - Non-POSIX environments raise explicit OSError(errno.ENOSYS).
+    - write_result_json fails closed if directory fsync fails.
+    """
+    def setUp(self):
+        self.td = tempfile.TemporaryDirectory()
+        self.td_path = Path(self.td.name)
+
+    def tearDown(self):
+        self.td.cleanup()
+
+    def test_fsync_directory_raises_on_open_oserror(self):
+        """Genuine OSError on opening directory propagates with error code."""
+        with patch("os.open", side_effect=OSError(errno.EACCES, "Permission denied")):
+            with self.assertRaises(OSError) as ctx:
+                run_trial.fsync_directory(self.td_path)
+            self.assertEqual(ctx.exception.errno, errno.EACCES)
+
+    def test_fsync_directory_raises_on_fsync_oserror(self):
+        """Genuine OSError during directory fsync propagates with error code."""
+        with patch("os.fsync", side_effect=OSError(errno.EIO, "I/O error")):
+            with self.assertRaises(OSError) as ctx:
+                run_trial.fsync_directory(self.td_path)
+            self.assertEqual(ctx.exception.errno, errno.EIO)
+
+    def test_fsync_directory_closes_fd_on_fsync_error(self):
+        """File descriptor is guaranteed to be closed even when os.fsync raises."""
+        fake_fd = 9999
+        with patch("os.open", return_value=fake_fd), \
+             patch("os.fsync", side_effect=OSError(errno.EIO, "Disk write failure")), \
+             patch("os.close") as mock_close:
+            with self.assertRaises(OSError):
+                run_trial.fsync_directory(self.td_path)
+            mock_close.assert_called_with(fake_fd)
+
+    def test_fsync_directory_retries_on_eintr(self):
+        """Retries open and fsync when interrupted by EINTR signal."""
+        fake_fd = 8888
+        open_attempts = [InterruptedError(errno.EINTR, "Interrupted"), fake_fd]
+        fsync_attempts = [InterruptedError(errno.EINTR, "Interrupted"), None]
+
+        with patch("os.open", side_effect=open_attempts), \
+             patch("os.fsync", side_effect=fsync_attempts), \
+             patch("os.close") as mock_close:
+            run_trial.fsync_directory(self.td_path)
+            mock_close.assert_called_once_with(fake_fd)
+
+    def test_fsync_directory_fails_on_non_posix(self):
+        """Explicitly raises OSError(errno.ENOSYS) on non-POSIX platforms."""
+        with patch("os.name", "nt"):
+            with self.assertRaises(OSError) as ctx:
+                run_trial.fsync_directory(self.td_path)
+            self.assertEqual(ctx.exception.errno, errno.ENOSYS)
+
+
+class TestPcapNgStructuralValidation(unittest.TestCase):
+    """
+    Rigorously tests all 11 PCAP-NG structural validation invariants:
+    1. EPB before any IDB fails closed.
+    2. EPB referencing nonexistent interface fails closed.
+    3. SPB before any IDB fails closed.
+    4. SPB packet exceeding IDB snaplen fails closed.
+    5. IDB/EPB/SPB in invalid section ordering fails closed.
+    6. Non-SHB first block fails closed.
+    7. Multiple sections with interface reset fails closed on cross-section ref.
+    8. Invalid section version/length metadata fails closed.
+    9. Malformed block options fail closed.
+    10. Malformed SPB padding and packet boundaries fail closed.
+    11. Valid supported PCAP-NG samples with and without TShark installed.
+    """
+    def setUp(self):
+        self.td = tempfile.TemporaryDirectory()
+        self.td_path = Path(self.td.name)
+
+    def tearDown(self):
+        self.td.cleanup()
+
+    @staticmethod
+    def _make_shb(major: int = 1, minor: int = 0, sec_len: int = -1, options: bytes = b"") -> bytes:
+        bom = 0x1A2B3C4D
+        opt_pad = (4 - (len(options) % 4)) % 4
+        padded_opts = options + (b"\x00" * opt_pad)
+        total_len = 28 + len(padded_opts)
+        body = struct.pack("<IIIHHq", 0x0A0D0D0A, total_len, bom, major, minor, sec_len)
+        return body + padded_opts + struct.pack("<I", total_len)
+
+    @staticmethod
+    def _make_idb(link_type: int = 1, snaplen: int = 65535, options: bytes = b"") -> bytes:
+        opt_pad = (4 - (len(options) % 4)) % 4
+        padded_opts = options + (b"\x00" * opt_pad)
+        total_len = 20 + len(padded_opts)
+        body = struct.pack("<IIHHI", 0x00000001, total_len, link_type, 0, snaplen)
+        return body + padded_opts + struct.pack("<I", total_len)
+
+    @staticmethod
+    def _make_epb(if_id: int = 0, cap_len: int = 60, orig_len: int = 60, pkt_data: bytes = None, options: bytes = b"") -> bytes:
+        if pkt_data is None:
+            pkt_data = b"\x00" * cap_len
+        pkt_pad = (4 - (len(pkt_data) % 4)) % 4
+        padded_pkt = pkt_data + (b"\x00" * pkt_pad)
+        opt_pad = (4 - (len(options) % 4)) % 4
+        padded_opts = options + (b"\x00" * opt_pad)
+        total_len = 32 + len(padded_pkt) + len(padded_opts)
+        body = struct.pack("<IIIIIII", 0x00000006, total_len, if_id, 0, 0, cap_len, orig_len)
+        return body + padded_pkt + padded_opts + struct.pack("<I", total_len)
+
+    @staticmethod
+    def _make_spb(orig_len: int = 60, pkt_data: bytes = None) -> bytes:
+        if pkt_data is None:
+            pkt_data = b"\x00" * orig_len
+        pkt_pad = (4 - (len(pkt_data) % 4)) % 4
+        padded_pkt = pkt_data + (b"\x00" * pkt_pad)
+        total_len = 16 + len(padded_pkt)
+        body = struct.pack("<III", 0x00000003, total_len, orig_len)
+        return body + padded_pkt + struct.pack("<I", total_len)
+
+    def _write_pcapng(self, data: bytes) -> Path:
+        p = self.td_path / f"synthetic_{time.time_ns()}.pcapng"
+        p.write_bytes(data)
+        return p
+
+    def test_01_epb_before_any_idb_fails_closed(self):
+        """1. EPB encountered before any Interface Description Block fails closed."""
+        pcapng = self._make_shb() + self._make_epb(if_id=0)
+        p = self._write_pcapng(pcapng)
+        valid, sha, sz, count, msg = run_trial.validate_pcap_file(p)
+        self.assertFalse(valid)
+        self.assertIn("precedes Interface Description Block", msg)
+
+    def test_02_epb_referencing_nonexistent_interface_fails_closed(self):
+        """2. EPB referencing invalid/nonexistent interface ID fails closed."""
+        pcapng = self._make_shb() + self._make_idb(snaplen=65535) + self._make_epb(if_id=1)
+        p = self._write_pcapng(pcapng)
+        valid, sha, sz, count, msg = run_trial.validate_pcap_file(p)
+        self.assertFalse(valid)
+        self.assertIn("references non-existent interface 1", msg)
+
+    def test_03_spb_before_any_idb_fails_closed(self):
+        """3. SPB encountered before any Interface Description Block fails closed."""
+        pcapng = self._make_shb() + self._make_spb(orig_len=40)
+        p = self._write_pcapng(pcapng)
+        valid, sha, sz, count, msg = run_trial.validate_pcap_file(p)
+        self.assertFalse(valid)
+        self.assertIn("precedes Interface Description Block", msg)
+
+    def test_04_spb_packet_exceeding_idb_snaplen_fails_closed(self):
+        """4. SPB packet exceeding interface snaplen fails closed."""
+        pcapng = self._make_shb() + self._make_idb(snaplen=50) + self._make_spb(orig_len=80, pkt_data=b"\x00" * 80)
+        p = self._write_pcapng(pcapng)
+        valid, sha, sz, count, msg = run_trial.validate_pcap_file(p)
+        self.assertFalse(valid)
+        self.assertIn("snaplen=50", msg)
+
+    def test_05_idb_before_shb_fails_closed(self):
+        """5. IDB/EPB encountered before Section Header Block fails closed."""
+        pcapng = self._make_idb(snaplen=65535) + self._make_shb()
+        p = self._write_pcapng(pcapng)
+        valid, sha, sz, count, msg = run_trial.validate_pcap_file(p)
+        self.assertFalse(valid)
+        self.assertIn("Invalid PCAP header magic", msg)
+
+    def test_06_non_shb_first_block_fails_closed(self):
+        """6. Non-SHB first block type fails closed."""
+        raw_garbage = struct.pack("<II", 0x12345678, 32) + b"\x00" * 24
+        p = self._write_pcapng(raw_garbage)
+        valid, sha, sz, count, msg = run_trial.validate_pcap_file(p)
+        self.assertFalse(valid)
+        self.assertIn("Invalid PCAP header magic", msg)
+
+    def test_07_multiple_sections_interface_reset(self):
+        """7. Multiple sections correctly reset interface tables between sections."""
+        # Section 1 has 2 interfaces (ID 0, 1) and 1 EPB on interface 1 (valid)
+        sec1 = self._make_shb() + self._make_idb() + self._make_idb() + self._make_epb(if_id=1)
+        # Section 2 has 1 interface (ID 0) and 1 EPB referencing interface 1 (now invalid!)
+        sec2 = self._make_shb() + self._make_idb() + self._make_epb(if_id=1)
+        p = self._write_pcapng(sec1 + sec2)
+        valid, sha, sz, count, msg = run_trial.validate_pcap_file(p)
+        self.assertFalse(valid)
+        self.assertIn("references non-existent interface 1 (known interfaces: 1)", msg)
+
+    def test_08_invalid_section_metadata_fails_closed(self):
+        """8. Invalid section version (e.g. major != 1) or mismatched block length fails closed."""
+        # Unsupported major version 2
+        pcapng_bad_ver = self._make_shb(major=2)
+        p = self._write_pcapng(pcapng_bad_ver)
+        valid, sha, sz, count, msg = run_trial.validate_pcap_file(p)
+        self.assertFalse(valid)
+        self.assertIn("Unsupported PCAP-NG section major version 2", msg)
+
+        # Mismatched leading and trailing block lengths
+        shb_raw = bytearray(self._make_shb())
+        struct.pack_into("<I", shb_raw, len(shb_raw) - 4, 999)  # corrupt trailing length
+        p2 = self._write_pcapng(bytes(shb_raw))
+        valid2, sha2, sz2, count2, msg2 = run_trial.validate_pcap_file(p2)
+        self.assertFalse(valid2)
+        self.assertIn("block length mismatch", msg2)
+
+    def test_09_malformed_block_options_fail_closed(self):
+        """9. Malformed block options fail closed."""
+        # Option length exceeding boundary
+        opt_oversized = struct.pack("<HH", 1, 100) + b"\x00" * 4  # declared len 100 but only 4 bytes
+        shb_oversized = self._make_shb(options=opt_oversized)
+        p1 = self._write_pcapng(shb_oversized)
+        valid1, sha1, sz1, count1, msg1 = run_trial.validate_pcap_file(p1)
+        self.assertFalse(valid1)
+        self.assertIn("exceeds option boundary", msg1)
+
+        # Non-zero garbage after opt_endofopt (code 0)
+        opt_with_garbage = struct.pack("<HH", 0, 0) + b"\xFF\xFF\xFF\xFF"
+        shb_garbage = self._make_shb(options=opt_with_garbage)
+        p2 = self._write_pcapng(shb_garbage)
+        valid2, sha2, sz2, count2, msg2 = run_trial.validate_pcap_file(p2)
+        self.assertFalse(valid2)
+        self.assertIn("Unexpected non-zero bytes after opt_endofopt", msg2)
+
+    def test_10_malformed_spb_padding_and_boundaries_fail_closed(self):
+        """10. Malformed SPB padding and packet boundaries fail closed."""
+        # SPB where block data length does not match expected padded data length
+        orig_len = 15  # requires 1 byte padding to 16
+        padded_pkt = b"\xAA" * 15 + b"\x00"  # 16 bytes
+        # Corrupt block total length to 33 (not multiple of 4)
+        spb_bad_align = struct.pack("<III", 0x00000003, 33, orig_len) + padded_pkt + struct.pack("<I", 33)
+        p1 = self._write_pcapng(self._make_shb() + self._make_idb() + spb_bad_align)
+        valid1, sha1, sz1, count1, msg1 = run_trial.validate_pcap_file(p1)
+        self.assertFalse(valid1)
+        self.assertIn("not 32-bit aligned", msg1)
+
+    def test_11_valid_pcapng_with_and_without_tshark(self):
+        """11. Valid PCAP-NG correctly validated with both EPBs and SPBs, with and without TShark."""
+        # File with 2 EPBs and 1 SPB -> exactly 3 packets
+        epb1 = self._make_epb(if_id=0, cap_len=40, orig_len=40, pkt_data=b"\x11" * 40)
+        epb2 = self._make_epb(if_id=0, cap_len=60, orig_len=60, pkt_data=b"\x22" * 60)
+        spb1 = self._make_spb(orig_len=30, pkt_data=b"\x33" * 30)
+        pcapng = self._make_shb() + self._make_idb(snaplen=65535) + epb1 + epb2 + spb1
+        p = self._write_pcapng(pcapng)
+
+        # Without TShark installed
+        with patch("shutil.which", return_value=None):
+            valid, sha, sz, count, msg = run_trial.validate_pcap_file(p, min_packets=3)
+            self.assertTrue(valid, f"Validation failed: {msg}")
+            self.assertEqual(count, 3)
+
+        # With mock TShark agreeing
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.stdout = "1\n2\n3\n"
+        with patch("shutil.which", return_value="/usr/bin/tshark"), \
+             patch("subprocess.run", return_value=mock_proc):
+            valid2, sha2, sz2, count2, msg2 = run_trial.validate_pcap_file(p, min_packets=3)
+            self.assertTrue(valid2, f"Validation failed: {msg2}")
+            self.assertEqual(count2, 3)
 
 
 if __name__ == "__main__":

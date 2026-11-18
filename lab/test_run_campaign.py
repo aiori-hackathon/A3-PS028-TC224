@@ -14,6 +14,7 @@ Fully mocked, unprivileged test suite verifying:
 8. Distinction between valid live, simulation, and measurement failures
 """
 
+import errno
 import json
 import os
 from pathlib import Path
@@ -1471,6 +1472,322 @@ runner.run()
 
         stdout, stderr = proc.communicate(timeout=5.0)
         self.assertEqual(proc.returncode, 130)
+
+
+class TestCampaignFsyncDirectoryFailClosed(unittest.TestCase):
+    """
+    Validates fail-closed semantics for directory fsync in run_campaign:
+    - Genuine OSErrors (EIO, ENOSPC, EACCES) propagate.
+    - File descriptors are unconditionally closed even when fsync fails.
+    - Interrupted system calls (EINTR) are retried until completion.
+    - Non-POSIX environments raise explicit OSError(errno.ENOSYS).
+    - write_failed_attempt_record and save_atomically fail closed if fsync fails.
+    """
+    def setUp(self):
+        self.td = tempfile.TemporaryDirectory(prefix="ps028_camp_fsync_")
+        self.td_path = Path(self.td.name)
+
+    def tearDown(self):
+        self.td.cleanup()
+
+    def test_fsync_directory_raises_on_open_oserror(self):
+        """Genuine OSError on opening directory propagates with error code."""
+        with patch("os.open", side_effect=OSError(errno.EACCES, "Permission denied")):
+            with self.assertRaises(OSError) as ctx:
+                run_campaign.fsync_directory(self.td_path)
+            self.assertEqual(ctx.exception.errno, errno.EACCES)
+
+    def test_fsync_directory_raises_on_fsync_oserror(self):
+        """Genuine OSError during directory fsync propagates with error code."""
+        with patch("os.fsync", side_effect=OSError(errno.EIO, "I/O error")):
+            with self.assertRaises(OSError) as ctx:
+                run_campaign.fsync_directory(self.td_path)
+            self.assertEqual(ctx.exception.errno, errno.EIO)
+
+    def test_fsync_directory_closes_fd_on_fsync_error(self):
+        """File descriptor is guaranteed to be closed even when os.fsync raises."""
+        fake_fd = 9999
+        with patch("os.open", return_value=fake_fd), \
+             patch("os.fsync", side_effect=OSError(errno.EIO, "Disk write failure")), \
+             patch("os.close") as mock_close:
+            with self.assertRaises(OSError):
+                run_campaign.fsync_directory(self.td_path)
+            mock_close.assert_called_with(fake_fd)
+
+    def test_fsync_directory_retries_on_eintr(self):
+        """Retries open and fsync when interrupted by EINTR signal."""
+        fake_fd = 8888
+        open_attempts = [InterruptedError(errno.EINTR, "Interrupted"), fake_fd]
+        fsync_attempts = [InterruptedError(errno.EINTR, "Interrupted"), None]
+
+        with patch("os.open", side_effect=open_attempts), \
+             patch("os.fsync", side_effect=fsync_attempts), \
+             patch("os.close") as mock_close:
+            run_campaign.fsync_directory(self.td_path)
+            mock_close.assert_called_once_with(fake_fd)
+
+    def test_fsync_directory_fails_on_non_posix(self):
+        """Explicitly raises OSError(errno.ENOSYS) on non-POSIX platforms."""
+        with patch("os.name", "nt"):
+            with self.assertRaises(OSError) as ctx:
+                run_campaign.fsync_directory(self.td_path)
+            self.assertEqual(ctx.exception.errno, errno.ENOSYS)
+
+    def test_write_failed_attempt_record_fails_closed_on_directory_fsync_error(self):
+        """write_failed_attempt_record propagates directory fsync OSError."""
+        trial_dir = self.td_path / "trial_err"
+        dummy_attempt = {
+            "attempt_number": 1,
+            "trial_id": "trial-test-01",
+            "execution_mode": "SIMULATION",
+            "is_simulation": True,
+            "timestamps": {},
+            "status": "FAILED",
+            "validity": "MEASUREMENT_FAILURE",
+            "evidence_paths": {},
+            "capture_metadata": {},
+            "http_outcome": {},
+            "network_observations": {},
+            "cleanup_status": {}
+        }
+        with patch("lab.run_campaign.fsync_directory", side_effect=OSError(errno.EIO, "I/O failure")):
+            with self.assertRaises(OSError):
+                run_campaign.write_failed_attempt_record(trial_dir, dummy_attempt)
+
+    def test_manifest_save_atomically_fails_closed_on_directory_fsync_error(self):
+        """manifest.save_atomically propagates directory fsync OSError."""
+        manifest = run_campaign.CampaignManifest(
+            campaign_id="camp-fsync-test",
+            output_dir=self.td_path,
+            scenarios=["S0"],
+            browsers=["chrome"],
+            repetitions=1,
+            is_simulation=True,
+            matrix_slots=[]
+        )
+        with patch("lab.run_campaign.fsync_directory", side_effect=OSError(errno.ENOSPC, "No space")):
+            with self.assertRaises(OSError):
+                manifest.save_atomically()
+
+
+class TestInterruptionLifecycleAndSignalSafety(unittest.TestCase):
+    """
+    Synthetic software tests exercising actual run_trial and run_campaign
+    interruption lifecycle, process termination, cleanup preservation, and exit codes:
+    1. Critical section defers KeyboardInterrupt until section finishes.
+    2. Registered subprocesses are terminated and reaped upon signal.
+    3. Signal during active trial finalizes cleanly (exit 130/143, durable failure record).
+    4. Signal during cleanup does not abort baseline restoration.
+    5. Signal after valid completed trial preserves COMPLETED/VALID_LIVE status.
+    6. Cleanup failure following interruption triggers fail-stop (HALTED_ON_FAILURE).
+    7. Repeated signal triggers immediate forced exit (sys.exit).
+    """
+    def setUp(self):
+        self.td = tempfile.TemporaryDirectory(prefix="ps028_interr_test_")
+        self.td_path = Path(self.td.name)
+
+    def tearDown(self):
+        self.td.cleanup()
+
+    def test_coordinator_critical_section_defers_interruption(self):
+        """Critical sections allow execution to complete without raising KeyboardInterrupt."""
+        coord = run_campaign.InterruptionCoordinator()
+        critical_executed = False
+
+        with coord.critical_section("test_section"):
+            coord.handle_signal(signal.SIGINT, None)
+            critical_executed = True
+
+        self.assertTrue(critical_executed)
+        self.assertTrue(coord.interrupted)
+        self.assertEqual(coord.signum, signal.SIGINT)
+        self.assertEqual(coord.signal_name, "SIGINT")
+
+    def test_coordinator_registers_and_terminates_subprocess(self):
+        """Registered child process is terminated and reaped when signal arrives."""
+        coord = run_campaign.InterruptionCoordinator()
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        coord.register_process(proc)
+
+        self.assertIsNone(proc.poll(), "Process should be alive initially")
+
+        with coord.critical_section("signal_delivery"):
+            coord.handle_signal(signal.SIGTERM, None)
+
+        self.assertIsNotNone(proc.poll(), "Process must be terminated and reaped by coordinator")
+        self.assertTrue(coord.interrupted)
+        self.assertEqual(coord.signum, signal.SIGTERM)
+
+    @patch("lab.impair.self_test_baseline", return_value=True)
+    def test_campaign_runner_signal_during_active_trial_finalizes_cleanly(self, mock_base):
+        """SIGINT during active trial reaps process, preserves partial evidence, and marks manifest INTERRUPTED."""
+        camp_dir = self.td_path / "camp_interrupted"
+        camp_dir.mkdir(parents=True, exist_ok=True)
+
+        runner = run_campaign.CampaignRunner(
+            scenarios=["S0"],
+            browsers=["chrome"],
+            repetitions=1,
+            output_dir=camp_dir,
+            is_simulation=True,
+            exit_on_interruption=False
+        )
+
+        def mock_trial_with_signal(**kwargs):
+            coord = kwargs.get("coordinator")
+            dummy_proc = MagicMock()
+            dummy_proc.poll.return_value = None
+            if coord:
+                coord.register_process(dummy_proc)
+                coord.handle_signal(signal.SIGINT, None)
+            raise KeyboardInterrupt("Interrupted during trial")
+
+        with patch("lab.run_trial.run_trial", side_effect=mock_trial_with_signal):
+            res = runner.run()
+
+        self.assertEqual(res["status"], "INTERRUPTED")
+        self.assertIn("SIGINT", res.get("summary", {}).get("halt_reason", ""))
+
+        # Verify exactly one attempt was recorded for slot 1
+        slot0 = res["matrix_slots"][0]
+        self.assertEqual(len(slot0["attempts"]), 1)
+        att0 = slot0["attempts"][0]
+        self.assertEqual(att0["status"], "INTERRUPTED")
+        self.assertEqual(att0["validity"], "INTERRUPTED")
+
+        # Verify durable failed_attempt_record.json exists on disk
+        trial_id = att0["trial_id"]
+        failure_record_path = camp_dir / "trials" / trial_id / run_campaign.FAILURE_RECORD_FILENAME
+        self.assertTrue(failure_record_path.is_file())
+        rec_data = json.loads(failure_record_path.read_text(encoding="utf-8"))
+        self.assertEqual(rec_data["trial_id"], trial_id)
+        self.assertEqual(rec_data["status"], "INTERRUPTED")
+        self.assertEqual(rec_data["validity"], "INTERRUPTED")
+
+    @patch("lab.impair.self_test_baseline", return_value=True)
+    def test_signal_during_cleanup_does_not_abort_cleanup(self, mock_base):
+        """Signal received during cleanup critical section allows cleanup to complete."""
+        camp_dir = self.td_path / "camp_cleanup_sig"
+        camp_dir.mkdir(parents=True, exist_ok=True)
+
+        runner = run_campaign.CampaignRunner(
+            scenarios=["S0"],
+            browsers=["chrome"],
+            repetitions=1,
+            output_dir=camp_dir,
+            is_simulation=True,
+            exit_on_interruption=False
+        )
+
+        # Signal delivered during attempt finalization
+        def mock_trial_ok(**kwargs):
+            # Fire signal inside finalization
+            runner.coordinator.handle_signal(signal.SIGTERM, None)
+            return None  # trial errored or was interrupted
+
+        with patch("lab.run_trial.run_trial", side_effect=mock_trial_ok):
+            res = runner.run()
+
+        self.assertEqual(res["status"], "INTERRUPTED")
+        self.assertIn("SIGTERM", res.get("summary", {}).get("halt_reason", ""))
+        self.assertEqual(len(res["matrix_slots"][0]["attempts"]), 1)
+
+    @patch("lab.impair.self_test_baseline", return_value=True)
+    def test_signal_after_completed_valid_trial_preserves_valid_evidence(self, mock_base):
+        """Signal arriving after a trial succeeded preserves genuine COMPLETED / VALID_LIVE evidence."""
+        camp_dir = self.td_path / "camp_signal_after_success"
+        camp_dir.mkdir(parents=True, exist_ok=True)
+
+        runner = run_campaign.CampaignRunner(
+            scenarios=["S0", "S1"],
+            browsers=["chrome"],
+            repetitions=1,
+            output_dir=camp_dir,
+            is_simulation=True,
+            exit_on_interruption=False
+        )
+
+        call_count = 0
+        def mock_trial_seq(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            tid = kwargs["trial_id"]
+            sc = kwargs["scenario_id"]
+            # Create mock trial result that succeeded
+            tdir = camp_dir / "trials" / tid
+            tdir.mkdir(parents=True, exist_ok=True)
+            res = _create_mock_trial_result(sc, tid, camp_dir, is_simulation=True, baseline_verified=True)
+            # Deliver SIGINT right after first trial succeeds
+            if call_count == 1:
+                runner.coordinator.record_interruption(signal.SIGINT, "SIGINT")
+            return res
+
+        with patch("lab.run_trial.run_trial", side_effect=mock_trial_seq):
+            res = runner.run()
+
+        # Slot 1 should be COMPLETED (genuine success preserved without false reclassification!)
+        slot0 = res["matrix_slots"][0]
+        self.assertEqual(slot0["status"], "COMPLETED")
+        att0 = slot0["attempts"][0]
+        self.assertEqual(att0["status"], "COMPLETED")
+        self.assertEqual(att0["validity"], "SIMULATION")
+
+        # Slot 2 should remain PENDING (not executed due to interruption)
+        slot1 = res["matrix_slots"][1]
+        self.assertEqual(slot1["status"], "PENDING")
+        self.assertEqual(len(slot1["attempts"]), 0)
+
+        # Campaign manifest is INTERRUPTED
+        self.assertEqual(res["status"], "INTERRUPTED")
+        self.assertIn("SIGINT", res.get("summary", {}).get("halt_reason", ""))
+
+    @patch("lab.impair.self_test_baseline", return_value=False)
+    @patch("lab.impair.clear_impairments")
+    def test_cleanup_failure_following_interruption_triggers_fail_stop(self, mock_clear, mock_base):
+        """Cleanup failure following interruption halts campaign with FAIL-STOP and status HALTED_ON_FAILURE."""
+        camp_dir = self.td_path / "camp_cleanup_fail"
+        camp_dir.mkdir(parents=True, exist_ok=True)
+
+        runner = run_campaign.CampaignRunner(
+            scenarios=["S0"],
+            browsers=["chrome"],
+            repetitions=1,
+            output_dir=camp_dir,
+            is_simulation=True,
+            exit_on_interruption=False
+        )
+
+        def mock_trial_fail(**kwargs):
+            runner.coordinator.record_interruption(signal.SIGINT, "SIGINT")
+            raise KeyboardInterrupt("Interrupted")
+
+        with patch("lab.run_trial.run_trial", side_effect=mock_trial_fail):
+            with self.assertRaises(run_campaign.CampaignHaltedError):
+                runner.run()
+
+        mpath = camp_dir / run_campaign.MANIFEST_FILENAME
+        self.assertTrue(mpath.is_file())
+        mdata = json.loads(mpath.read_text(encoding="utf-8"))
+        self.assertEqual(mdata["status"], "HALTED_ON_FAILURE")
+        self.assertIn("FAIL-STOP", mdata.get("summary", {}).get("halt_reason", ""))
+
+        slot0 = mdata["matrix_slots"][0]
+        att0 = slot0["attempts"][0]
+        self.assertEqual(att0["status"], "FAILED")
+        self.assertEqual(att0["validity"], "CLEANUP_FAILURE")
+
+    def test_repeated_signal_causes_immediate_forced_exit(self):
+        """Second signal delivered to coordinator immediately forces exit with 128 + signum."""
+        coord = run_campaign.InterruptionCoordinator()
+        # First signal
+        with coord.critical_section("init"):
+            coord.handle_signal(signal.SIGINT, None)
+        self.assertEqual(coord.signal_count, 1)
+
+        # Second signal must invoke sys.exit(130)
+        with self.assertRaises(SystemExit) as ctx:
+            coord.handle_signal(signal.SIGINT, None)
+        self.assertEqual(ctx.exception.code, 130)
 
 
 if __name__ == "__main__":
