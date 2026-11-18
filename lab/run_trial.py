@@ -1476,6 +1476,9 @@ def _count_packets_pcapng(
     endian = "<"
     interfaces: List[Dict[str, Any]] = []
     section_count = 0
+    current_section_offset = 0
+    current_section_len = -1
+    current_section_bytes = 0
 
     while offset < dlen:
         if offset + 12 > dlen:
@@ -1484,7 +1487,14 @@ def _count_packets_pcapng(
         # Check for Section Header Block (0x0A0D0D0A) which establishes endianness
         raw_type = data[offset : offset + 4]
         if raw_type == b"\x0a\x0d\x0d\x0a":
+            # If a prior section was opened, finalize its length verification
+            if section_count > 0 and current_section_len != -1:
+                if current_section_bytes != current_section_len:
+                    return False, count, f"PCAP-NG section length mismatch for section at offset {current_section_offset}: declared {current_section_len} bytes != actual {current_section_bytes} bytes"
+
             section_count += 1
+            current_section_offset = offset
+            current_section_bytes = 0
             interfaces = []  # Reset interface list per section for multi-section isolation
             if offset + 28 > dlen:
                 return False, count, f"Truncated Section Header Block at offset {offset} ({dlen - offset} bytes < 28)"
@@ -1502,8 +1512,18 @@ def _count_packets_pcapng(
                 return False, count, f"Invalid Section Header Block length {block_len} at offset {offset} (< 28)"
 
             major, minor = struct.unpack(endian + "HH", data[offset + 12 : offset + 16])
-            if major != 1:
-                return False, count, f"Unsupported PCAP-NG section major version {major} at offset {offset} (expected 1)"
+            if major != 1 or minor != 0:
+                return False, count, f"Unsupported PCAP-NG section version {major}.{minor} at offset {offset} (expected 1.0)"
+
+            sec_len = struct.unpack(endian + "q", data[offset + 16 : offset + 24])[0]
+            if sec_len < -1:
+                return False, count, f"Invalid PCAP-NG section length {sec_len} at offset {offset} (must be -1 or non-negative)"
+            if sec_len != -1:
+                if sec_len % 4 != 0:
+                    return False, count, f"PCAP-NG section length {sec_len} at offset {offset} is not 32-bit aligned"
+                if offset + block_len + sec_len > dlen:
+                    return False, count, f"PCAP-NG section length {sec_len} at offset {offset} exceeds available file data ({dlen - (offset + block_len)} bytes)"
+            current_section_len = sec_len
 
             opt_ok, opt_err = _validate_pcapng_options(data, offset + 24, offset + block_len - 4, endian)
             if not opt_ok:
@@ -1524,12 +1544,17 @@ def _count_packets_pcapng(
         if trailing_len != block_len:
             return False, count, f"PCAP-NG block length mismatch at offset {offset}: leading {block_len} != trailing {trailing_len}"
 
+        if raw_type != b"\x0a\x0d\x0d\x0a":
+            current_section_bytes += block_len
+
         # Block-specific structural parsing
         if block_type == 0x00000001:
             # Interface Description Block (IDB)
             if block_len < 20:
                 return False, count, f"Truncated PCAP-NG IDB at offset {offset} (length {block_len} < 20)"
             link_type, reserved, snaplen = struct.unpack(endian + "HHI", data[offset + 8 : offset + 16])
+            if reserved != 0:
+                return False, count, f"Invalid PCAP-NG IDB reserved field {reserved} at offset {offset} (must be 0)"
             if snaplen <= 0 or snaplen > 262144:
                 return False, count, f"Invalid PCAP-NG interface snaplen: {snaplen} (must be > 0 and <= 262144)"
             opt_ok, opt_err = _validate_pcapng_options(data, offset + 16, offset + block_len - 4, endian)
@@ -1583,6 +1608,11 @@ def _count_packets_pcapng(
 
     if offset != dlen:
         return False, count, f"Trailing unparsed bytes at end of PCAP-NG: {dlen - offset} bytes"
+
+    # Finalize the last section length verification
+    if section_count > 0 and current_section_len != -1:
+        if current_section_bytes != current_section_len:
+            return False, count, f"PCAP-NG section length mismatch for section at offset {current_section_offset}: declared {current_section_len} bytes != actual {current_section_bytes} bytes"
 
     if section_count == 0:
         return False, 0, "No valid Section Header Block found in PCAP-NG"
@@ -4247,6 +4277,228 @@ def verify_browser_dns_controls(
     return res
 
 
+def find_descendant_pids(parent_pid: int) -> List[int]:
+    """
+    Finds all descendant PIDs of a given parent PID by scanning /proc.
+    Returns list of descendant PIDs in discovery order.
+    """
+    if not isinstance(parent_pid, int) or parent_pid <= 1:
+        return []
+    try:
+        children_map: Dict[int, List[int]] = {}
+        for entry in os.listdir("/proc"):
+            if not entry.isdigit():
+                continue
+            pid = int(entry)
+            try:
+                stat_path = f"/proc/{pid}/stat"
+                with open(stat_path, "r", encoding="utf-8", errors="replace") as f:
+                    content = f.read()
+                rparen = content.rfind(")")
+                if rparen != -1 and rparen + 2 < len(content):
+                    rest = content[rparen + 2 :].split()
+                    if len(rest) >= 2:
+                        ppid = int(rest[1])
+                        children_map.setdefault(ppid, []).append(pid)
+            except (FileNotFoundError, ProcessLookupError, PermissionError, ValueError, IndexError):
+                continue
+
+        descendants: List[int] = []
+        queue = [parent_pid]
+        visited = {parent_pid}
+        while queue:
+            curr = queue.pop(0)
+            for child in children_map.get(curr, []):
+                if child not in visited:
+                    visited.add(child)
+                    descendants.append(child)
+                    queue.append(child)
+        return descendants
+    except Exception:
+        return []
+
+
+def terminate_process_group(
+    proc: Any,
+    timeout: float = 1.5,
+    escalate_to_kill: bool = True
+) -> bool:
+    """
+    Safely terminates a process group and any remaining descendant processes.
+    - Sends SIGTERM to process group (if distinct from runner) and direct PID.
+    - Bounded wait for process exit.
+    - Escalates to SIGKILL if still running.
+    - Reaps the process with wait().
+    - Never signals runner's own PGID or host root processes.
+    Returns True if the process was confirmed terminated and reaped, False otherwise.
+    """
+    if proc is None:
+        return True
+
+    pid = getattr(proc, "pid", None)
+    poll_fn = getattr(proc, "poll", None)
+    wait_fn = getattr(proc, "wait", None)
+
+    if callable(poll_fn) and poll_fn() is not None:
+        return True
+
+    if not isinstance(pid, int) or pid <= 1:
+        try:
+            term_fn = getattr(proc, "terminate", None)
+            if callable(term_fn):
+                term_fn()
+            if callable(wait_fn):
+                wait_fn(timeout=min(timeout, 0.5))
+        except Exception:
+            pass
+        return True
+
+    current_pid = os.getpid()
+    current_pgid = os.getpgrp()
+
+    target_pgid = None
+    try:
+        target_pgid = os.getpgid(pid)
+    except (ProcessLookupError, OSError):
+        target_pgid = None
+
+    descendants = find_descendant_pids(pid)
+
+    # 1. Graceful SIGTERM
+    if target_pgid is not None and target_pgid > 1 and target_pgid != current_pid and target_pgid != current_pgid:
+        try:
+            os.killpg(target_pgid, signal.SIGTERM)
+        except (ProcessLookupError, OSError):
+            pass
+    else:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except (ProcessLookupError, OSError):
+            pass
+
+    for dpid in descendants:
+        if dpid > 1 and dpid != current_pid and dpid != current_pgid:
+            try:
+                os.kill(dpid, signal.SIGTERM)
+            except (ProcessLookupError, OSError):
+                pass
+
+    # Bounded wait for graceful termination
+    t_end = time.time() + timeout
+    while time.time() < t_end:
+        if callable(poll_fn):
+            try:
+                if poll_fn() is not None:
+                    break
+            except Exception:
+                pass
+        elif not _is_pid_alive(pid):
+            break
+        time.sleep(0.05)
+
+    # 2. Escalate to SIGKILL if still alive
+    is_alive = True
+    if callable(poll_fn):
+        try:
+            is_alive = (poll_fn() is None)
+        except Exception:
+            is_alive = _is_pid_alive(pid)
+    else:
+        is_alive = _is_pid_alive(pid)
+
+    if is_alive and escalate_to_kill:
+        if target_pgid is not None and target_pgid > 1 and target_pgid != current_pid and target_pgid != current_pgid:
+            try:
+                os.killpg(target_pgid, signal.SIGKILL)
+            except (ProcessLookupError, OSError):
+                pass
+        else:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except (ProcessLookupError, OSError):
+                pass
+
+        remaining_descendants = find_descendant_pids(pid)
+        for dpid in set(descendants + remaining_descendants):
+            if dpid > 1 and dpid != current_pid and dpid != current_pgid:
+                try:
+                    os.kill(dpid, signal.SIGKILL)
+                except (ProcessLookupError, OSError):
+                    pass
+
+    # 3. Final reap via wait()
+    if callable(wait_fn):
+        try:
+            wait_fn(timeout=1.0)
+        except (subprocess.TimeoutExpired, Exception):
+            pass
+
+    if callable(poll_fn):
+        try:
+            return poll_fn() is not None
+        except Exception:
+            return not _is_pid_alive(pid)
+
+    return not _is_pid_alive(pid)
+
+
+def execute_browser_subprocess(
+    cmd: List[str],
+    env: Optional[Dict[str, str]] = None,
+    timeout: float = 15.0,
+    coordinator: Optional[Any] = None,
+    start_new_session: bool = True
+) -> Tuple[int, str, str, bool]:
+    """
+    Executes a browser subprocess with controlled lifecycle, process-group isolation,
+    and InterruptionCoordinator tracking.
+    Returns: (exit_code, stdout, stderr, timed_out)
+    """
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+        start_new_session=start_new_session
+    )
+    if coordinator is not None and hasattr(coordinator, "register_process"):
+        coordinator.register_process(proc)
+
+    timed_out = False
+    stdout = ""
+    stderr = ""
+    exit_code = -1
+
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+        exit_code = proc.returncode
+    except subprocess.TimeoutExpired as exc:
+        timed_out = True
+        exit_code = 124
+        terminate_process_group(proc, timeout=1.5, escalate_to_kill=True)
+        try:
+            res_out, res_err = proc.communicate(timeout=1.0)
+            stdout = (exc.stdout or "") + (res_out or "")
+            stderr = (exc.stderr or "") + (res_err or "")
+        except Exception:
+            stdout = exc.stdout or ""
+            stderr = exc.stderr or ""
+    except (KeyboardInterrupt, BaseException):
+        terminate_process_group(proc, timeout=1.5, escalate_to_kill=True)
+        raise
+    finally:
+        reaped = True
+        if hasattr(proc, "poll") and proc.poll() is None:
+            reaped = terminate_process_group(proc, timeout=1.0, escalate_to_kill=True)
+        if not reaped and coordinator is not None and hasattr(coordinator, "record_termination_error"):
+            coordinator.record_termination_error(f"Failed to terminate and reap browser process {getattr(proc, 'pid', 'unknown')}")
+        if coordinator is not None and hasattr(coordinator, "unregister_process"):
+            coordinator.unregister_process(proc)
+
+    return exit_code, stdout, stderr, timed_out
+
+
 def run_browser(
     browser_name: str,
     browser_path: str,
@@ -4256,14 +4508,15 @@ def run_browser(
     netns: str = CLIENT_NETNS,
     is_simulation: bool = False,
     extra_args: Optional[List[str]] = None,
-    coordinator: Optional[Any] = None
+    coordinator: Optional[Any] = None,
+    raw_cmd_override: Optional[List[str]] = None
 ) -> Dict[str, Any]:
     """
     Executes a real browser inside the client namespace with a clean process,
     isolated profile, and headless display flags.
     Captures stdout, stderr, exit code, and determines HTTP outcome.
     """
-    if is_simulation:
+    if is_simulation and raw_cmd_override is None:
         return {
             "name": browser_name,
             "executable": browser_path,
@@ -4279,112 +4532,116 @@ def run_browser(
     target_uid, target_gid = get_browser_uid_gid()
     browser_env = get_browser_env(target_uid, target_gid)
 
-    # Preflight path writability checks
-    verify_browser_paths_writable(
-        profile_dir=profile_dir,
-        target_uid=target_uid,
-        target_gid=target_gid,
-        browser_name=browser_name,
-        env=browser_env
-    )
-
     bname = browser_name.lower()
     telemetry_log_path = profile_dir / "moz_telemetry.log"
     if "firefox" in bname:
         browser_env["MOZ_LOG"] = "sync,timestamp,nsHttp:5,nsSocketTransport:5"
         browser_env["MOZ_LOG_FILE"] = str(telemetry_log_path.resolve())
 
-    # Construct browser command per browser family
-    is_snap = is_snap_browser(browser_path)
-    if is_snap:
-        cmd = []
-        if os.geteuid() != 0:
-            cmd.extend(["sudo", "-n"])
-        cmd.extend(["ip", "netns", "exec", netns])
-        cmd.extend(["unshare", "--mount", "--propagation", "private"])
-        cmd.extend([
-            sys.executable,
-            str(SCRIPT_DIR / "privileged_helper.py"),
-            "launch-snap-browser",
-            f"--reuid={target_uid}",
-            f"--regid={target_gid}",
-            f"--snap-name={browser_name}",
-            "--",
-            browser_path
-        ])
+    if raw_cmd_override is not None:
+        cmd = list(raw_cmd_override)
+        is_snap = False
     else:
-        cmd = []
-        if os.geteuid() != 0:
-            cmd.extend(["sudo", "-n"])
-        cmd.extend(["ip", "netns", "exec", netns])
-
-        if shutil.which("setpriv"):
-            cmd.extend(["setpriv", f"--reuid={target_uid}", f"--regid={target_gid}", "--init-groups"])
-        else:
-            try:
-                ident = identity.resolve_user_by_uid(target_uid)
-                user_name = ident.username
-            except identity.IdentityResolutionError as exc:
-                raise BrowserPreflightError(
-                    f"Failed to resolve username for UID {target_uid}: {exc}"
-                ) from exc
-            cmd.extend(["sudo", "-u", user_name, "--"])
-
-        cmd.extend(["env", "-i"])
-        for env_k, env_v in browser_env.items():
-            cmd.append(f"{env_k}={env_v}")
-
-        cmd.append(browser_path)
-
-    netlog_path = profile_dir / "netlog.json"
-    if "chromium" in bname or "chrome" in bname:
-        cmd.extend([
-            "--headless=new",
-            "--dump-dom",
-            "--no-sandbox",
-            "--disable-gpu",
-            f"--user-data-dir={profile_dir.resolve()}",
-            "--no-first-run",
-            "--no-default-browser-check",
-            "--disable-background-networking",
-            "--disable-component-update",
-            "--disable-domain-reliability",
-            "--disable-client-side-phishing-detection",
-            "--safebrowsing-disable-auto-update",
-            "--disable-features=OptimizationHints,Translate,DnsOverHttps",
-            "--dns-over-https-mode=off",
-            "--disable-breakpad",
-            "--disable-background-timer-throttling",
-            "--disable-sync",
-            "--disable-translate",
-            "--disable-default-apps",
-            f"--log-net-log={netlog_path.resolve()}",
-            f"--timeout={int(timeout * 1000)}",
-        ])
-    elif "firefox" in bname:
-        cmd.extend([
-            "--headless",
-            "--profile", str(profile_dir.resolve()),
-            "--no-remote",
-            "--new-instance",
-        ])
-
-    if extra_args:
-        cmd.extend(extra_args)
-
-    cmd.append(target_url)
-
-    # Enforce preflight browser DNS controls verification before process launch
-    dns_ctrl = verify_browser_dns_controls(
-        browser_name=browser_name,
-        cmd_args=cmd,
-        profile_dir=profile_dir,
-        browser_path=browser_path
-    )
-    if not dns_ctrl.get("doh_trr_controlled"):
-        raise BrowserPreflightError(
-            f"Preflight DNS control verification failed for {browser_name}: {dns_ctrl}"
+        # Preflight path writability checks
+        verify_browser_paths_writable(
+            profile_dir=profile_dir,
+            target_uid=target_uid,
+            target_gid=target_gid,
+            browser_name=browser_name,
+            env=browser_env
         )
+
+        # Construct browser command per browser family
+        is_snap = is_snap_browser(browser_path)
+        if is_snap:
+            cmd = []
+            if os.geteuid() != 0:
+                cmd.extend(["sudo", "-n"])
+            cmd.extend(["ip", "netns", "exec", netns])
+            cmd.extend(["unshare", "--mount", "--propagation", "private"])
+            cmd.extend([
+                sys.executable,
+                str(SCRIPT_DIR / "privileged_helper.py"),
+                "launch-snap-browser",
+                f"--reuid={target_uid}",
+                f"--regid={target_gid}",
+                f"--snap-name={browser_name}",
+                "--",
+                browser_path
+            ])
+        else:
+            cmd = []
+            if os.geteuid() != 0:
+                cmd.extend(["sudo", "-n"])
+            cmd.extend(["ip", "netns", "exec", netns])
+
+            if shutil.which("setpriv"):
+                cmd.extend(["setpriv", f"--reuid={target_uid}", f"--regid={target_gid}", "--init-groups"])
+            else:
+                try:
+                    ident = identity.resolve_user_by_uid(target_uid)
+                    user_name = ident.username
+                except identity.IdentityResolutionError as exc:
+                    raise BrowserPreflightError(
+                        f"Failed to resolve username for UID {target_uid}: {exc}"
+                    ) from exc
+                cmd.extend(["sudo", "-u", user_name, "--"])
+
+            cmd.extend(["env", "-i"])
+            for env_k, env_v in browser_env.items():
+                cmd.append(f"{env_k}={env_v}")
+
+            cmd.append(browser_path)
+
+        netlog_path = profile_dir / "netlog.json"
+        if "chromium" in bname or "chrome" in bname:
+            cmd.extend([
+                "--headless=new",
+                "--dump-dom",
+                "--no-sandbox",
+                "--disable-gpu",
+                f"--user-data-dir={profile_dir.resolve()}",
+                "--no-first-run",
+                "--no-default-browser-check",
+                "--disable-background-networking",
+                "--disable-component-update",
+                "--disable-domain-reliability",
+                "--disable-client-side-phishing-detection",
+                "--safebrowsing-disable-auto-update",
+                "--disable-features=OptimizationHints,Translate,DnsOverHttps",
+                "--dns-over-https-mode=off",
+                "--disable-breakpad",
+                "--disable-background-timer-throttling",
+                "--disable-sync",
+                "--disable-translate",
+                "--disable-default-apps",
+                f"--log-net-log={netlog_path.resolve()}",
+                f"--timeout={int(timeout * 1000)}",
+            ])
+        elif "firefox" in bname:
+            cmd.extend([
+                "--headless",
+                "--profile", str(profile_dir.resolve()),
+                "--no-remote",
+                "--new-instance",
+            ])
+
+        if extra_args:
+            cmd.extend(extra_args)
+
+        cmd.append(target_url)
+
+        # Enforce preflight browser DNS controls verification before process launch
+        dns_ctrl = verify_browser_dns_controls(
+            browser_name=browser_name,
+            cmd_args=cmd,
+            profile_dir=profile_dir,
+            browser_path=browser_path
+        )
+        if not dns_ctrl.get("doh_trr_controlled"):
+            raise BrowserPreflightError(
+                f"Preflight DNS control verification failed for {browser_name}: {dns_ctrl}"
+            )
 
     t0 = time.time()
     timed_out = False
@@ -4395,7 +4652,7 @@ def run_browser(
     stop_event = threading.Event()
     watcher_thread = None
 
-    if "firefox" in bname and not is_simulation:
+    if "firefox" in bname and not is_simulation and raw_cmd_override is None:
         def _firefox_telemetry_watcher():
             t_end = time.time() + timeout
             while time.time() < t_end and not stop_event.is_set():
@@ -4417,17 +4674,13 @@ def run_browser(
         watcher_thread.start()
 
     try:
-        proc = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
+        exit_code, stdout, stderr, timed_out = execute_browser_subprocess(
+            cmd=cmd,
+            env=browser_env,
             timeout=timeout,
-            check=False,
-            env=browser_env
+            coordinator=coordinator,
+            start_new_session=True
         )
-        exit_code = proc.returncode
-        stdout = proc.stdout
-        stderr = proc.stderr
         if is_snap and exit_code == 71:
             raise SnapMountError(stderr.strip() or "Snap mount setup failed")
         if exit_code < 0:
@@ -4442,18 +4695,14 @@ def run_browser(
             raise BrowserPreflightError(
                 f"Browser launch environment error: {stderr.strip()}"
             )
-    except subprocess.TimeoutExpired as e:
-        parsed_late = parse_firefox_telemetry(profile_dir, target_url=target_url) if "firefox" in bname else {}
-        if "firefox" in bname and parsed_late.get("status_code") is not None:
-            timed_out = False
-            exit_code = 0
-            stdout = (e.stdout or b"").decode("utf-8", errors="replace") if isinstance(e.stdout, bytes) else (e.stdout or "")
-            stderr = (e.stderr or b"").decode("utf-8", errors="replace") if isinstance(e.stderr, bytes) else (e.stderr or "")
-        else:
-            timed_out = True
-            exit_code = 124
-            stdout = (e.stdout or b"").decode("utf-8", errors="replace") if isinstance(e.stdout, bytes) else (e.stdout or "")
-            stderr = (e.stderr or b"").decode("utf-8", errors="replace") if isinstance(e.stderr, bytes) else (e.stderr or "")
+        if timed_out:
+            parsed_late = parse_firefox_telemetry(profile_dir, target_url=target_url) if "firefox" in bname else {}
+            if "firefox" in bname and parsed_late.get("status_code") is not None:
+                timed_out = False
+                exit_code = 0
+            else:
+                timed_out = True
+                exit_code = 124
     except KeyboardInterrupt:
         if "firefox" in bname:
             try:
@@ -4731,7 +4980,8 @@ def run_trial(
     capture_filter: Optional[str] = None,
     capture_buffer_kb: Optional[int] = None,
     caller_manages_signals: bool = False,
-    coordinator: Optional[Any] = None
+    coordinator: Optional[Any] = None,
+    raw_cmd_override: Optional[List[str]] = None
 ) -> Dict[str, Any]:
     """
     Executes one complete integrated measurement trial:
@@ -4847,30 +5097,31 @@ def run_trial(
             )
             scenario_applied_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
-            if not is_simulation:
-                # 4. Start Packet Capture (tcpdump) in ps028-cl namespace
-                capture_start_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
-                cap_iface = capture_interface or CLIENT_CAPTURE_INTERFACE
-                cap_filter = capture_filter or DEFAULT_BPF_FILTER
-                cap_buf_kb = capture_buffer_kb if capture_buffer_kb is not None else DEFAULT_CAPTURE_BUFFER_KB
-                tcpdump_proc = start_packet_capture(
-                    output_pcap=pcap_path,
-                    log_file=tcpdump_log,
-                    netns=CLIENT_NETNS,
-                    interface=cap_iface,
-                    bpf_filter=cap_filter,
-                    buffer_size_kb=cap_buf_kb,
-                    is_simulation=False,
-                    caller_holds_lock=concurrency.is_lock_held_by_current_thread(target_lock),
-                    lock_file=target_lock
-                )
+            if not is_simulation or raw_cmd_override is not None:
+                if not is_simulation:
+                    # 4. Start Packet Capture (tcpdump) in ps028-cl namespace
+                    capture_start_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+                    cap_iface = capture_interface or CLIENT_CAPTURE_INTERFACE
+                    cap_filter = capture_filter or DEFAULT_BPF_FILTER
+                    cap_buf_kb = capture_buffer_kb if capture_buffer_kb is not None else DEFAULT_CAPTURE_BUFFER_KB
+                    tcpdump_proc = start_packet_capture(
+                        output_pcap=pcap_path,
+                        log_file=tcpdump_log,
+                        netns=CLIENT_NETNS,
+                        interface=cap_iface,
+                        bpf_filter=cap_filter,
+                        buffer_size_kb=cap_buf_kb,
+                        is_simulation=False,
+                        caller_holds_lock=concurrency.is_lock_held_by_current_thread(target_lock),
+                        lock_file=target_lock
+                    )
 
-                # Confirm capture readiness before browser launch
-                confirm_capture_ready(tcpdump_proc, tcpdump_log)
-                if coordinator and tcpdump_proc is not None:
-                    coordinator.register_process(tcpdump_proc)
+                    # Confirm capture readiness before browser launch
+                    confirm_capture_ready(tcpdump_proc, tcpdump_log)
+                    if coordinator and tcpdump_proc is not None:
+                        coordinator.register_process(tcpdump_proc)
 
-                # 5. Run Genuine Browser
+                # 5. Run Genuine Browser (or overridden test command)
                 browser_start_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
                 browser_result = run_browser(
                     browser_name=bname,
@@ -4881,26 +5132,28 @@ def run_trial(
                     netns=CLIENT_NETNS,
                     is_simulation=False,
                     extra_args=extra_browser_args,
-                    coordinator=coordinator
+                    coordinator=coordinator,
+                    raw_cmd_override=raw_cmd_override
                 )
                 browser_end_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
-                # 6. Stop Packet Capture
-                try:
-                    stop_packet_capture(
-                        tcpdump_proc,
-                        timeout=5.0,
-                        pcap_path=pcap_path,
-                        caller_holds_lock=concurrency.is_lock_held_by_current_thread(target_lock),
-                        lock_file=target_lock
-                    )
-                except Exception as cse:
-                    capture_shutdown_unconfirmed = True
-                    capture_shutdown_error = str(cse)
-                    cleanup_errors.append(f"Capture shutdown unconfirmed: {cse}")
-                finally:
-                    tcpdump_proc = None
-                    capture_stop_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+                # 6. Stop Packet Capture (if started)
+                if tcpdump_proc is not None:
+                    try:
+                        stop_packet_capture(
+                            tcpdump_proc,
+                            timeout=5.0,
+                            pcap_path=pcap_path,
+                            caller_holds_lock=concurrency.is_lock_held_by_current_thread(target_lock),
+                            lock_file=target_lock
+                        )
+                    except Exception as cse:
+                        capture_shutdown_unconfirmed = True
+                        capture_shutdown_error = str(cse)
+                        cleanup_errors.append(f"Capture shutdown unconfirmed: {cse}")
+                    finally:
+                        tcpdump_proc = None
+                        capture_stop_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
                 http_outcome = {
                     "status_code": browser_result.get("http_status"),

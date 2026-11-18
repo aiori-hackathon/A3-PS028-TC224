@@ -332,23 +332,19 @@ class TestBrowserIdentityAndPrivilegeDropping(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
-    @patch("subprocess.run")
+    @patch("lab.run_trial.execute_browser_subprocess")
     @patch("os.geteuid", return_value=1000)
     @patch("os.getuid", return_value=1000)
     @patch("os.getgid", return_value=1000)
     def test_run_browser_drops_privileges_to_normal_user(
-        self, mock_gid, mock_uid, mock_euid, mock_run
+        self, mock_gid, mock_uid, mock_euid, mock_exec
     ):
         """
         CRITICAL REQUIREMENT:
         run_browser must enter client netns with sudo -n but drop privileges
         to normal user (UID 1000) using setpriv or sudo -u before browser execution.
         """
-        mock_proc = MagicMock()
-        mock_proc.returncode = 0
-        mock_proc.stdout = "<html><body>Response</body></html>"
-        mock_proc.stderr = ""
-        mock_run.return_value = mock_proc
+        mock_exec.return_value = (0, "<html><body>Response</body></html>", "", False)
 
         profile = self.temp_dir / "profile"
         profile.mkdir()
@@ -361,8 +357,8 @@ class TestBrowserIdentityAndPrivilegeDropping(unittest.TestCase):
             is_simulation=False
         )
 
-        mock_run.assert_called_once()
-        cmd_called = mock_run.call_args[0][0]
+        mock_exec.assert_called_once()
+        cmd_called = mock_exec.call_args[1].get("cmd") or mock_exec.call_args[0][0]
 
         # Sudo for network namespace entry
         self.assertEqual(cmd_called[0], "sudo")
@@ -526,14 +522,15 @@ class TestSnapBrowserNamespaceMountsAndLaunch(unittest.TestCase):
         self.assertIn("Failed to mount securityfs on /sys/kernel/security", str(ctx.exception))
         self.assertIn("Device or resource busy", str(ctx.exception))
 
-    @patch("subprocess.run")
-    def test_run_browser_snap_mount_failure_fails_clearly(self, mock_run):
+    @patch("lab.run_trial.execute_browser_subprocess")
+    def test_run_browser_snap_mount_failure_fails_clearly(self, mock_exec):
         """When helper returns mount failure (exit code 71), run_browser raises SnapMountError."""
-        mock_proc = MagicMock()
-        mock_proc.returncode = 71
-        mock_proc.stdout = ""
-        mock_proc.stderr = "Snap mount setup error: Failed to mount cgroup2 on /sys/fs/cgroup: Permission denied"
-        mock_run.return_value = mock_proc
+        mock_exec.return_value = (
+            71,
+            "",
+            "Snap mount setup error: Failed to mount cgroup2 on /sys/fs/cgroup: Permission denied",
+            False
+        )
 
         profile = self.temp_dir / "profile"
         profile.mkdir()
@@ -597,17 +594,13 @@ class TestSnapBrowserNamespaceMountsAndLaunch(unittest.TestCase):
             "--headless=new"
         ])
 
-    @patch("subprocess.run")
+    @patch("lab.run_trial.execute_browser_subprocess")
     @patch("os.geteuid", return_value=1000)
     @patch("os.getuid", return_value=1000)
     @patch("os.getgid", return_value=1000)
-    def test_non_snap_browser_launch_remains_unchanged(self, mock_gid, mock_uid, mock_euid, mock_run):
+    def test_non_snap_browser_launch_remains_unchanged(self, mock_gid, mock_uid, mock_euid, mock_exec):
         """Non-Snap browser must NOT create private mount namespace or invoke launch-snap-browser."""
-        mock_proc = MagicMock()
-        mock_proc.returncode = 0
-        mock_proc.stdout = "DOM content"
-        mock_proc.stderr = ""
-        mock_run.return_value = mock_proc
+        mock_exec.return_value = (0, "DOM content", "", False)
 
         profile = self.temp_dir / "profile"
         profile.mkdir()
@@ -619,8 +612,8 @@ class TestSnapBrowserNamespaceMountsAndLaunch(unittest.TestCase):
             profile_dir=profile
         )
 
-        mock_run.assert_called_once()
-        cmd = mock_run.call_args[0][0]
+        mock_exec.assert_called_once()
+        cmd = mock_exec.call_args[1].get("cmd") or mock_exec.call_args[0][0]
 
         # Verify command does NOT contain unshare or launch-snap-browser
         self.assertNotIn("unshare", cmd)
@@ -637,17 +630,13 @@ class TestSnapBrowserNamespaceMountsAndLaunch(unittest.TestCase):
         self.assertTrue("--reuid=1000" in cmd_str or "sudo -u" in cmd_str)
         self.assertIn("/usr/bin/google-chrome", cmd)
 
-    @patch("subprocess.run")
+    @patch("lab.run_trial.execute_browser_subprocess")
     @patch("os.geteuid", return_value=1000)
     @patch("os.getuid", return_value=1000)
     @patch("os.getgid", return_value=1000)
-    def test_snap_browser_launch_creates_private_mount_namespace(self, mock_gid, mock_uid, mock_euid, mock_run):
+    def test_snap_browser_launch_creates_private_mount_namespace(self, mock_gid, mock_uid, mock_euid, mock_exec):
         """Snap browser must enter netns, unshare private mount namespace, and invoke launch-snap-browser."""
-        mock_proc = MagicMock()
-        mock_proc.returncode = 0
-        mock_proc.stdout = "DOM content"
-        mock_proc.stderr = ""
-        mock_run.return_value = mock_proc
+        mock_exec.return_value = (0, "DOM content", "", False)
 
         profile = self.temp_dir / "profile"
         profile.mkdir()
@@ -659,8 +648,8 @@ class TestSnapBrowserNamespaceMountsAndLaunch(unittest.TestCase):
             profile_dir=profile
         )
 
-        mock_run.assert_called_once()
-        cmd = mock_run.call_args[0][0]
+        mock_exec.assert_called_once()
+        cmd = mock_exec.call_args[1].get("cmd") or mock_exec.call_args[0][0]
 
         # Enters client netns
         self.assertEqual(cmd[0], "sudo")
@@ -685,17 +674,13 @@ class TestSnapBrowserNamespaceMountsAndLaunch(unittest.TestCase):
         self.assertIn("--", cmd)
         self.assertIn("/snap/bin/chromium", cmd)
 
-    @patch("subprocess.run")
+    @patch("lab.run_trial.execute_browser_subprocess")
     @patch("os.geteuid", return_value=1000)
     @patch("os.getuid", return_value=1000)
     @patch("os.getgid", return_value=1000)
-    def test_snap_firefox_launch_passes_snap_name_firefox(self, mock_gid, mock_uid, mock_euid, mock_run):
+    def test_snap_firefox_launch_passes_snap_name_firefox(self, mock_gid, mock_uid, mock_euid, mock_exec):
         """Snap Firefox browser must pass --snap-name=firefox to launch-snap-browser."""
-        mock_proc = MagicMock()
-        mock_proc.returncode = 0
-        mock_proc.stdout = "DOM content"
-        mock_proc.stderr = ""
-        mock_run.return_value = mock_proc
+        mock_exec.return_value = (0, "DOM content", "", False)
 
         profile = self.temp_dir / "profile"
         profile.mkdir()
@@ -707,8 +692,8 @@ class TestSnapBrowserNamespaceMountsAndLaunch(unittest.TestCase):
             profile_dir=profile
         )
 
-        mock_run.assert_called_once()
-        cmd = mock_run.call_args[0][0]
+        mock_exec.assert_called_once()
+        cmd = mock_exec.call_args[1].get("cmd") or mock_exec.call_args[0][0]
         self.assertIn("--snap-name=firefox", cmd)
         self.assertIn("/snap/bin/firefox", cmd)
 

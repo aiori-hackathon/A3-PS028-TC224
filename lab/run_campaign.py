@@ -825,6 +825,7 @@ class InterruptionCoordinator:
         self._signal_count: int = 0
         self._critical_depth: int = 0
         self._tracked_processes: Set[Any] = set()
+        self._termination_errors: List[str] = []
         self._lock = threading.RLock()
         self._old_sigint = None
         self._old_sigterm = None
@@ -871,6 +872,21 @@ class InterruptionCoordinator:
         with self._lock:
             self._tracked_processes.discard(proc)
 
+    def record_termination_error(self, err: str) -> None:
+        """Records an error encountered during child process termination or reaping."""
+        with self._lock:
+            self._termination_errors.append(err)
+
+    def get_termination_errors(self) -> List[str]:
+        """Returns all recorded process termination and reaping errors."""
+        with self._lock:
+            return list(self._termination_errors)
+
+    def clear_termination_errors(self) -> None:
+        """Clears recorded process termination errors."""
+        with self._lock:
+            self._termination_errors.clear()
+
     def terminate_tracked_processes(self) -> None:
         """Safely terminates and reaps all currently tracked child processes."""
         with self._lock:
@@ -879,35 +895,17 @@ class InterruptionCoordinator:
 
         for proc in procs:
             try:
-                poll_fn = getattr(proc, "poll", None)
-                if callable(poll_fn) and poll_fn() is not None:
-                    continue
-                term_fn = getattr(proc, "terminate", None)
-                if callable(term_fn):
-                    term_fn()
-                elif hasattr(proc, "send_signal"):
-                    proc.send_signal(signal.SIGTERM)
-            except (ProcessLookupError, OSError):
-                pass
-            except Exception:
-                pass
-
-        for proc in procs:
-            try:
-                wait_fn = getattr(proc, "wait", None)
-                if callable(wait_fn):
-                    try:
-                        wait_fn(timeout=0.5)
-                    except (subprocess.TimeoutExpired, Exception):
-                        kill_fn = getattr(proc, "kill", None)
-                        if callable(kill_fn):
-                            kill_fn()
-                            try:
-                                wait_fn(timeout=0.5)
-                            except Exception:
-                                pass
-            except Exception:
-                pass
+                reaped = run_trial.terminate_process_group(proc, timeout=1.5, escalate_to_kill=True)
+                if not reaped:
+                    with self._lock:
+                        self._termination_errors.append(
+                            f"Failed to terminate and reap tracked process {getattr(proc, 'pid', 'unknown')}"
+                        )
+            except Exception as exc:
+                with self._lock:
+                    self._termination_errors.append(
+                        f"Exception terminating tracked process {getattr(proc, 'pid', 'unknown')}: {exc}"
+                    )
 
     @contextlib.contextmanager
     def critical_section(self, section_name: str):
@@ -1002,7 +1000,8 @@ class CampaignRunner:
         lab_lock_file: Optional[Path] = None,
         lock_timeout: float = 10.0,
         exit_on_interruption: bool = True,
-        coordinator: Optional[InterruptionCoordinator] = None
+        coordinator: Optional[InterruptionCoordinator] = None,
+        browser_cmd_override: Optional[List[str]] = None
     ):
         self.scenarios = [s.upper() for s in (scenarios or DEFAULT_SCENARIOS)]
         for sc in self.scenarios:
@@ -1021,6 +1020,7 @@ class CampaignRunner:
         self.lab_lock_file = lab_lock_file or concurrency.DEFAULT_LAB_LOCK_FILE
         self.lock_timeout = lock_timeout
         self.exit_on_interruption = exit_on_interruption
+        self.browser_cmd_override = browser_cmd_override
 
         # Interruption coordinator & tracking
         self.coordinator = coordinator or InterruptionCoordinator()
@@ -1228,7 +1228,8 @@ class CampaignRunner:
                 lock_file=self.lab_lock_file,
                 lock_timeout=self.lock_timeout,
                 caller_manages_signals=True,
-                coordinator=self.coordinator
+                coordinator=self.coordinator,
+                raw_cmd_override=self.browser_cmd_override
             )
         except (KeyboardInterrupt, InterruptedError) as ki:
             if not self.coordinator.interrupted:
@@ -1285,6 +1286,12 @@ class CampaignRunner:
             scenario_restored = cleanup_status.get("scenario_restored", False)
             baseline_verified = cleanup_status.get("baseline_verified", False)
             cleanup_errors = list(cleanup_status.get("errors", []))
+
+            # Include any child process termination/reaping failures from coordinator
+            termination_errors = self.coordinator.get_termination_errors()
+            if termination_errors:
+                cleanup_errors.extend(termination_errors)
+                self.coordinator.clear_termination_errors()
 
             # Extra verification of baseline state using impair.self_test_baseline
             try:

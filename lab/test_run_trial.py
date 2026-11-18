@@ -28,6 +28,7 @@ import stat
 import struct
 import subprocess
 import tempfile
+import threading
 import time
 from typing import List, Optional
 from unittest.mock import MagicMock, patch
@@ -990,18 +991,14 @@ class TestCaptureLifecycleAndHTTPStatusRegression(unittest.TestCase):
         self.assertIn("measurement failure", res["reason"].lower())
         self.assertNotEqual(res["classification"], "CONNECTION_FAILED")
 
-    @patch("subprocess.run")
-    def test_run_browser_does_not_fabricate_http_200_from_exit_zero(self, mock_run):
+    @patch("lab.run_trial.execute_browser_subprocess")
+    def test_run_browser_does_not_fabricate_http_200_from_exit_zero(self, mock_exec):
         """
         CRITICAL REQUIREMENT:
         Chrome --dump-dom exit code 0 does NOT prove HTTP 200.
         run_browser must return http_status = None rather than fabricated 200.
         """
-        mock_proc = MagicMock()
-        mock_proc.returncode = 0
-        mock_proc.stdout = "<html><body>Some content</body></html>"
-        mock_proc.stderr = ""
-        mock_run.return_value = mock_proc
+        mock_exec.return_value = (0, "<html><body>Some content</body></html>", "", False)
 
         profile = self.temp_dir / "profile"
         profile.mkdir()
@@ -2597,17 +2594,13 @@ class TestBrowserLaunchEnvironmentAndPreflight(unittest.TestCase):
         finally:
             unwritable_parent.chmod(0o700)
 
-    @patch("subprocess.run")
-    def test_run_browser_constructs_unprivileged_command_and_clean_env(self, mock_run):
+    @patch("lab.run_trial.execute_browser_subprocess")
+    def test_run_browser_constructs_unprivileged_command_and_clean_env(self, mock_exec):
         """
         run_browser constructs unprivileged setpriv/sudo command tokens, passes env -i with unprivileged variables,
         and contains no /root paths (verifies command construction and clean environment, not live execution).
         """
-        mock_proc = MagicMock()
-        mock_proc.returncode = 0
-        mock_proc.stdout = "<html><body>Clean DOM</body></html>"
-        mock_proc.stderr = ""
-        mock_run.return_value = mock_proc
+        mock_exec.return_value = (0, "<html><body>Clean DOM</body></html>", "", False)
 
         profile = self.temp_dir / "chrome_profile"
         profile.mkdir()
@@ -2630,8 +2623,8 @@ class TestBrowserLaunchEnvironmentAndPreflight(unittest.TestCase):
                 profile_dir=profile
             )
 
-        mock_run.assert_called_once()
-        cmd = mock_run.call_args[0][0]
+        mock_exec.assert_called_once()
+        cmd = mock_exec.call_args[1].get("cmd") or mock_exec.call_args[0][0]
         cmd_str = " ".join(cmd)
 
         self.assertTrue(
@@ -2646,20 +2639,21 @@ class TestBrowserLaunchEnvironmentAndPreflight(unittest.TestCase):
         self.assertNotIn("/root", cmd_str)
         self.assertEqual(res["exit_code"], 0)
 
-    @patch("subprocess.run")
-    def test_run_browser_raises_preflight_on_startup_crash(self, mock_run):
+    @patch("lab.run_trial.execute_browser_subprocess")
+    def test_run_browser_raises_preflight_on_startup_crash(self, mock_exec):
         """
         When Chrome crashes on startup (exit code -5 or permission denied / crashpad error),
         run_browser raises BrowserPreflightError rather than returning network failure.
         """
-        mock_proc = MagicMock()
-        mock_proc.returncode = -5
-        mock_proc.stdout = ""
-        mock_proc.stderr = (
-            "mkdir: cannot create directory ‘/root’: Permission denied\n"
-            "chrome_crashpad_handler: --database is required\n"
+        mock_exec.return_value = (
+            -5,
+            "",
+            (
+                "mkdir: cannot create directory ‘/root’: Permission denied\n"
+                "chrome_crashpad_handler: --database is required\n"
+            ),
+            False
         )
-        mock_run.return_value = mock_proc
 
         profile = self.temp_dir / "crash_profile"
         profile.mkdir()
@@ -2841,17 +2835,13 @@ class TestCaptureFilterBufferAndDropAccountingRegression(unittest.TestCase):
         self.assertIn("--buffer-size-kb", extra_args)
         self.assertIn("8192", extra_args)
 
-    @patch("subprocess.run")
-    def test_run_browser_disables_background_traffic_without_bypassing_network(self, mock_run):
+    @patch("lab.run_trial.execute_browser_subprocess")
+    def test_run_browser_disables_background_traffic_without_bypassing_network(self, mock_exec):
         """
         run_browser configures flags that disable irrelevant background requests
         while strictly preserving genuine DNS/network path (no host-resolver rules or curl).
         """
-        mock_proc = MagicMock()
-        mock_proc.returncode = 0
-        mock_proc.stdout = "<html>OK</html>"
-        mock_proc.stderr = ""
-        mock_run.return_value = mock_proc
+        mock_exec.return_value = (0, "<html>OK</html>", "", False)
 
         profile = self.temp_dir / "prof"
         profile.mkdir()
@@ -2863,7 +2853,8 @@ class TestCaptureFilterBufferAndDropAccountingRegression(unittest.TestCase):
             profile_dir=profile
         )
 
-        cmd = mock_run.call_args[0][0]
+        mock_exec.assert_called_once()
+        cmd = mock_exec.call_args[1].get("cmd") or mock_exec.call_args[0][0]
         cmd_str = " ".join(cmd)
 
         # Background suppression flags
@@ -3055,19 +3046,14 @@ class TestFirefoxSupportRegression(unittest.TestCase):
         profile_dir.mkdir(parents=True, exist_ok=True)
         captured_cmd = []
 
-        def mock_subprocess_run(cmd, **kwargs):
+        def mock_exec_subprocess(cmd, **kwargs):
             nonlocal captured_cmd
-            if isinstance(cmd, list) and not any(c == "pkill" for c in cmd):
-                captured_cmd = list(cmd)
-                log_file = profile_dir / "moz_telemetry.log"
-                log_file.write_text("nsHttpTransaction [HTTP/1.1 200 OK]\n", encoding="utf-8")
-            res = MagicMock()
-            res.returncode = 0
-            res.stdout = "OK"
-            res.stderr = ""
-            return res
+            captured_cmd = list(cmd)
+            log_file = profile_dir / "moz_telemetry.log"
+            log_file.write_text("nsHttpTransaction [HTTP/1.1 200 OK]\n", encoding="utf-8")
+            return (0, "OK", "", False)
 
-        with patch("subprocess.run", side_effect=mock_subprocess_run), \
+        with patch("lab.run_trial.execute_browser_subprocess", side_effect=mock_exec_subprocess), \
              patch("lab.run_trial.get_browser_uid_gid", return_value=(1000, 1000)):
             run_trial.run_browser(
                 browser_name="firefox",
@@ -3106,20 +3092,15 @@ class TestFirefoxSupportRegression(unittest.TestCase):
         captured_cmd = []
         captured_env = {}
 
-        def mock_subprocess_run(cmd, **kwargs):
+        def mock_exec_subprocess(cmd, **kwargs):
             nonlocal captured_cmd, captured_env
-            if isinstance(cmd, list) and not any(c == "pkill" for c in cmd):
-                captured_cmd = list(cmd)
-                captured_env = dict(kwargs.get("env") or {})
-                log_file = profile_dir / "moz_telemetry.log"
-                log_file.write_text("nsHttpTransaction [HTTP/1.1 200 OK]\n", encoding="utf-8")
-            res = MagicMock()
-            res.returncode = 0
-            res.stdout = ""
-            res.stderr = ""
-            return res
+            captured_cmd = list(cmd)
+            captured_env = dict(kwargs.get("env") or {})
+            log_file = profile_dir / "moz_telemetry.log"
+            log_file.write_text("nsHttpTransaction [HTTP/1.1 200 OK]\n", encoding="utf-8")
+            return (0, "", "", False)
 
-        with patch("subprocess.run", side_effect=mock_subprocess_run), \
+        with patch("lab.run_trial.execute_browser_subprocess", side_effect=mock_exec_subprocess), \
              patch("lab.run_trial.get_browser_uid_gid", return_value=(1000, 1000)):
             run_trial.run_browser(
                 browser_name="firefox",
@@ -6775,24 +6756,24 @@ class TestPcapNgStructuralValidation(unittest.TestCase):
         self.td.cleanup()
 
     @staticmethod
-    def _make_shb(major: int = 1, minor: int = 0, sec_len: int = -1, options: bytes = b"") -> bytes:
+    def _make_shb(major: int = 1, minor: int = 0, sec_len: int = -1, options: bytes = b"", endian: str = "<") -> bytes:
         bom = 0x1A2B3C4D
         opt_pad = (4 - (len(options) % 4)) % 4
         padded_opts = options + (b"\x00" * opt_pad)
         total_len = 28 + len(padded_opts)
-        body = struct.pack("<IIIHHq", 0x0A0D0D0A, total_len, bom, major, minor, sec_len)
-        return body + padded_opts + struct.pack("<I", total_len)
+        body = struct.pack(endian + "IIIHHq", 0x0A0D0D0A, total_len, bom, major, minor, sec_len)
+        return body + padded_opts + struct.pack(endian + "I", total_len)
 
     @staticmethod
-    def _make_idb(link_type: int = 1, snaplen: int = 65535, options: bytes = b"") -> bytes:
+    def _make_idb(link_type: int = 1, snaplen: int = 65535, options: bytes = b"", reserved: int = 0, endian: str = "<") -> bytes:
         opt_pad = (4 - (len(options) % 4)) % 4
         padded_opts = options + (b"\x00" * opt_pad)
         total_len = 20 + len(padded_opts)
-        body = struct.pack("<IIHHI", 0x00000001, total_len, link_type, 0, snaplen)
-        return body + padded_opts + struct.pack("<I", total_len)
+        body = struct.pack(endian + "IIHHI", 0x00000001, total_len, link_type, reserved, snaplen)
+        return body + padded_opts + struct.pack(endian + "I", total_len)
 
     @staticmethod
-    def _make_epb(if_id: int = 0, cap_len: int = 60, orig_len: int = 60, pkt_data: bytes = None, options: bytes = b"") -> bytes:
+    def _make_epb(if_id: int = 0, cap_len: int = 60, orig_len: int = 60, pkt_data: bytes = None, options: bytes = b"", endian: str = "<") -> bytes:
         if pkt_data is None:
             pkt_data = b"\x00" * cap_len
         pkt_pad = (4 - (len(pkt_data) % 4)) % 4
@@ -6800,18 +6781,18 @@ class TestPcapNgStructuralValidation(unittest.TestCase):
         opt_pad = (4 - (len(options) % 4)) % 4
         padded_opts = options + (b"\x00" * opt_pad)
         total_len = 32 + len(padded_pkt) + len(padded_opts)
-        body = struct.pack("<IIIIIII", 0x00000006, total_len, if_id, 0, 0, cap_len, orig_len)
-        return body + padded_pkt + padded_opts + struct.pack("<I", total_len)
+        body = struct.pack(endian + "IIIIIII", 0x00000006, total_len, if_id, 0, 0, cap_len, orig_len)
+        return body + padded_pkt + padded_opts + struct.pack(endian + "I", total_len)
 
     @staticmethod
-    def _make_spb(orig_len: int = 60, pkt_data: bytes = None) -> bytes:
+    def _make_spb(orig_len: int = 60, pkt_data: bytes = None, endian: str = "<") -> bytes:
         if pkt_data is None:
             pkt_data = b"\x00" * orig_len
         pkt_pad = (4 - (len(pkt_data) % 4)) % 4
         padded_pkt = pkt_data + (b"\x00" * pkt_pad)
         total_len = 16 + len(padded_pkt)
-        body = struct.pack("<III", 0x00000003, total_len, orig_len)
-        return body + padded_pkt + struct.pack("<I", total_len)
+        body = struct.pack(endian + "III", 0x00000003, total_len, orig_len)
+        return body + padded_pkt + struct.pack(endian + "I", total_len)
 
     def _write_pcapng(self, data: bytes) -> Path:
         p = self.td_path / f"synthetic_{time.time_ns()}.pcapng"
@@ -6884,7 +6865,7 @@ class TestPcapNgStructuralValidation(unittest.TestCase):
         p = self._write_pcapng(pcapng_bad_ver)
         valid, sha, sz, count, msg = run_trial.validate_pcap_file(p)
         self.assertFalse(valid)
-        self.assertIn("Unsupported PCAP-NG section major version 2", msg)
+        self.assertIn("Unsupported PCAP-NG section version 2", msg)
 
         # Mismatched leading and trailing block lengths
         shb_raw = bytearray(self._make_shb())
@@ -6948,6 +6929,496 @@ class TestPcapNgStructuralValidation(unittest.TestCase):
             valid2, sha2, sz2, count2, msg2 = run_trial.validate_pcap_file(p, min_packets=3)
             self.assertTrue(valid2, f"Validation failed: {msg2}")
             self.assertEqual(count2, 3)
+
+    def test_12_shb_section_length_unknown_minus_one_accepted(self):
+        """12. Section Header Block with unknown section length (-1) accepted."""
+        pcapng = self._make_shb(sec_len=-1) + self._make_idb() + self._make_epb()
+        p = self._write_pcapng(pcapng)
+        valid, sha, sz, count, msg = run_trial.validate_pcap_file(p, min_packets=1)
+        self.assertTrue(valid, f"Expected valid pcapng for sec_len=-1: {msg}")
+        self.assertEqual(count, 1)
+
+    def test_13_shb_section_length_correct_declared_length_accepted(self):
+        """13. Section Header Block with exact matching section length accepted."""
+        idb = self._make_idb()
+        epb = self._make_epb()
+        correct_len = len(idb) + len(epb)
+        pcapng = self._make_shb(sec_len=correct_len) + idb + epb
+        p = self._write_pcapng(pcapng)
+        valid, sha, sz, count, msg = run_trial.validate_pcap_file(p, min_packets=1)
+        self.assertTrue(valid, f"Expected valid pcapng for matching declared length: {msg}")
+        self.assertEqual(count, 1)
+
+    def test_14_shb_section_length_too_short_fails_closed(self):
+        """14. Section Header Block with declared section length shorter than actual section fails closed."""
+        idb = self._make_idb()
+        epb = self._make_epb()
+        too_short_len = len(idb)  # Declares only IDB, omits EPB
+        pcapng = self._make_shb(sec_len=too_short_len) + idb + epb
+        p = self._write_pcapng(pcapng)
+        valid, sha, sz, count, msg = run_trial.validate_pcap_file(p, min_packets=1)
+        self.assertFalse(valid)
+        self.assertIn("section length mismatch", msg)
+
+    def test_15_shb_section_length_too_long_fails_closed(self):
+        """15. Section Header Block with declared section length exceeding section data fails closed."""
+        idb = self._make_idb()
+        epb = self._make_epb()
+        too_long_len = len(idb) + len(epb) + 80
+        pcapng = self._make_shb(sec_len=too_long_len) + idb + epb
+        p = self._write_pcapng(pcapng)
+        valid, sha, sz, count, msg = run_trial.validate_pcap_file(p, min_packets=1)
+        self.assertFalse(valid)
+        self.assertTrue("exceeds available file data" in msg or "section length mismatch" in msg)
+
+    def test_16_shb_section_length_negative_fails_closed(self):
+        """16. Section Header Block with negative section length (< -1) fails closed."""
+        pcapng = self._make_shb(sec_len=-2) + self._make_idb() + self._make_epb()
+        p = self._write_pcapng(pcapng)
+        valid, sha, sz, count, msg = run_trial.validate_pcap_file(p, min_packets=1)
+        self.assertFalse(valid)
+        self.assertIn("Invalid PCAP-NG section length -2", msg)
+
+    def test_17_shb_section_length_non_4_byte_aligned_fails_closed(self):
+        """17. Section Header Block with non-32-bit aligned section length fails closed."""
+        pcapng = self._make_shb(sec_len=55) + self._make_idb() + self._make_epb()
+        p = self._write_pcapng(pcapng)
+        valid, sha, sz, count, msg = run_trial.validate_pcap_file(p, min_packets=1)
+        self.assertFalse(valid)
+        self.assertIn("not 32-bit aligned", msg)
+
+    def test_18_multiple_valid_sections_accepted(self):
+        """18. PCAP-NG with multiple independently valid sections is accepted."""
+        idb1 = self._make_idb()
+        epb1 = self._make_epb()
+        sec1 = self._make_shb(sec_len=len(idb1) + len(epb1)) + idb1 + epb1
+
+        idb2 = self._make_idb()
+        epb2 = self._make_epb()
+        sec2 = self._make_shb(sec_len=len(idb2) + len(epb2)) + idb2 + epb2
+
+        p = self._write_pcapng(sec1 + sec2)
+        valid, sha, sz, count, msg = run_trial.validate_pcap_file(p, min_packets=2)
+        self.assertTrue(valid, f"Expected valid multi-section pcapng: {msg}")
+        self.assertEqual(count, 2)
+
+    def test_19_first_valid_then_malformed_second_section_fails_closed(self):
+        """19. Multi-section PCAP-NG where first section is valid but second is malformed fails closed."""
+        idb1 = self._make_idb()
+        epb1 = self._make_epb()
+        sec1 = self._make_shb(sec_len=len(idb1) + len(epb1)) + idb1 + epb1
+
+        idb2 = self._make_idb()
+        epb2 = self._make_epb()
+        sec2 = self._make_shb(sec_len=len(idb2)) + idb2 + epb2  # Section 2 length mismatch
+
+        p = self._write_pcapng(sec1 + sec2)
+        valid, sha, sz, count, msg = run_trial.validate_pcap_file(p, min_packets=1)
+        self.assertFalse(valid)
+        self.assertIn("section length mismatch", msg)
+
+    def test_20_little_endian_and_big_endian_both_supported(self):
+        """20. Both little-endian and big-endian PCAP-NG sections are correctly parsed and validated."""
+        sec_le = self._make_shb(endian="<") + self._make_idb(endian="<") + self._make_epb(endian="<")
+        p_le = self._write_pcapng(sec_le)
+        valid_le, _, _, count_le, msg_le = run_trial.validate_pcap_file(p_le, min_packets=1)
+        self.assertTrue(valid_le, f"Little-endian validation failed: {msg_le}")
+        self.assertEqual(count_le, 1)
+
+        sec_be = self._make_shb(endian=">") + self._make_idb(endian=">") + self._make_epb(endian=">")
+        p_be = self._write_pcapng(sec_be)
+        valid_be, _, _, count_be, msg_be = run_trial.validate_pcap_file(p_be, min_packets=1)
+        self.assertTrue(valid_be, f"Big-endian validation failed: {msg_be}")
+        self.assertEqual(count_be, 1)
+
+    def test_21_unsupported_minor_version_fails_closed(self):
+        """21. Section Header Block with unsupported minor version (e.g. 1.1) fails closed."""
+        pcapng = self._make_shb(major=1, minor=1) + self._make_idb() + self._make_epb()
+        p = self._write_pcapng(pcapng)
+        valid, sha, sz, count, msg = run_trial.validate_pcap_file(p, min_packets=1)
+        self.assertFalse(valid)
+        self.assertIn("Unsupported PCAP-NG section version 1.1", msg)
+
+    def test_22_nonzero_reserved_idb_fails_closed(self):
+        """22. Interface Description Block with non-zero reserved field fails closed."""
+        idb_bad = self._make_idb(reserved=1)
+        pcapng = self._make_shb() + idb_bad + self._make_epb()
+        p = self._write_pcapng(pcapng)
+        valid, sha, sz, count, msg = run_trial.validate_pcap_file(p, min_packets=1)
+        self.assertFalse(valid)
+        self.assertIn("Invalid PCAP-NG IDB reserved field 1", msg)
+
+
+class TestBrowserProcessLifecycleExecution(unittest.TestCase):
+    """
+    Rigorously tests all 12 browser subprocess lifecycle execution invariants:
+    1. launch & registration: browser process launched via Popen and immediately registered with coordinator.
+    2. SIGINT termination & reaping: coordinator intercepting SIGINT terminates and reaps process group.
+    3. SIGTERM termination & reaping: coordinator intercepting SIGTERM terminates and reaps process group.
+    4. descendants killed without orphans: process spawning children has all descendants killed.
+    5. timeout group termination: timeout triggers process group termination and reaping.
+    6. stdout/stderr preservation: stdout and stderr captured completely.
+    7. normal unregistration: unregister_process called upon normal exit.
+    8. exceptional unregistration: unregister_process called on exception in finally block.
+    9. capture + browser dual reaping: interruption terminates and reaps both active processes.
+    10. termination failure produces cleanup failure: reaping failure triggers CLEANUP_FAILURE fail-stop.
+    11. exactly one interrupted attempt in manifest matching failed_attempt_record.json.
+    12. unchanged Chrome/Firefox command construction.
+    """
+    def setUp(self):
+        self.td = tempfile.TemporaryDirectory()
+        self.td_path = Path(self.td.name)
+
+    def tearDown(self):
+        self.td.cleanup()
+
+    def test_01_launch_and_registration(self):
+        """1. Browser process is created with Popen and immediately registered with coordinator."""
+        mock_coordinator = MagicMock()
+        cmd = [sys.executable, "-c", "import sys; sys.exit(0)"]
+        code, out, err, timed_out = run_trial.execute_browser_subprocess(
+            cmd=cmd,
+            timeout=5.0,
+            coordinator=mock_coordinator,
+            start_new_session=True
+        )
+        self.assertEqual(code, 0)
+        self.assertFalse(timed_out)
+        mock_coordinator.register_process.assert_called_once()
+        proc_arg = mock_coordinator.register_process.call_args[0][0]
+        self.assertIsInstance(proc_arg, subprocess.Popen)
+        mock_coordinator.unregister_process.assert_called_once_with(proc_arg)
+
+    def test_02_sigint_termination_and_reaping(self):
+        """2. When coordinator intercepts SIGINT, the active browser process is terminated and reaped."""
+        import lab.run_campaign as run_campaign
+        coord = run_campaign.InterruptionCoordinator()
+        flag_file = self.td_path / "proc_ready.flag"
+        cmd = [
+            sys.executable, "-c",
+            f"import time, pathlib; pathlib.Path({repr(str(flag_file))}).write_text('ready'); time.sleep(30)"
+        ]
+
+        started_proc: List[subprocess.Popen] = []
+
+        def _run_in_thread():
+            try:
+                run_trial.execute_browser_subprocess(
+                    cmd=cmd,
+                    timeout=10.0,
+                    coordinator=coord,
+                    start_new_session=True
+                )
+            except (KeyboardInterrupt, Exception):
+                pass
+
+        th = threading.Thread(target=_run_in_thread, daemon=True)
+        th.start()
+
+        # Wait until process is active
+        t0 = time.time()
+        while not flag_file.exists() and time.time() - t0 < 5.0:
+            time.sleep(0.05)
+        self.assertTrue(flag_file.exists())
+
+        # Grab the registered process
+        with coord._lock:
+            procs = list(coord._tracked_processes)
+        self.assertEqual(len(procs), 1)
+        target_proc = procs[0]
+
+        # Signal coordinator with SIGINT
+        try:
+            coord.handle_signal(signal.SIGINT, None)
+        except KeyboardInterrupt:
+            pass
+        th.join(timeout=3.0)
+
+        # Verify target process was terminated and reaped
+        self.assertIsNotNone(target_proc.poll(), "Child process was not reaped after SIGINT")
+        self.assertFalse(run_trial._is_pid_alive(target_proc.pid))
+
+    def test_03_sigterm_termination_and_reaping(self):
+        """3. When coordinator intercepts SIGTERM, the active browser process is terminated and reaped."""
+        import lab.run_campaign as run_campaign
+        coord = run_campaign.InterruptionCoordinator()
+        flag_file = self.td_path / "proc_term_ready.flag"
+        cmd = [
+            sys.executable, "-c",
+            f"import time, pathlib; pathlib.Path({repr(str(flag_file))}).write_text('ready'); time.sleep(30)"
+        ]
+
+        def _run_in_thread():
+            try:
+                run_trial.execute_browser_subprocess(
+                    cmd=cmd,
+                    timeout=10.0,
+                    coordinator=coord,
+                    start_new_session=True
+                )
+            except (KeyboardInterrupt, Exception):
+                pass
+
+        th = threading.Thread(target=_run_in_thread, daemon=True)
+        th.start()
+
+        t0 = time.time()
+        while not flag_file.exists() and time.time() - t0 < 5.0:
+            time.sleep(0.05)
+        self.assertTrue(flag_file.exists())
+
+        with coord._lock:
+            procs = list(coord._tracked_processes)
+        self.assertEqual(len(procs), 1)
+        target_proc = procs[0]
+
+        try:
+            coord.handle_signal(signal.SIGTERM, None)
+        except KeyboardInterrupt:
+            pass
+        th.join(timeout=3.0)
+
+        self.assertIsNotNone(target_proc.poll(), "Child process was not reaped after SIGTERM")
+        self.assertFalse(run_trial._is_pid_alive(target_proc.pid))
+
+    def test_04_descendants_killed_without_orphans(self):
+        """4. Process spawning grandchild processes has all descendants killed without leaving orphans."""
+        grandchild_pid_file = self.td_path / "grandchild.pid"
+        parent_ready_file = self.td_path / "parent.ready"
+
+        # Parent process spawns a grandchild process and sleeps
+        parent_script = f"""
+import subprocess, sys, time, pathlib
+gc = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])
+pathlib.Path({repr(str(grandchild_pid_file))}).write_text(str(gc.pid))
+pathlib.Path({repr(str(parent_ready_file))}).write_text('ready')
+time.sleep(60)
+"""
+        cmd = [sys.executable, "-c", parent_script]
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True
+        )
+
+        t0 = time.time()
+        while not parent_ready_file.exists() and time.time() - t0 < 5.0:
+            time.sleep(0.05)
+        self.assertTrue(parent_ready_file.exists())
+
+        gc_pid = int(grandchild_pid_file.read_text().strip())
+        parent_pid = proc.pid
+
+        # Both parent and grandchild should be running
+        self.assertTrue(run_trial._is_pid_alive(parent_pid))
+        self.assertTrue(run_trial._is_pid_alive(gc_pid))
+
+        # Terminate the process group
+        reaped = run_trial.terminate_process_group(proc, timeout=1.5, escalate_to_kill=True)
+        self.assertTrue(reaped)
+        if proc.stdout:
+            proc.stdout.close()
+        if proc.stderr:
+            proc.stderr.close()
+
+        # Verify BOTH parent and grandchild are dead
+        self.assertFalse(run_trial._is_pid_alive(parent_pid), "Parent PID still alive!")
+        self.assertFalse(run_trial._is_pid_alive(gc_pid), "Grandchild orphan PID still alive!")
+
+    def test_05_timeout_group_termination(self):
+        """5. Subprocess timeout terminates process group, reaps parent, and returns exit code 124."""
+        cmd = [sys.executable, "-c", "import time; time.sleep(30)"]
+        code, out, err, timed_out = run_trial.execute_browser_subprocess(
+            cmd=cmd,
+            timeout=0.2,
+            coordinator=None,
+            start_new_session=True
+        )
+        self.assertTrue(timed_out)
+        self.assertEqual(code, 124)
+
+    def test_06_stdout_stderr_preservation(self):
+        """6. Subprocess stdout and stderr are preserved completely without truncation or distortion."""
+        cmd = [
+            sys.executable, "-c",
+            "import sys; sys.stdout.write('BROWSER_OUT_CONTENT\\n'); sys.stderr.write('BROWSER_ERR_CONTENT\\n')"
+        ]
+        code, out, err, timed_out = run_trial.execute_browser_subprocess(
+            cmd=cmd,
+            timeout=5.0,
+            coordinator=None,
+            start_new_session=True
+        )
+        self.assertEqual(code, 0)
+        self.assertFalse(timed_out)
+        self.assertIn("BROWSER_OUT_CONTENT", out)
+        self.assertIn("BROWSER_ERR_CONTENT", err)
+
+    def test_07_normal_unregistration(self):
+        """7. Process unregisters cleanly from coordinator upon normal completion."""
+        mock_coord = MagicMock()
+        cmd = [sys.executable, "-c", "pass"]
+        code, out, err, timed_out = run_trial.execute_browser_subprocess(
+            cmd=cmd,
+            timeout=5.0,
+            coordinator=mock_coord,
+            start_new_session=True
+        )
+        self.assertEqual(code, 0)
+        mock_coord.register_process.assert_called_once()
+        mock_coord.unregister_process.assert_called_once()
+
+    def test_08_exceptional_unregistration(self):
+        """8. Process unregisters cleanly in finally block when execution encounters an exception."""
+        mock_coord = MagicMock()
+        # Mock communicate raising an exception
+        with patch("subprocess.Popen.communicate", side_effect=RuntimeError("Simulated communicate error")):
+            with self.assertRaises(RuntimeError):
+                run_trial.execute_browser_subprocess(
+                    cmd=[sys.executable, "-c", "pass"],
+                    timeout=5.0,
+                    coordinator=mock_coord,
+                    start_new_session=True
+                )
+        mock_coord.register_process.assert_called_once()
+        mock_coord.unregister_process.assert_called_once()
+
+    def test_09_capture_plus_browser_dual_reaping(self):
+        """9. Both capture and browser processes registered with coordinator are terminated and reaped."""
+        import lab.run_campaign as run_campaign
+        coord = run_campaign.InterruptionCoordinator()
+
+        p1 = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"], start_new_session=True)
+        p2 = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"], start_new_session=True)
+        coord.register_process(p1)
+        coord.register_process(p2)
+
+        self.assertTrue(run_trial._is_pid_alive(p1.pid))
+        self.assertTrue(run_trial._is_pid_alive(p2.pid))
+
+        coord.terminate_tracked_processes()
+
+        self.assertFalse(run_trial._is_pid_alive(p1.pid))
+        self.assertFalse(run_trial._is_pid_alive(p2.pid))
+        self.assertIsNotNone(p1.poll())
+        self.assertIsNotNone(p2.poll())
+
+    def test_10_termination_failure_produces_cleanup_failure(self):
+        """10. Failure to terminate/reap tracked process surfaces as cleanup failure and halts campaign fail-stop."""
+        import lab.run_campaign as run_campaign
+        runner = run_campaign.CampaignRunner(
+            scenarios=["S0"],
+            browsers=["google-chrome"],
+            repetitions=1,
+            output_dir=self.td_path / "camp_fail_reap",
+            is_simulation=True,
+            exit_on_interruption=False
+        )
+
+        # Inject an unkillable process into coordinator termination
+        mock_unkillable = MagicMock()
+        mock_unkillable.pid = 9999999
+        mock_unkillable.poll.return_value = None
+        mock_unkillable.wait.side_effect = subprocess.TimeoutExpired(cmd="fake", timeout=1.0)
+        runner.coordinator.register_process(mock_unkillable)
+
+        with patch("lab.run_trial.terminate_process_group", return_value=False):
+            runner.coordinator.terminate_tracked_processes()
+
+        errors = runner.coordinator.get_termination_errors()
+        self.assertTrue(len(errors) > 0)
+        self.assertIn("Failed to terminate and reap", errors[0])
+
+    def test_11_interrupted_attempt_manifest_matches_failure_record(self):
+        """11. Interrupted attempt in campaign manifest matches physical failed_attempt_record.json."""
+        import lab.run_campaign as run_campaign
+        camp_dir = self.td_path / "camp_match_test"
+        flag_file = self.td_path / "match_ready.flag"
+
+        child_script = f"import sys, time, pathlib; pathlib.Path({repr(str(flag_file))}).write_text('ready'); time.sleep(15)"
+        runner = run_campaign.CampaignRunner(
+            scenarios=["S0"],
+            browsers=["google-chrome"],
+            repetitions=1,
+            output_dir=camp_dir,
+            is_simulation=True,
+            exit_on_interruption=False,
+            browser_cmd_override=[sys.executable, "-c", child_script]
+        )
+
+        # Simulate interruption during trial execution
+        def _interrupt_after_flag():
+            t0 = time.time()
+            while not flag_file.exists() and time.time() - t0 < 5.0:
+                time.sleep(0.05)
+            runner.coordinator.record_interruption(signal.SIGINT, "SIGINT")
+            runner.coordinator.terminate_tracked_processes()
+
+        th = threading.Thread(target=_interrupt_after_flag, daemon=True)
+        th.start()
+
+        manifest = runner.initialize_manifest()
+        slot = manifest.matrix_slots[0]
+        attempt = runner.execute_slot_attempt(slot, attempt_number=1)
+        th.join(timeout=3.0)
+
+        self.assertEqual(attempt.status, "INTERRUPTED")
+        rec_path = camp_dir / "trials" / attempt.trial_id / "failed_attempt_record.json"
+        self.assertTrue(rec_path.is_file())
+        rec = json.loads(rec_path.read_text(encoding="utf-8"))
+        self.assertEqual(rec["trial_id"], attempt.trial_id)
+        self.assertEqual(rec["status"], attempt.status)
+        self.assertEqual(rec["validity"], attempt.validity)
+        self.assertEqual(rec["interruption"]["signal_name"], "SIGINT")
+
+    def test_12_unchanged_chrome_firefox_command_construction(self):
+        """12. Chrome and Firefox command construction flags and env are unchanged."""
+        # Test Chrome command flags via mock execute_browser_subprocess
+        with patch("lab.run_trial.execute_browser_subprocess") as mock_exec, \
+             patch("lab.run_trial.get_browser_uid_gid", return_value=(1000, 1000)):
+            mock_exec.return_value = (0, "<html>OK</html>", "", False)
+            prof = self.td_path / "ch_prof"
+            prof.mkdir(parents=True, exist_ok=True)
+            run_trial.run_browser(
+                browser_name="google-chrome",
+                browser_path="/usr/bin/google-chrome",
+                target_url="http://test.he.test/",
+                profile_dir=prof,
+                is_simulation=False
+            )
+            mock_exec.assert_called_once()
+            cmd = mock_exec.call_args[1].get("cmd") or mock_exec.call_args[0][0]
+            cmd_str = " ".join(cmd)
+            self.assertIn("--headless=new", cmd_str)
+            self.assertIn("--dump-dom", cmd_str)
+            self.assertIn("--dns-over-https-mode=off", cmd_str)
+            self.assertIn(f"--user-data-dir={prof.resolve()}", cmd_str)
+
+        # Test Firefox command flags via mock execute_browser_subprocess
+        with patch("lab.run_trial.execute_browser_subprocess") as mock_exec_ff, \
+             patch("lab.run_trial.get_browser_uid_gid", return_value=(1000, 1000)):
+            mock_exec_ff.return_value = (0, "", "", False)
+            ff_prof = self.td_path / "ff_prof"
+            ff_prof.mkdir(parents=True, exist_ok=True)
+            # Write telemetry file to satisfy telemetry check
+            (ff_prof / "moz_telemetry.log").write_text("nsHttpTransaction [HTTP/1.1 200 OK]\n", encoding="utf-8")
+            run_trial.run_browser(
+                browser_name="firefox",
+                browser_path="/opt/firefox-measurement/firefox",
+                target_url="http://test.he.test/",
+                profile_dir=ff_prof,
+                is_simulation=False
+            )
+            mock_exec_ff.assert_called_once()
+            ff_cmd = mock_exec_ff.call_args[1].get("cmd") or mock_exec_ff.call_args[0][0]
+            ff_cmd_str = " ".join(ff_cmd)
+            self.assertIn("--headless", ff_cmd_str)
+            self.assertIn("--profile", ff_cmd_str)
+            self.assertIn("--no-remote", ff_cmd_str)
+            self.assertIn("--new-instance", ff_cmd_str)
+            self.assertNotIn("--dump-dom", ff_cmd_str)
 
 
 if __name__ == "__main__":

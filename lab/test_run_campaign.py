@@ -1324,13 +1324,7 @@ from pathlib import Path
 import lab.run_campaign as run_campaign
 import lab.run_trial as run_trial
 
-flag_path = Path({repr(str(flag_file))})
-def slow_trial(**kwargs):
-    flag_path.write_text("ready", encoding="utf-8")
-    time.sleep(10.0)
-    return {{"timestamps": {{}}, "cleanup_status": {{"scenario_restored": True, "baseline_verified": True, "errors": []}}}}
-
-run_trial.run_trial = slow_trial
+browser_child_script = "import sys, time, pathlib; pathlib.Path({repr(str(flag_file))}).write_text('ready'); time.sleep(15)"
 
 runner = run_campaign.CampaignRunner(
     scenarios=["S0"],
@@ -1338,7 +1332,8 @@ runner = run_campaign.CampaignRunner(
     repetitions=1,
     output_dir=Path({repr(str(camp_dir))}),
     is_simulation=True,
-    exit_on_interruption=True
+    exit_on_interruption=True,
+    browser_cmd_override=[sys.executable, "-c", browser_child_script]
 )
 runner.run()
 """
@@ -1366,6 +1361,23 @@ runner.run()
         self.assertEqual(mdata["status"], "INTERRUPTED")
         self.assertIn("SIGINT", mdata.get("halt_reason", ""))
 
+        # Verify exactly one attempt recorded in manifest and matches failed_attempt_record.json
+        slot_0 = mdata["matrix_slots"][0]
+        self.assertEqual(len(slot_0["attempts"]), 1)
+        attempt = slot_0["attempts"][0]
+        self.assertEqual(attempt["status"], "INTERRUPTED")
+        self.assertEqual(attempt["validity"], "INTERRUPTED")
+        self.assertIsNotNone(attempt["interruption"])
+        self.assertEqual(attempt["interruption"]["signal_number"], 2)
+
+        fail_rec_path = camp_dir / "trials" / attempt["trial_id"] / "failed_attempt_record.json"
+        self.assertTrue(fail_rec_path.is_file(), f"Expected failure record at {fail_rec_path}")
+        fail_rec = json.loads(fail_rec_path.read_text(encoding="utf-8"))
+        self.assertEqual(fail_rec["trial_id"], attempt["trial_id"])
+        self.assertEqual(fail_rec["status"], attempt["status"])
+        self.assertEqual(fail_rec["validity"], attempt["validity"])
+        self.assertEqual(fail_rec["interruption"]["signal_name"], "SIGINT")
+
     def test_subprocess_sigterm_controlled_exit_143(self):
         camp_dir = self.temp_dir / "camp_sigterm"
         camp_dir.mkdir(parents=True, exist_ok=True)
@@ -1377,13 +1389,7 @@ from pathlib import Path
 import lab.run_campaign as run_campaign
 import lab.run_trial as run_trial
 
-flag_path = Path({repr(str(flag_file))})
-def slow_trial(**kwargs):
-    flag_path.write_text("ready", encoding="utf-8")
-    time.sleep(10.0)
-    return {{"timestamps": {{}}, "cleanup_status": {{"scenario_restored": True, "baseline_verified": True, "errors": []}}}}
-
-run_trial.run_trial = slow_trial
+browser_child_script = "import sys, time, pathlib; pathlib.Path({repr(str(flag_file))}).write_text('ready'); time.sleep(15)"
 
 runner = run_campaign.CampaignRunner(
     scenarios=["S0"],
@@ -1391,7 +1397,8 @@ runner = run_campaign.CampaignRunner(
     repetitions=1,
     output_dir=Path({repr(str(camp_dir))}),
     is_simulation=True,
-    exit_on_interruption=True
+    exit_on_interruption=True,
+    browser_cmd_override=[sys.executable, "-c", browser_child_script]
 )
 runner.run()
 """
@@ -1412,6 +1419,23 @@ runner.run()
         stdout, stderr = proc.communicate(timeout=5.0)
 
         self.assertEqual(proc.returncode, 143, f"Expected returncode 143, got {proc.returncode}. Stderr: {stderr}")
+
+        mpath = camp_dir / "campaign_manifest.json"
+        self.assertTrue(mpath.is_file())
+        mdata = json.loads(mpath.read_text(encoding="utf-8"))
+        self.assertEqual(mdata["status"], "INTERRUPTED")
+        self.assertIn("SIGTERM", mdata.get("halt_reason", ""))
+
+        slot_0 = mdata["matrix_slots"][0]
+        self.assertEqual(len(slot_0["attempts"]), 1)
+        attempt = slot_0["attempts"][0]
+        self.assertEqual(attempt["interruption"]["signal_number"], 15)
+
+        fail_rec_path = camp_dir / "trials" / attempt["trial_id"] / "failed_attempt_record.json"
+        self.assertTrue(fail_rec_path.is_file())
+        fail_rec = json.loads(fail_rec_path.read_text(encoding="utf-8"))
+        self.assertEqual(fail_rec["trial_id"], attempt["trial_id"])
+        self.assertEqual(fail_rec["interruption"]["signal_name"], "SIGTERM")
 
         mpath = camp_dir / "campaign_manifest.json"
         self.assertTrue(mpath.is_file())
