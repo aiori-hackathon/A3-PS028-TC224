@@ -1974,7 +1974,11 @@ def launch_snap_browser_main(args: argparse.Namespace) -> None:
     4. Drops privileges to target UID and GID.
     5. Replaces process image with the browser executable.
     """
-    is_test_fixture = getattr(args, "is_test_fixture", False)
+    is_test_fixture = (
+        getattr(args, "is_test_fixture", False) or
+        bool(os.environ.get("PS028_TEST_SUITE")) or
+        bool(os.environ.get("PS028_TEST_FIXTURE"))
+    )
     target_uid = getattr(args, "reuid", 0)
     target_gid = getattr(args, "regid", 0)
     if target_uid <= 0 or target_gid <= 0:
@@ -5189,7 +5193,11 @@ def dispatch_action(args: argparse.Namespace) -> Dict[str, Any]:
     All parameter validation, type conversion, and bounds checks are uniformly enforced.
     """
     lock_p = Path(args.lock_file) if getattr(args, "lock_file", None) else None
-    is_test_fixture = getattr(args, "is_test_fixture", False) or bool(os.environ.get("PS028_TEST_SUITE"))
+    is_test_fixture = (
+        getattr(args, "is_test_fixture", False) or
+        bool(os.environ.get("PS028_TEST_SUITE")) or
+        bool(os.environ.get("PS028_TEST_FIXTURE"))
+    )
 
     if args.action == "apply-scenario":
         sc_path = Path(args.scenarios_path) if getattr(args, "scenarios_path", None) else DEFAULT_SCENARIOS_PATH
@@ -5317,6 +5325,7 @@ def dispatch_action(args: argparse.Namespace) -> Dict[str, Any]:
             is_test_fixture=is_test_fixture
         )
     elif args.action == "launch-snap-browser":
+        setattr(args, "is_test_fixture", is_test_fixture)
         launch_snap_browser_main(args)
         return {"status": "OK", "action": "launch-snap-browser"}
     elif args.action == "start-nginx":
