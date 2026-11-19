@@ -1,0 +1,176 @@
+# ==============================================================================
+# PS-028 Happy Eyeballs Measurement Lab
+# Work Package A4: Controlled Impairment Scenarios Configuration
+# Reference: Study Guide Scenarios S0 - S6
+# ==============================================================================
+
+version: "1.0"
+
+lab:
+  namespaces:
+    client: "ps028-cl"
+    router: "ps028-rt"
+    server: "ps028-sv"
+  interfaces:
+    router_sv4: "ps028-rt-sv4"
+    server_rt4: "ps028-sv-rt4"
+    router_sv6: "ps028-rt-sv6"
+    server_rt6: "ps028-sv-rt6"
+  addresses:
+    client_ipv4: "10.0.1.2"
+    client_ipv6: "2001:db8:1::2"
+    router_cl_ipv4: "10.0.1.1"
+    router_cl_ipv6: "2001:db8:1::1"
+    server_ipv4: "10.0.2.10"
+    server_ipv6: "2001:db8:2::10"
+    dns_ipv4: "10.0.1.1"
+  nftables:
+    table: "ps028_impair"
+    family: "inet"
+    namespace: "ps028-rt"
+    chain: "forward"
+    hook: "forward"
+    priority: 0
+    policy: "accept"
+  baseline_delays:
+    ps028-rt-sv4: "10ms"
+    ps028-sv-rt4: "10ms"
+    ps028-rt-sv6: "10ms"
+    ps028-sv-rt6: "10ms"
+
+scenarios:
+  S0:
+    id: "S0"
+    name: "healthy_baseline"
+    description: "Healthy baseline: 10ms netem delay on each server link (~20ms RTT), immediate DNS responses (0ms delay), no packet loss or drops"
+    type: "baseline"
+    target_family: "dual"
+    network:
+      ipv4_rtt_ms: 20
+      ipv6_rtt_ms: 20
+      delays:
+        ps028-rt-sv4: "10ms"
+        ps028-sv-rt4: "10ms"
+        ps028-rt-sv6: "10ms"
+        ps028-sv-rt6: "10ms"
+    dns:
+      A_delay_ms: 0
+      AAAA_delay_ms: 0
+    nftables: []
+
+  S1:
+    id: "S1"
+    name: "ipv6_syn_blackhole"
+    description: "IPv6 TCP SYN blackhole: IPv6 TCP SYN packets are silently discarded without response (triggers client SYN timeout and Happy Eyeballs fallback to IPv4)"
+    type: "nftables"
+    target_family: "ipv6"
+    network:
+      ipv4_rtt_ms: 20
+      ipv6_rtt_ms: null
+      delays:
+        ps028-rt-sv4: "10ms"
+        ps028-sv-rt4: "10ms"
+        ps028-rt-sv6: "10ms"
+        ps028-sv-rt6: "10ms"
+    dns:
+      A_delay_ms: 0
+      AAAA_delay_ms: 0
+    nftables:
+      - 'oifname "ps028-rt-sv6" ip6 daddr 2001:db8:2::10 tcp flags syn / syn,ack drop'
+
+  S2:
+    id: "S2"
+    name: "ipv6_tcp_rst"
+    description: "IPv6 TCP RST rejection: IPv6 TCP SYN packets are actively rejected with TCP RST (triggers immediate client reset and Happy Eyeballs fallback without waiting for timeout)"
+    type: "nftables"
+    target_family: "ipv6"
+    network:
+      ipv4_rtt_ms: 20
+      ipv6_rtt_ms: null
+      delays:
+        ps028-rt-sv4: "10ms"
+        ps028-sv-rt4: "10ms"
+        ps028-rt-sv6: "10ms"
+        ps028-sv-rt6: "10ms"
+    dns:
+      A_delay_ms: 0
+      AAAA_delay_ms: 0
+    nftables:
+      - 'oifname "ps028-rt-sv6" ip6 daddr 2001:db8:2::10 tcp flags syn / syn,ack reject with tcp reset'
+
+  S3:
+    id: "S3"
+    name: "ipv6_rtt_150ms"
+    description: "IPv6 RTT 150ms: Symmetric 75ms delay on each IPv6 link end, increasing IPv6 round-trip time from 20ms baseline to 150ms while IPv4 remains at 20ms"
+    type: "netem"
+    target_family: "ipv6"
+    network:
+      ipv4_rtt_ms: 20
+      ipv6_rtt_ms: 150
+      delays:
+        ps028-rt-sv4: "10ms"
+        ps028-sv-rt4: "10ms"
+        ps028-rt-sv6: "75ms"
+        ps028-sv-rt6: "75ms"
+    dns:
+      A_delay_ms: 0
+      AAAA_delay_ms: 0
+    nftables: []
+
+  S4:
+    id: "S4"
+    name: "ipv6_rtt_600ms"
+    description: "IPv6 RTT 600ms: Symmetric 300ms delay on each IPv6 link end, increasing IPv6 round-trip time from 20ms baseline to 600ms while IPv4 remains at 20ms"
+    type: "netem"
+    target_family: "ipv6"
+    network:
+      ipv4_rtt_ms: 20
+      ipv6_rtt_ms: 600
+      delays:
+        ps028-rt-sv4: "10ms"
+        ps028-sv-rt4: "10ms"
+        ps028-rt-sv6: "300ms"
+        ps028-sv-rt6: "300ms"
+    dns:
+      A_delay_ms: 0
+      AAAA_delay_ms: 0
+    nftables: []
+
+  S5:
+    id: "S5"
+    name: "ipv6_syn_loss_50pct"
+    description: "Approximately 50% IPv6 SYN loss in the client-to-server direction only: Client-to-server IPv6 TCP SYN packets are dropped with 50% probability; server-to-client traffic and non-SYN packets are unaffected"
+    type: "nftables"
+    target_family: "ipv6"
+    network:
+      ipv4_rtt_ms: 20
+      ipv6_rtt_ms: 20
+      delays:
+        ps028-rt-sv4: "10ms"
+        ps028-sv-rt4: "10ms"
+        ps028-rt-sv6: "10ms"
+        ps028-sv-rt6: "10ms"
+    dns:
+      A_delay_ms: 0
+      AAAA_delay_ms: 0
+    nftables:
+      - 'oifname "ps028-rt-sv6" ip6 daddr 2001:db8:2::10 tcp flags syn / syn,ack numgen random mod 100 < 50 drop'
+
+  S6:
+    id: "S6"
+    name: "delay_aaaa_500ms"
+    description: "Delay AAAA DNS responses by 500ms while A remains immediate: Tests Happy Eyeballs behavior when AAAA record resolution is delayed relative to A record resolution"
+    type: "dns"
+    target_family: "ipv6"
+    network:
+      ipv4_rtt_ms: 20
+      ipv6_rtt_ms: 20
+      delays:
+        ps028-rt-sv4: "10ms"
+        ps028-sv-rt4: "10ms"
+        ps028-rt-sv6: "10ms"
+        ps028-sv-rt6: "10ms"
+    dns:
+      A_delay_ms: 0
+      AAAA_delay_ms: 500
+    nftables: []

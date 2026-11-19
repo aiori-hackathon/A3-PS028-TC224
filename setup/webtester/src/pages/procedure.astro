@@ -1,0 +1,434 @@
+---
+import PageLayout from "@/layouts/main.astro";
+import Header from "@/components/header.astro";
+import CodeBlock from "@/components/code-block.astro";
+
+// KaTeX pre-rendered output for 7 \times 2 \times 20 = 280 generated via vendored KaTeX engine
+const mathHtml = `<span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>7</mn><mo>×</mo><mn>2</mn><mo>×</mo><mn>20</mn><mo>=</mo><mn>280</mn></mrow><annotation encoding="application/x-tex">7 \\times 2 \\times 20 = 280</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">7</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">2</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">20</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">280</span></span></span></span>`;
+
+const step1Command = `git clone https://github.com/aiori-hackathon/A3-PS028-TC224.git
+
+cd A3-PS028-TC224
+
+git checkout --detach 61c46aa2184245a06e878f6aca85102e08d726fa`;
+
+const step3Command = `python3 lab/partner_preflight.py`;
+
+const step5Command = `python3 lab/run_campaign.py \\
+  --output-dir "$PARTNER_EVIDENCE_DIR" \\
+  --repetitions 20 \\
+  --browsers "google-chrome,firefox" \\
+  --scenarios "S0,S1,S2,S3,S4,S5,S6"`;
+
+const step6Command = `python3 lab/export_campaign_evidence.py \\
+  --campaign-dir "$PARTNER_EVIDENCE_DIR" \\
+  --output-dir "$PARTNER_DERIVED_DIR" \\
+  --target all`;
+
+interface ResourceFile {
+  name: string;
+  path: string;
+}
+
+interface ResourceItem {
+  files: ResourceFile[];
+  purpose: string;
+}
+
+const downloadableResources: ResourceItem[] = [
+  {
+    files: [
+      { name: "README.md", path: "README.md" }
+    ],
+    purpose: "Project overview, architecture, experiment design, results, and repository guide."
+  },
+  {
+    files: [
+      { name: "partner_replication_runbook.md", path: "docs/phase-cd/partner_replication_runbook.md" }
+    ],
+    purpose: "Main step-by-step instructions for an independent laboratory to reproduce the experiment."
+  },
+  {
+    files: [
+      { name: "partner_replication_manifest.json", path: "docs/phase-cd/partner_replication_manifest.json" }
+    ],
+    purpose: "Defines the browser versions, scenarios, repetitions, toolchain requirements, and replication status."
+  },
+  {
+    files: [
+      { name: "scenarios.yaml", path: "lab/scenarios.yaml" }
+    ],
+    purpose: "Exact configuration of the seven experimental conditions."
+  },
+  {
+    files: [
+      { name: "phase-c-metric-contract.md", path: "docs/phase-c-metric-contract.md" }
+    ],
+    purpose: "Mathematical definitions of connection timing, fallback metrics, classification rules, and evidence requirements."
+  },
+  {
+    files: [
+      { name: "partner_preflight.py", path: "lab/partner_preflight.py" }
+    ],
+    purpose: "Checks whether another Linux machine is ready to run the experiment."
+  },
+  {
+    files: [
+      { name: "setup_topology.sh", path: "lab/setup_topology.sh" }
+    ],
+    purpose: "Creates, checks, and tears down the isolated network topology."
+  },
+  {
+    files: [
+      { name: "run_campaign.py", path: "lab/run_campaign.py" },
+      { name: "run_trial.py", path: "lab/run_trial.py" }
+    ],
+    purpose: "Execute the complete campaign and individual browser trials."
+  },
+  {
+    files: [
+      { name: "export_campaign_evidence.py", path: "lab/export_campaign_evidence.py" },
+      { name: "analyze.py", path: "lab/analyze.py" }
+    ],
+    purpose: "Process packet captures and produce structured experimental results."
+  },
+  {
+    files: [
+      { name: "verify_partner_handover.py", path: "lab/verify_partner_handover.py" }
+    ],
+    purpose: "Validates the evidence package submitted by an independent laboratory."
+  }
+];
+---
+
+<PageLayout title="Steps for Reproducing Test Laboratory - Happy Eyeballs Webtester">
+  <link rel="stylesheet" href="/katex/katex.min.css" />
+
+  <Header
+    titleLine1="Steps for Reproducing"
+    titleLine2="Test Laboratory"
+  >
+    <div class="space-y-2">
+      <h2 class="text-base sm:text-lg font-bold text-foreground">
+        How we are making PS-028 reproducible
+      </h2>
+      <p class="text-black leading-relaxed">
+        Our project is designed so that another researcher or networking enthusiast can repeat the same experiment, collect independent evidence, and compare their findings with ours.
+      </p>
+    </div>
+  </Header>
+
+  <div class="mt-8 space-y-8">
+    {/* =========================================================================
+        Red information bubble containing the five reproducibility practices
+        ========================================================================= */}
+    <section
+      data-testid="reproducibility-practices-callout"
+      class="rounded-xl border border-destructive/40 bg-destructive/10 p-6 sm:p-8 space-y-4 shadow-sm text-black"
+    >
+      <p class="text-black font-semibold text-base sm:text-lg leading-relaxed">
+        We achieve this through five main practices:
+      </p>
+
+      <ol class="list-decimal pl-5 sm:pl-6 space-y-3.5 text-black text-sm sm:text-base leading-relaxed">
+        <li class="pl-1">
+          <strong class="font-bold text-black">Fixed experimental conditions:</strong> We define all seven conditions (S0 baseline plus S1–S6) in a configuration file, including the network delays, packet loss, TCP failures, and DNS response delays.
+        </li>
+
+        <li class="pl-1">
+          <strong class="font-bold text-black">Pinned software and specifications:</strong> We record the exact Chrome and Firefox versions, required tool versions, and the Happy Eyeballs specification revision used in the campaign (draft-ietf-happy-happyeyeballs-v3-04).
+        </li>
+
+        <li class="pl-1">
+          <strong class="font-bold text-black">Repeatable execution:</strong> The campaign runner executes 20 valid repetitions for each browser under each condition, giving a total of <span class="inline-block text-black font-semibold align-baseline" set:html={mathHtml} /> valid trials.
+        </li>
+
+        <li class="pl-1">
+          <strong class="font-bold text-black">Evidence-based measurement:</strong> Each trial preserves its result JSON, packet capture, browser diagnostics, and execution information. We use packet captures as the primary source for determining connection attempts and the winning address family.
+        </li>
+
+        <li class="pl-1">
+          <strong class="font-bold text-black">Deterministic analysis and integrity checks:</strong> Our analysis and export tools generate structured CSV files and provenance records containing information such as source commit, software versions, and SHA-256 checksums. Missing or invalid measurements are not silently converted into zero values.
+        </li>
+      </ol>
+
+      <p class="text-black text-sm sm:text-base leading-relaxed pt-2">
+        This makes it possible to distinguish genuine live experiments from simulations, synthetic tests, and historical evidence.
+      </p>
+    </section>
+
+    {/* =========================================================================
+        Card containing downloadable replication resources and the complete procedure
+        ========================================================================= */}
+    <div
+      data-testid="replication-resources-card"
+      class="rounded-xl border bg-card text-card-foreground shadow-sm p-6 sm:p-8 space-y-10"
+    >
+      {/* ---------------------------------------------------------------------
+          Section A — Downloadable project resources
+          --------------------------------------------------------------------- */}
+      <section data-testid="downloadable-resources-section" class="space-y-4">
+        <div>
+          <h2 class="text-xl sm:text-2xl font-bold tracking-tight text-foreground">
+            Downloadable project resources
+          </h2>
+          <p class="mt-2 text-sm sm:text-base text-black font-semibold">
+            The following files are the most useful starting points. They are available in our integration branch.
+          </p>
+        </div>
+
+        <div class="overflow-x-auto rounded-lg border bg-card/60 shadow-xs">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="border-b bg-muted/40 text-left font-medium text-black">
+                <th class="p-3 sm:p-3.5 text-black font-semibold text-xs sm:text-sm tracking-wide uppercase w-2/5">
+                  File
+                </th>
+                <th class="p-3 sm:p-3.5 text-black font-semibold text-xs sm:text-sm tracking-wide uppercase w-3/5">
+                  Purpose
+                </th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-border/50 text-xs sm:text-sm">
+              {downloadableResources.map((resource) => {
+                const first = resource.files[0]!;
+                const second = resource.files[1];
+                return (
+                  <tr class="hover:bg-muted/20 transition-colors">
+                    <td class="p-3 sm:p-3.5 align-top">
+                      {!second ? (
+                        <a
+                          href={`/downloads/${first.name}`}
+                          download={first.name}
+                          class="inline-flex items-center gap-1.5 font-mono font-semibold text-primary hover:underline hover:text-primary/80 transition-colors group break-all"
+                          title={`Download verified ${first.name} (commit 61c46aa)`}
+                        >
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            width="14"
+                            height="14"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            class="size-3.5 shrink-0 transition-transform group-hover:translate-y-0.5 text-primary"
+                            aria-hidden="true"
+                          >
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                            <polyline points="7 10 12 15 17 10"></polyline>
+                            <line x1="12" x2="12" y1="15" y2="3"></line>
+                          </svg>
+                          <code>{first.name}</code>
+                        </a>
+                      ) : (
+                        <div class="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2">
+                          <a
+                            href={`/downloads/${first.name}`}
+                            download={first.name}
+                            class="inline-flex items-center gap-1.5 font-mono font-semibold text-primary hover:underline hover:text-primary/80 transition-colors group break-all"
+                            title={`Download verified ${first.name} (commit 61c46aa)`}
+                          >
+                            <svg
+                              xmlns="http://www.w3.org/2000/svg"
+                              width="14"
+                              height="14"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              stroke-width="2"
+                              stroke-linecap="round"
+                              stroke-linejoin="round"
+                              class="size-3.5 shrink-0 transition-transform group-hover:translate-y-0.5 text-primary"
+                              aria-hidden="true"
+                            >
+                              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                              <polyline points="7 10 12 15 17 10"></polyline>
+                              <line x1="12" x2="12" y1="15" y2="3"></line>
+                            </svg>
+                            <code>{first.name}</code>
+                          </a>
+                          <span class="text-black text-xs font-sans">and</span>
+                          <a
+                            href={`/downloads/${second.name}`}
+                            download={second.name}
+                            class="inline-flex items-center gap-1.5 font-mono font-semibold text-primary hover:underline hover:text-primary/80 transition-colors group break-all"
+                            title={`Download verified ${second.name} (commit 61c46aa)`}
+                          >
+                            <svg
+                              xmlns="http://www.w3.org/2000/svg"
+                              width="14"
+                              height="14"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              stroke-width="2"
+                              stroke-linecap="round"
+                              stroke-linejoin="round"
+                              class="size-3.5 shrink-0 transition-transform group-hover:translate-y-0.5 text-primary"
+                              aria-hidden="true"
+                            >
+                              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                              <polyline points="7 10 12 15 17 10"></polyline>
+                              <line x1="12" x2="12" y1="15" y2="3"></line>
+                            </svg>
+                            <code>{second.name}</code>
+                          </a>
+                        </div>
+                      )}
+                    </td>
+                    <td class="p-3 sm:p-3.5 text-black leading-relaxed align-top">
+                      {resource.purpose}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {/* ---------------------------------------------------------------------
+          Section B — How another researcher can reproduce the experiment
+          --------------------------------------------------------------------- */}
+      <section data-testid="reproduction-procedure-section" class="space-y-6 pt-4 border-t border-border/60">
+        <div>
+          <h2 class="text-xl sm:text-2xl font-bold tracking-tight text-foreground">
+            How another researcher can reproduce the experiment
+          </h2>
+        </div>
+
+        <div class="space-y-6">
+          {/* Step 1 */}
+          <div class="space-y-2.5">
+            <h3 class="text-base sm:text-lg font-bold text-foreground">
+              Step 1 — Clone the repository and use a fixed source revision
+            </h3>
+            <p class="text-sm sm:text-base text-black leading-relaxed">
+              Clone the repository and use a fixed source revision.
+            </p>
+            <CodeBlock code={step1Command} language="bash" />
+            <p class="text-sm sm:text-base text-black leading-relaxed">
+              This pins the checkout to the integration branch revision verified on November 18, 2026, rather than relying on a branch that may change later.
+            </p>
+          </div>
+
+          {/* Step 2 */}
+          <div class="space-y-2.5">
+            <h3 class="text-base sm:text-lg font-bold text-foreground">
+              Step 2 — Prepare a compatible Linux environment
+            </h3>
+            <p class="text-sm sm:text-base text-black leading-relaxed">
+              The replication runbook specifies Ubuntu 24.04 LTS, either bare metal or WSL2 with systemd, with support for network namespaces, iproute2, tc netem, and nftables. It also specifies Python, TShark, Nginx, Chrome, and Firefox requirements.
+            </p>
+          </div>
+
+          {/* Step 3 */}
+          <div class="space-y-2.5">
+            <h3 class="text-base sm:text-lg font-bold text-foreground">
+              Step 3 — Run the read-only preflight checks
+            </h3>
+            <CodeBlock code={step3Command} language="bash" />
+            <p class="text-sm sm:text-base text-black leading-relaxed">
+              The researcher should also save the host's original network configuration and follow the runbook's privileged-helper dry-run and installation procedure.
+            </p>
+          </div>
+
+          {/* Step 4 */}
+          <div class="space-y-2.5">
+            <h3 class="text-base sm:text-lg font-bold text-foreground">
+              Step 4 — Provision the isolated experimental network
+            </h3>
+            <p class="text-sm sm:text-base text-black leading-relaxed">
+              Follow the runbook to create the three network namespaces: client, router, and server. The topology setup requires a separate explicit authorization gate because it changes network state and needs privileged operations.
+            </p>
+            <div class="p-4 rounded-lg border border-amber-500/30 bg-amber-500/10 text-black text-xs sm:text-sm flex items-start gap-3">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                class="size-4 sm:size-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5"
+                aria-hidden="true"
+              >
+                <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path>
+                <line x1="12" x2="12" y1="9" y2="13"></line>
+                <line x1="12" x2="12.01" y1="17" y2="17"></line>
+              </svg>
+              <div>
+                <strong class="font-bold text-foreground">Explicit Authorization Gate Notice:</strong> Topology provisioning requires explicit administrator authorization and must follow the runbook's safety and restoration procedure. Never automatically execute privileged commands in an unverified environment.
+              </div>
+            </div>
+          </div>
+
+          {/* Step 5 */}
+          <div class="space-y-2.5">
+            <h3 class="text-base sm:text-lg font-bold text-foreground">
+              Step 5 — Run the canonical 280-trial campaign
+            </h3>
+            <CodeBlock code={step5Command} language="bash" />
+            <p class="text-sm sm:text-base text-black leading-relaxed">
+              The campaign should finish with status <code>COMPLETED</code>, execution mode <code>LIVE</code>, and 280 completed valid trial slots.
+            </p>
+          </div>
+
+          {/* Step 6 */}
+          <div class="space-y-2.5">
+            <h3 class="text-base sm:text-lg font-bold text-foreground">
+              Step 6 — Generate and validate the experimental evidence
+            </h3>
+            <CodeBlock code={step6Command} language="bash" />
+            <p class="text-sm sm:text-base text-black leading-relaxed">
+              The researcher then follows the runbook to tear down the network, verify host restoration, generate SHA-256 checksums, and validate the final handover archive.
+            </p>
+          </div>
+
+          {/* Step 7 */}
+          <div class="space-y-2.5 pt-2">
+            <h3 class="text-base sm:text-lg font-bold text-foreground">
+              Submit the independent evidence
+            </h3>
+            <p class="text-sm sm:text-base text-black leading-relaxed">
+              Submit the evidence archive and its SHA-256 checksum to the project maintainers. They can inspect and compare the independent results with our original campaign.
+            </p>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <script is:inline>
+    document.addEventListener("DOMContentLoaded", () => {
+      document.querySelectorAll(".code-block-wrapper").forEach((block) => {
+        const btn = block.querySelector(".copy-btn");
+        if (!btn) return;
+        btn.addEventListener("click", async () => {
+          const code = btn.getAttribute("data-code");
+          if (!code) return;
+          try {
+            await navigator.clipboard.writeText(code);
+            const copyIcon = btn.querySelector(".copy-icon");
+            const checkIcon = btn.querySelector(".check-icon");
+            const label = btn.querySelector(".copy-label");
+            if (copyIcon) copyIcon.classList.add("hidden");
+            if (checkIcon) checkIcon.classList.remove("hidden");
+            if (label) label.textContent = "Copied!";
+            setTimeout(() => {
+              if (copyIcon) copyIcon.classList.remove("hidden");
+              if (checkIcon) checkIcon.classList.add("hidden");
+              if (label) label.textContent = "Copy";
+            }, 1500);
+          } catch (err) {
+            console.error("Failed to copy:", err);
+          }
+        });
+      });
+    });
+  </script>
+</PageLayout>

@@ -8,9 +8,11 @@
     "build": "npm run prepare:data && astro build",
     "preview": "astro preview",
     "check": "npm run prepare:data && astro check",
-    "test": "node --experimental-strip-types --test test/historical-evidence.test.mjs test/scenario-analytics.test.mjs",
-    "test:smoke": "node scripts/smoke-test-preview.mjs",
+    "test": "npm run prepare:data && node --experimental-strip-types --test test/historical-evidence.test.mjs test/scenario-analytics.test.mjs",
+    "test:procedure": "node --experimental-strip-types --test test/reproducibility-procedure.test.mjs",
+    "test:smoke": "node scripts/smoke-test-preview.mjs && npm run test:procedure",
     "test:browser": "node test/browser-acceptance.test.mjs",
+    "test:reproducibility": "node test/reproducibility-browser.test.mjs",
     "format": "prettier --write .",
     "astro": "astro"
   },
