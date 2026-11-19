@@ -230,3 +230,57 @@ jobs:
             PS028 Detailed Analysis & Report PDF.pdf
             lab/derived/phase-c/presentation_deck.html
             lab/derived/phase-c/technical_report.html
+
+  deploy-production:
+    name: Vercel Production Deployment
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [python-tests, frontend-validation, artifacts-validation]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: setup/webtester/package-lock.json
+
+      - name: Install dependencies
+        working-directory: setup/webtester
+        run: npm ci
+
+      - name: Prepare historical evidence data
+        working-directory: setup/webtester
+        run: npm run prepare:data
+
+      - name: Install Vercel CLI (pinned 65.17.0)
+        run: npm install --global vercel@65.17.0
+
+      - name: Pull Vercel environment information
+        working-directory: setup/webtester
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: vercel pull --yes --environment=production
+
+      - name: Build project artifacts
+        working-directory: setup/webtester
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: vercel build --prod
+
+      - name: Deploy project artifacts to Vercel
+        working-directory: setup/webtester
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: vercel deploy --prebuilt --prod
