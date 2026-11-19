@@ -262,7 +262,6 @@ jobs:
         run: npm install --global vercel@65.17.0
 
       - name: Pull Vercel environment information
-        working-directory: setup/webtester
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
@@ -270,7 +269,6 @@ jobs:
         run: vercel pull --yes --environment=production
 
       - name: Build project artifacts
-        working-directory: setup/webtester
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
@@ -278,7 +276,6 @@ jobs:
         run: vercel build --prod
 
       - name: Deploy project artifacts to Vercel
-        working-directory: setup/webtester
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
