@@ -21,8 +21,13 @@ import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const bundlePath = path.resolve(__dirname, '../public/data/demo_bundle.json');
-const provenancePath = path.resolve(__dirname, '../public/data/demo_bundle.json.provenance.json');
+const defaultBundlePath = path.resolve(__dirname, '../public/data/demo_bundle.json');
+const repoRootBundlePath = path.resolve(__dirname, '../../../lab/derived/phase-e/demo_bundle.json');
+const bundlePath = fs.existsSync(defaultBundlePath) ? defaultBundlePath : repoRootBundlePath;
+
+const defaultProvPath = path.resolve(__dirname, '../public/data/demo_bundle.json.provenance.json');
+const repoRootProvPath = path.resolve(__dirname, '../../../lab/derived/phase-e/demo_bundle.json.provenance.json');
+const provenancePath = fs.existsSync(defaultProvPath) ? defaultProvPath : repoRootProvPath;
 
 // Import analytics calculation utilities directly
 import {

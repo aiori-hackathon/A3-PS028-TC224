@@ -115,7 +115,7 @@ jobs:
         working-directory: setup/webtester
         run: npm ci
 
-      - name: Run frontend unit tests (Historical Evidence Explorer)
+      - name: Run frontend unit tests (Historical Evidence Explorer & Scenario Analytics)
         working-directory: setup/webtester
         run: npm test
 
@@ -127,7 +127,7 @@ jobs:
         working-directory: setup/webtester
         run: npm run build
 
-      - name: Run distribution smoke tests
+      - name: Run distribution smoke tests and reproducibility procedure verification
         working-directory: setup/webtester
         run: npm run test:smoke
 
@@ -137,7 +137,9 @@ jobs:
 
       - name: Run genuine browser acceptance tests
         working-directory: setup/webtester
-        run: npm run test:browser
+        run: |
+          npm run test:browser
+          npm run test:reproducibility
 
   artifacts-validation:
     name: Submission Artifacts & PDF Validation
