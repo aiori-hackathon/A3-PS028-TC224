@@ -1,5 +1,10 @@
 # PS-028 Phase E Demo-Readiness Remediation & Verification Report
 
+> [!NOTE]
+> **Archival Notice**:
+> This document records the dated Phase E demo-readiness remediation and verification results as of 12 November 2026.
+> Its findings and deliverables have since been integrated into the authoritative production release baseline. For current documentation, see [`docs/phase-e/README.md`](README.md) and [`README.md`](../../README.md).
+
 - **Document Version**: `1.5.0` (Incorporating Batch 1E Canonical Scenario Identity and Cohort-Key Validation)
 - **Report Date**: 2026-11-12
 - **Lead Role**: Senior Internet Measurement Scientist, Network Protocol Engineer, Test Architect

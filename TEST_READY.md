@@ -1,5 +1,10 @@
 # PS-028 Happy Eyeballs Measurement Lab: Test Readiness Report (TEST_READY)
 
+> [!NOTE]
+> **Archival Notice**:
+> This document records dated test readiness milestones from 11–12 November 2026 for the synthetic integration suite in `tests/` (initial 67-test baseline expanding to 93 tests across 5 tiers).
+> For the complete, current repository-wide test inventory (incorporating lab, integration, and frontend suites), see [`docs/phase-cd/test-inventory-reconciliation.md`](docs/phase-cd/test-inventory-reconciliation.md).
+
 **Document Version**: 1.0.0  
 **Status**: VERIFIED / READY  
 **Track**: Independent End-to-End Testing Track (Test Writer)  

@@ -3,6 +3,7 @@ name: PS-028 Continuous Integration
 'on':
   push:
     branches:
+      - main
       - fix/phase-e-bundle-timeline-mapping
   pull_request:
     branches:

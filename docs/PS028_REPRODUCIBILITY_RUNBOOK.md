@@ -6,7 +6,11 @@ This runbook describes how to preflight the PS-028 isolated lab, execute the int
 
 ## Environment and safety
 
-The current tested environment is WSL2 Ubuntu 24.04 with Chrome (`google-chrome`). The lab uses isolated client/router/server network namespaces, a DNS service for `he.test`, and an HTTP server. Live scenarios modify networking and DNS state. Run them only in the dedicated lab environment, one at a time, with the necessary privileges. Do not run trials concurrently.
+The recorded laboratory environment is Ubuntu 24.04 LTS (x86_64, Linux kernel 6.x / WSL2) with Google Chrome (`google-chrome` 156.0.8078.73) and Mozilla Firefox (`firefox` 159.0).
+
+### Prerequisites and Boundaries
+- **Live Experimentation (Linux Only)**: Requires Linux kernel network namespaces (`ip netns`), `nftables` (table manipulation), `iproute2` / `tc netem` (traffic control link delays), `nginx` (HTTP origin server), `tshark` / `tcpdump` (packet capture), and root/sudo permissions for namespace manipulation. Live trials modify networking and DNS state and **MUST** run sequentially, one trial at a time, inside the dedicated testbed. Do not run live trials concurrently.
+- **Offline Analysis & Web Development (Cross-Platform)**: Offline PCAP replay (`lab/demo_replay.py`), statistical re-derivation (`lab/analyze.py`), bundle export, frontend Astro/React application development, and unit/integration test execution require only Python 3.12, Node.js 22, and standard dependencies—no root privileges, no kernel namespaces, and no network alteration.
 
 Before beginning, make sure the repository is up to date and that you are in its root:
 
@@ -22,13 +26,23 @@ The main tools are:
 - `lab/run_campaign.py`: sequential campaign orchestrator and resume engine (A8).
 - `lab/run_trial.py`: integrated browser-measurement runner (A7).
 - `lab/impair.py`: scenario controller and S0–S6 self-test harness.
+- `lab/demo_replay.py`: offline authentic PCAP replay utility.
 - `lab/scenarios.yaml`: canonical scenario definitions.
 - `lab/trials/<trial_id>/result.json`: structured record for each trial.
 - `lab/trials/<trial_id>/capture.pcap`: packet capture for each trial.
 
-## 1. Preflight and baseline checks
+## 1. Preflight, Checksum Verification and Baseline Checks
 
-Start with non-destructive checks:
+### 1.1 Verify Historical Evidence Checksums
+Before running any analysis or experiments, verify the integrity of all preserved PCAPs, manifests, and results:
+
+```bash
+sha256sum -c lab/derived/phase-c/historical_integrity_before.sha256
+```
+Every entry must report `OK` (705/705 matching checksums).
+
+### 1.2 Non-Destructive Lab Preflight Checks
+For live measurement environments, run the non-destructive lab health checks:
 
 ```bash
 sudo python3 lab/impair.py preflight
@@ -218,35 +232,96 @@ The analyzer evaluates Happy Eyeballs v2 requirements strictly from observable n
 - **RFC 8305 §3 (Resolution Delay)**: Evaluates delayed AAAA behavior (S6). In the recorded Chrome trial (`trial-20261028171417-b2d83f2f`), Chrome waited ~515 ms for late AAAA and connected over IPv6 rather than initiating IPv4 fallback after the RFC 8305 §3 recommended 50 ms Resolution Delay. This is classified as an **`OBSERVED_DEVIATION`** strictly scoped to the recorded trial, without inferring general browser non-conformance.
 - **Unsupported Checks**: Features not testable under isolated single-trial protocol (e.g., cross-session cache statefulness in §4 Sorting Addresses; Section 7 is dedicated to NAT64 and DNS64 on IPv6-only networks) or out of testbed scope (e.g., QUIC/SCTP in §8) are strictly marked **`NOT_ASSESSED`** / **`INDETERMINATE`**.
 
-## 8. Useful commands
+## 8. Verification and Execution Commands
 
+### 8.1 Historical Evidence Checksum Verification (Rule R2)
+Verify all 705 original PCAPs, JSON results, and campaign manifests:
 ```bash
-# Review available scenarios and their descriptions
-python3 lab/impair.py list
-
-# Inspect current scenario-controller status
-sudo python3 lab/impair.py status
-
-# Run statistical analysis and RFC 8305 assessment (A9)
-python3 lab/analyze.py
-python3 lab/analyze.py --csv
-python3 lab/analyze.py -o lab/results/
-
-# Check tool options
-python3 lab/impair.py --help
-python3 lab/run_trial.py --help
-python3 lab/run_campaign.py --help
-python3 lab/analyze.py --help
-
-# Run automated tests (simulation/unit tests; not a replacement for live trials)
-python3 -m unittest lab.test_campaign_pcap_regression  # authentic October 29 S0-S5 PCAPs; requires TShark and the recorded captures
-python3 lab/test_analyze.py
-python3 lab/test_run_campaign.py
-python3 lab/test_run_trial.py
-# Run all 725 offline unit tests in lab/
-python3 -m unittest discover -s lab -p "test_*.py"
-# Run all 93 offline E2E and adversarial synthetic tests in tests/
-python3 -m unittest discover -s tests -p "test_*.py"
+sha256sum -c lab/derived/phase-c/historical_integrity_before.sha256
 ```
 
-A successful automated test suite does not, by itself, prove a live network experiment worked. Use the matching trial JSON, PCAP, and baseline verification as evidence for live claims.
+### 8.2 Offline Deterministic Test Suites
+These tests run completely offline without root privileges, namespaces, or browser processes:
+
+```bash
+# 1. Python Lab Unit & Regression Test Suite
+python3 -m unittest discover -s lab -p "test_*.py"
+
+# 2. Python Integration & Adversarial Test Suite
+python3 -m unittest discover -s tests -p "test_*.py"
+
+# 3. Frontend Unit Tests (Historical Evidence & Scenario Analytics)
+cd setup/webtester
+npm test
+```
+
+### 8.3 Real-Browser Acceptance & Distribution Smoke Tests
+These tests validate the frontend WebTester application:
+
+```bash
+cd setup/webtester
+
+# Astro type checking and diagnostic checks
+npm run check
+
+# Static production build
+npm run build
+
+# Preview server distribution smoke test
+npm run test:smoke
+
+# Genuine Playwright browser acceptance suite (Chromium)
+npm run test:browser
+```
+
+### 8.4 Offline Demonstration & PCAP Replay
+Replay authentic historical PCAPs without live network execution:
+
+```bash
+# Tabular summary of representative cohort trials
+python3 lab/demo_replay.py --summary
+
+# Event-level timeline replay
+python3 lab/demo_replay.py --events
+
+# Filter by scenario or browser
+python3 lab/demo_replay.py --scenario S2 --browser google-chrome
+
+# View canonical RFC 8305 pseudocode
+python3 lab/demo_replay.py --pseudocode
+```
+
+### 8.5 Offline Statistical Analysis & PDF Generation
+Regenerate empirical analysis artifacts and publication PDFs:
+
+```bash
+# Statistical re-derivation and RFC 8305 evaluation
+python3 lab/analyze.py --campaign-dir lab/campaigns/ps028-a10-live-20261030-01 -o lab/results/
+
+# Build 11-page Beamer presentation deck PDF
+python3 lab/build_submission_report.py
+
+# Build 22-page technical report PDF
+python3 lab/build_technical_report_pdf.py
+```
+
+### 8.6 Live Measurement Execution (Linux Network Namespaces Only)
+Live measurement modifies networking and DNS state; run only sequentially with sudo on a configured Linux testbed:
+
+```bash
+# Review available scenarios
+python3 lab/impair.py list
+
+# Inspect scenario controller and verify baseline
+sudo python3 lab/impair.py status
+sudo python3 lab/impair.py self-test-baseline
+
+# Execute a single trial (Chrome S0)
+sudo python3 lab/run_trial.py --scenario S0 --browser google-chrome
+
+# Verify baseline restoration after trial
+sudo python3 lab/impair.py self-test-baseline
+```
+
+> [!CAUTION]
+> A successful automated test suite, frontend build, or simulation run does not, by itself, prove that a live network measurement occurred. Genuine live claims require the matching trial JSON, packet capture (`capture.pcap`), and verified baseline restoration. Simulation data must never be substituted for live measurements.

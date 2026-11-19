@@ -1,5 +1,11 @@
 # Project: PS-028 Happy Eyeballs Measurement Lab (Phase C & Phase D)
 
+> [!NOTE]
+> **Archival Notice & Project Status**:
+> This document is an archived historical project specification and feature inventory created during the initiation of Phase C and Phase D (November 2026).
+> - **Milestone Outcomes**: Milestones M1, M2, M3, M4, M5, and M7 were fully completed, verified, and merged to `main` via PR #13 (commit `c6e561ed`). Milestone M6 (Phase D live research sweeps) was formally paused per owner directive ([`docs/phase-cd/phase-d-paused.md`](docs/phase-cd/phase-d-paused.md)) to prioritize Phase C empirical evidence and demonstration delivery.
+> - **Current Documentation**: For the authoritative, current repository guide and results, see [`README.md`](README.md) and [`docs/README.md`](docs/README.md). Historical content below is preserved intact for audit trail integrity.
+
 ## Architecture
 The Happy Eyeballs IPv4/IPv6 Fallback Measurement Lab evaluates browser connection racing behaviors under controlled network impairments across three Linux network namespaces:
 - `ps028-cl` (Client): Executes browser binaries (Google Chrome, Mozilla Firefox) with isolated profiles, tracing tools (PCAP, NetLog), and DNS resolution.
