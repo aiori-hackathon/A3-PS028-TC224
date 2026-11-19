@@ -23,15 +23,15 @@ An early statement in `README.md` line 201 claiming "the recorded suite reports 
 - **Correction**: The true verified initial testbed baseline comprised **524 automated tests** (431 lab tests in `lab/` + 93 integration tests in `tests/`).
 - **Policy**: The figure 400 is not a validated inventory milestone, is not an authentic historical test count, and must not be cited as an empirical test baseline.
 
-### 1.2 Ten-Milestone Chronology
-The repository's authentic, independently supported test baselines follow a verified **ten-milestone chronology**:
-$$\mathbf{524 \longrightarrow 818 \longrightarrow 824 \longrightarrow 918 \longrightarrow 881 \longrightarrow 928 \longrightarrow 929 \longrightarrow 952 \longrightarrow 962 \longrightarrow 966}$$
+### 1.2 Eleven-Milestone Chronology
+The repository's authentic, independently supported test baselines follow a verified **eleven-milestone chronology**:
+$$\mathbf{524 \longrightarrow 818 \longrightarrow 824 \longrightarrow 918 \longrightarrow 881 \longrightarrow 928 \longrightarrow 929 \longrightarrow 952 \longrightarrow 962 \longrightarrow 966 \longrightarrow 1380}$$
 
 Earlier historical records represent authentic milestones of their respective development phases. They must not be erased, overwritten, or conflated with the authoritative P1 validation snapshot or fresh release validation.
 
 ---
 
-## 2. Ten-Milestone Chronology of Test Baselines
+## 2. Eleven-Milestone Chronology of Test Baselines
 
 The table below details the full sequence of test suite milestones across the repository lifecycle:
 
@@ -46,7 +46,8 @@ The table below details the full sequence of test suite milestones across the re
 | **7** | **Historical P1 Validation Snapshot** | 2026-11-14 | `ee59362ac3f53fad3bc01e65b5d90815697a93d4` on `work/ps028-p1-remediation` | 805 | 93 | 31 | **929** | 100% PASS (0 fail, 0 err, 0 skip) | Documented in `docs/phase-cd/p1-validation-record-2026-11-14.md`. Adds +1 regression test (`test_scientific_presentation_claims_accuracy` in `lab/test_build_submission_report.py`). |
 | **8** | **Post-P2 Release Readiness Validation** | 2026-11-15 | `a398c6e5c4dd` on `fix/ps028-post-p2-release-readiness` | 828 | 93 | 31 | **952** | 100% PASS (0 fail, 0 err, 0 skip) | Release-readiness suite: incorporates fail-closed P1 parser regression suite (+19 in `lab/test_build_submission_report.py`), RFC attribution audit (+1 in `lab/test_analyze.py`), and browser DNS controls verification with real Chrome netlog verification (+3 in `lab/test_run_trial.py`), alongside expanded 14-stage Playwright acceptance in genuine Chromium (242 assertions). |
 | **9** | **Release Closure & CI Integration (Run #2)** | 2026-11-15 | `afceefb759627f1a1d6bc1a2ba4c1970d0f89656` on `fix/phase-e-bundle-timeline-mapping` | 838 | 93 | 31 | **962** | 100% PASS (0 fail, 0 err, 0 skip) | Authoritative integration branch release baseline: incorporates automated technical report PDF generator and regression suite (+10 in `lab/test_build_technical_report_pdf.py`), establishing 962 unique automated tests passing 100%, 16 static smoke checks, 14-stage / 242-assertion Chromium acceptance suite, and automated GitHub Actions CI workflow (`.github/workflows/ci.yml`). |
-| **10** | **Post-CI Success & Hardening Baseline (Run #3)** | **2026-11-15** | `275ebf45eaefc64a40dd02d1f9f5dc9dffb95fe3` on `fix/phase-e-bundle-timeline-mapping` | **842** | **93** | **31** | **966** | **100% PASS (0 fail, 0 err, 0 skip)** | Validated remotely in GitHub Actions Run #3 ([`43741695912`](https://github.com/aiori-hackathon/A3-PS028-TC224/actions/runs/43741695912)) with 966 automated tests. Subsequent security and provenance hardenings expand the suite to 872 lab tests + 93 integration + 31 frontend (996 total unique automated tests; 100% PASS). |
+| **10** | **Post-CI Success & Hardening Baseline (Run #3)** | 2026-11-15 | `275ebf45eaefc64a40dd02d1f9f5dc9dffb95fe3` on `fix/phase-e-bundle-timeline-mapping` | 842 | 93 | 31 | **966** | 100% PASS (0 fail, 0 err, 0 skip) | Validated remotely in GitHub Actions Run #3 ([`43741695912`](https://github.com/aiori-hackathon/A3-PS028-TC224/actions/runs/43741695912)) with 966 automated tests. Subsequent security and provenance hardenings expand the suite to 872 lab tests + 93 integration + 31 frontend (996 total unique automated tests; 100% PASS). |
+| **11** | **Final Release Reconciliation & Judge-Readiness Audit** | **2026-11-19** | `7cf178dfb4df796c705ba9f439a10ad33322fd75` (PR #13 merge `c6e561ed11a72682b72973dd829fdc910ee908bc` on `main`) | **1,243** | **93** | **44** | **1,380** | **1,379 PASS, 1 SKIP, 0 FAIL, 0 ERR** | Fresh validation on local working tree based on exact HEAD: 1,380 unique automated tests discovered; 1,379 passed, 1 skipped due to an unprivileged host environment, zero failures and zero errors (1,243 lab tests across 26 modules: 1,242 passed, 1 skipped; 93 integration tests across 5 tiers: 93 passed; 44 frontend unit tests: 44 passed), alongside 16 distribution smoke checks, 19-stage / 260-assertion Playwright browser acceptance suite in Chromium, and 705/705 checksums verified OK. |
 
 ---
 

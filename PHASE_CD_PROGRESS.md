@@ -1,5 +1,10 @@
 # PS-028 Happy Eyeballs Lab: Phase C + Phase D Progress Tracker
 
+> [!NOTE]
+> **Archival Notice**:
+> This document is an archived historical progress tracker recording milestones completed through Phase C/D and early Phase E demo readiness as of 12 November 2026.
+> All subsequent phases (P0/P1 remediation, post-P2 release readiness, remote CI verification, and PR #13 merge to `main`) have successfully concluded. For current repository status, see [`README.md`](README.md) and [`docs/README.md`](docs/README.md).
+
 - **Branch**: `regional/phase-e-demo-readiness` (branched from `regional/ps028-phase-cd` @ `b920ebc93f2e6aaae8396b7095b6cd3c8598ade5`)
 - **Base Branch**: `regional/p0-remediation` @ commit `7c6ab23c2a378bbc8556fcc15f5911f626502576`
 - **Last Updated**: 2026-11-12T15:30:00Z

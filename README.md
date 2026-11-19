@@ -2,315 +2,448 @@
 
 **Team AlgoRhythm** · **AIORI Hackathon 3** · **PS-028: Internet Measurement**
 
-|Submission detail|Value|
-|-|-|
-|Campaign|`ps028-a10-live-20261030-01`|
-|Evidence and code baseline|Branch `a/lab-foundation` · commit [`002c4453d35d6760760c6a14d2e98618b024f1f2`](https://github.com/aiori-hackathon/A3-PS028-TC224/commit/002c4453d35d6760760c6a14d2e98618b024f1f2)|
-|Phase C/D analysis revision|Branch `regional/ps028-phase-cd` · commit [`b920ebc93f2e6aaae8396b7095b6cd3c8598ade5`](https://github.com/aiori-hackathon/A3-PS028-TC224/commit/b920ebc93f2e6aaae8396b7095b6cd3c8598ade5)|
-|Authoritative integration branch|Branch `fix/phase-e-bundle-timeline-mapping` · commit [`afceefb759627f1a1d6bc1a2ba4c1970d0f89656`](https://github.com/aiori-hackathon/A3-PS028-TC224/commit/afceefb759627f1a1d6bc1a2ba4c1970d0f89656) (PR #10 merged `work/ps028-p1-remediation` into this branch; active development & integration branch)|
-|Final submission target branch|Branch `main` · commit [`fc4fef7df5b9638dd438e6b4acaadf4d219b3e26`](https://github.com/aiori-hackathon/A3-PS028-TC224/commit/fc4fef7df5b9638dd438e6b4acaadf4d219b3e26) (reserved for final submission via pull request after explicit owner authorization)|
-|Remote CI status|[![PS-028 CI](https://github.com/aiori-hackathon/A3-PS028-TC224/actions/workflows/ci.yml/badge.svg?branch=fix/phase-e-bundle-timeline-mapping)](https://github.com/aiori-hackathon/A3-PS028-TC224/actions/runs/43741695912) · **SUCCESS** (Run [#43741695912](https://github.com/aiori-hackathon/A3-PS028-TC224/actions/runs/43741695912); 3/3 jobs passed: 966/966 automated tests, 705/705 checksums, both submission PDFs generated & uploaded)|
-|Final technical report|[`PS028 Detailed Analysis & Report PDF.pdf`](PS028%20Detailed%20Analysis%20%26%20Report%20PDF.pdf)|
-|Final presentation slide deck|[`PS028_Hackathon_Submission_Presentation.pdf`](PS028_Hackathon_Submission_Presentation.pdf)|
-|Team introduction|https://youtu.be/5LLxlW9f6r4?si=EQjgtt3bIgkQ4Nix|
-|Final Project Demonstration Video|[https://youtu.be/LYngp7dzoRI?si=1mPrapHizazV41zB](https://youtu.be/LYngp7dzoRI?si=1mPrapHizazV41zB)|
-|Campaign evidence|[`lab/campaigns/ps028-a10-live-20261030-01/`](lab/campaigns/ps028-a10-live-20261030-01)|
+[![PS-028 CI](https://github.com/aiori-hackathon/A3-PS028-TC224/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/aiori-hackathon/A3-PS028-TC224/actions/workflows/ci.yml)
+[![Live Demonstration](https://img.shields.io/badge/Demo-ps028--happy--eyeballs.vercel.app-097009?style=flat&logo=vercel)](https://ps028-happy-eyeballs.vercel.app/)
+[![License: MPL 2.0](https://img.shields.io/badge/License-MPL_2.0-blue.svg)](LICENSE)
+[![Frontend UI: MIT](https://img.shields.io/badge/UI_Components-MIT-green.svg)](LICENSES/MIT.txt)
 
-\---
+---
+
+## Submission Resources & Quick Links
+
+| Resource | Deliverable | Details |
+|---|---|---|
+| **Live Interactive Web Application** | [ps028-happy-eyeballs.vercel.app](https://ps028-happy-eyeballs.vercel.app/) | Interactive Historical Evidence Explorer & Scenario Analytics Dashboard |
+| **Official GitHub Repository** | [github.com/aiori-hackathon/A3-PS028-TC224](https://github.com/aiori-hackathon/A3-PS028-TC224) | Default branch `main` (commit `c6e561ed`) |
+| **Official Technical Report (PDF)** | [`PS028 Detailed Analysis & Report PDF.pdf`](PS028%20Detailed%20Analysis%20%26%20Report%20PDF.pdf) | 22-page publication report with KaTeX math & RFC 8305 assessment |
+| **Official Presentation Deck (PDF)** | [`PS028_Hackathon_Submission_Presentation.pdf`](PS028_Hackathon_Submission_Presentation.pdf) | 11-slide Beamer presentation deck matching organizer template |
+| **Final Demonstration Video** | [YouTube: Final Project Demonstration](https://youtu.be/LYngp7dzoRI?si=1mPrapHizazV41zB) | Full video demonstration of replay tooling and web dashboard |
+| **Team Introduction Video** | [YouTube: Team Introduction](https://youtu.be/5LLxlW9f6r4?si=EQjgtt3bIgkQ4Nix) | Video introduction to Team AlgoRhythm |
+| **Campaign Evidence Directory** | [`lab/campaigns/ps028-a10-live-20261030-01/`](lab/campaigns/ps028-a10-live-20261030-01) | 280 valid live PCAPs, JSON logs, NetLog traces, and SHA-256 manifests |
+| **Central Documentation Index** | [`docs/README.md`](docs/README.md) | Structured index to all operational, scientific, and historical documents |
+
+---
 
 ## Contents
 
-* [Project summary](#project-summary)
-* [Problem and objective](#problem-and-objective)
-* [Experimental design](#experimental-design)
-* [Testbed and instrumentation](#testbed-and-instrumentation)
-* [Results](#results)
-* [Evidence quality and exclusions](#evidence-quality-and-exclusions)
-* [Statistical methods and metric definitions](#statistical-methods-and-metric-definitions)
-* [RFC interpretation and scope](#rfc-interpretation-and-scope)
-* [Repository guide](#repository-guide)
-* [Reproduce offline analysis on Windows](#reproduce-offline-analysis-on-windows)
-* [Limitations and threats to validity](#limitations-and-threats-to-validity)
-* [References](#references)
-* [Git branch and submission strategy](#git-branch-and-submission-strategy)
-* [Submission checklist](#submission-checklist)
+- [A. Project Identity](#a-project-identity)
+- [B. Project Overview](#b-project-overview)
+- [C. Live Demonstration](#c-live-demonstration)
+- [D. Experimental Design](#d-experimental-design)
+- [E. Results and Scientific Findings](#e-results-and-scientific-findings)
+- [F. Architecture and Instrumentation](#f-architecture-and-instrumentation)
+- [G. Frontend Architecture and Routes](#g-frontend-architecture-and-routes)
+- [H. Repository Map](#h-repository-map)
+- [I. Reproducibility](#i-reproducibility)
+- [J. Testing and Continuous Integration](#j-testing-and-continuous-integration)
+- [K. Limitations and Threats to Validity](#k-limitations-and-threats-to-validity)
+- [L. Submission and Project Resources](#l-submission-and-project-resources)
+- [M. Licensing and Upstream Attribution](#m-licensing-and-upstream-attribution)
 
-\---
+---
 
-## Project summary
+## A. Project Identity
 
-This project measures how two existing browser clients establish connections in a controlled dual-stack laboratory when IPv6 is impaired by a TCP SYN blackhole, active TCP reset, additional latency, packet loss or delayed DNS. The test harness runs six impairment scenarios required by PS-028 plus a healthy baseline control.
+- **Project Title**: Happy Eyeballs — IPv4/IPv6 Fallback Measurement
+- **Team**: AlgoRhythm
+- **Hackathon**: AIORI Hackathon 3 (AI-Assisted Open Research Initiative)
+- **Problem Statement**: PS-028 (Internet Measurement)
+- **Repository**: [https://github.com/aiori-hackathon/A3-PS028-TC224](https://github.com/aiori-hackathon/A3-PS028-TC224)
+- **Default Branch**: `main` (latest official release revision: commit `c6e561ed11a72682b72973dd829fdc910ee908bc`, merging PR #13 on 18 November 2026)
+- **Campaign Identifier**: `ps028-a10-live-20261030-01`
+- **Scope**: Empirical measurement, packet-capture correlation, and RFC 8305 standards evaluation of two pinned production browsers (**Google Chrome 156.0.8078.73** and **Mozilla Firefox 159.0**) under controlled dual-stack impairments.
 
-The completed campaign contains **280 valid live trials**: seven conditions × two browsers × 20 repetitions. The primary-navigation analysis classified **154 trials (55.00%) as direct IPv6** and **126 trials (45.00%) as IPv4 fallback**. All 280 valid trials returned HTTP 200.
+---
 
-> \*\*Scope:\*\* These are empirical observations from two pinned browser builds in one laboratory environment. This project does not implement a new browser stack and does not claim general RFC conformance.
+## B. Project Overview
 
-## Problem and objective
+### The Dual-Stack Connection Racing Problem
+Modern dual-stack hostnames routinely return both IPv4 (A) and IPv6 (AAAA) DNS resource records. While IPv6 is the preferred protocol across standard address selection policies ([RFC 6724](https://www.rfc-editor.org/rfc/rfc6724.html)), real-world IPv6 paths frequently experience routing blackholes, high latency, firewall misconfigurations, or packet loss. A naive client that sequentially attempts an unresponsive IPv6 address before falling back to IPv4 imposes multi-second connection delays on end users.
 
-A dual-stack hostname can return both A (IPv4) and AAAA (IPv6) records, while the corresponding network paths differ in reachability or latency. A client that waits too long on an impaired preferred path can increase connection-establishment time. Happy Eyeballs coordinates connection attempts across available address families so that a usable path can be selected without waiting for a long failure timeout.
+### What Happy Eyeballs Solves
+[Happy Eyeballs Version 2 (RFC 8305)](https://www.rfc-editor.org/rfc/rfc8305.html) specifies an algorithm that coordinates connection attempts across address families without waiting for full transport timeouts. A dual-stack client initiates an attempt to an IPv6 address, waits a bounded interval called the **Connection Attempt Delay (CAD)** (recommended default: 250 ms; recommended minimum: 100 ms; mandatory floor: 10 ms), and then initiates an IPv4 attempt if IPv6 has not yet completed. Whichever address family completes its transport handshake first is selected for application traffic, while redundant in-flight attempts are cleanly terminated.
 
-The objective is to compare two existing browsers under repeatable, controlled conditions. Packet captures provide the primary network evidence; browser telemetry is retained as supporting diagnostic evidence.
+### Experimental Objective
+This project empirical measures how real, unmodified production web browsers implement dual-stack fallback under repeatable, controlled network conditions. We constructed an isolated, three-namespace Linux laboratory to evaluate:
+1. Does the browser prefer IPv6 when paths are healthy?
+2. Does the browser fall back to IPv4 when IPv6 is impaired?
+3. How quickly does fallback occur across blackholes, resets, latency asymmetry, packet loss, and DNS delays?
+4. How do observable packet timings align with the normative requirements and recommended parameters of RFC 8305?
 
-## Experimental design
+> [!IMPORTANT]
+> **Measurement Scope**:
+> This project measures and analyzes the empirical network behavior of existing browser binaries. The team **did not** implement a new browser networking stack or fork browser source code. All observations reflect authentic client behavior measured from the wire.
 
-The PS-028 brief calls for six controlled impairment scenarios. **S0 is an additional healthy baseline**, so the campaign contains seven conditions in total. The canonical scenario definitions are maintained in [`lab/scenarios.yaml`](lab/scenarios.yaml).
+### Why Packet-Level Evidence is Essential
+Browser-reported JavaScript events (`PerformanceNavigationTiming`) and browser diagnostic logs (`NetLog`, Firefox socket logging) capture internal software states from heterogeneous internal vantage points. They cannot directly measure on-the-wire packet arrival, TCP sequence progression, or operating-system kernel socket behavior.
 
-|ID|Canonical scenario|Controlled condition|Measurement purpose|
-|:-:|-|-|-|
-|S0|`healthy\_baseline`|IPv4 and IPv6 RTT approximately 20 ms; A and AAAA answers immediate|Healthy dual-stack reference|
-|S1|`ipv6\_syn\_blackhole`|IPv6 TCP SYN packets are silently dropped; IPv4 remains healthy|Observe recovery from an unresponsive IPv6 path|
-|S2|`ipv6\_tcp\_rst`|IPv6 TCP SYN is actively rejected with TCP RST; IPv4 remains healthy|Observe response to active IPv6 rejection|
-|S3|`ipv6\_rtt\_150ms`|IPv6 RTT approximately 150 ms; IPv4 approximately 20 ms|Compare a moderately slower IPv6 path|
-|S4|`ipv6\_rtt\_600ms`|IPv6 RTT approximately 600 ms; IPv4 approximately 20 ms|Compare a severely slower IPv6 path|
-|S5|`ipv6\_syn\_loss\_50pct`|Approximately 50% random loss on client-to-server IPv6 TCP SYN only|Observe behaviour under partial SYN loss|
-|S6|`delay\_aaaa\_500ms`|A response is immediate; AAAA response is delayed by 500 ms|Observe address-family selection under delayed AAAA resolution|
+This project uses full packet captures (`capture.pcap`) recorded at the client-facing network interface (`ps028-cl-rt`) as the **primary ground-truth evidence**. Raw PCAPs are independently parsed, TCP streams are correlated with the primary HTTP `GET /` document request, and browser diagnostic telemetry is retained strictly as secondary supporting context.
 
-### Clients and repetitions
+---
 
-|Client|Recorded build|Valid repetitions per condition|
-|-|-:|-:|
-|Google Chrome|`156.0.8078.73`|20|
-|Mozilla Firefox|`159.0`|20|
-|**Total**|**2 browser builds**|**280 valid trials**|
+## C. Live Demonstration
 
-## Testbed and instrumentation
+### Deployed Web Application
+The project frontend is deployed and publicly accessible at:
+👉 **[https://ps028-happy-eyeballs.vercel.app/](https://ps028-happy-eyeballs.vercel.app/)**
 
-The experiment uses three isolated Linux network namespaces:
+### Verified Functionality
+The deployed application provides:
+1. **Historical Evidence Explorer (`/evidence`)**:
+   - Interactive data table inspecting all **280 valid live trials** and **2 excluded attempts** from campaign `ps028-a10-live-20261030-01`.
+   - Multi-source chronological event timeline (28,330 synchronized events across `HARNESS`, `PCAP`, and `BROWSER_TELEMETRY`).
+   - TCP connection attempt inspector displaying 5-tuple, sequence numbers, stream index, and attempt outcome.
+   - Real-time client-side SHA-256 provenance verification using the WebCrypto API.
+   - Filterable view isolating excluded cleanup attempts with zero empirical data leakage.
+2. **Scenario Analytics Dashboard (`/analytics`)**:
+   - Interactive comparative charts across scenarios S0 through S6 and browser implementations (Chrome vs Firefox).
+   - Statistical Tukey box plots showing median, IQR, whiskers, and outlier distribution for connection setup times and fallback delays.
+   - Address-family winner distributions (direct IPv6 vs IPv4 fallback).
+   - Client-side customized PDF report generation (`jspdf`).
+3. **Browser-Facing WebTester Tools (`/tests/*`)**:
+   - Interactive diagnostic pages testing client browser behavior for Connection Attempt Delay, Resolution Delay, HTTP/3 QUIC capability, and HEv3 protocol racing.
 
-|Namespace|Role|Main components|
-|-|-|-|
-|`ps028-cl`|Dual-stack client|Chrome 156, Firefox 159, ephemeral browser profiles, client-link PCAP capture|
-|`ps028-rt`|Router and DNS|IPv4/IPv6 forwarding, controlled DNS service, scenario-specific `nftables` rules, `tc netem` delay/loss|
-|`ps028-sv`|Origin server|Nginx HTTP/1.1 endpoint, IPv4 `10.0.2.10`, IPv6 `2001:db8:2::10`|
+### Critical Operational Boundary Notice
+> [!CAUTION]
+> **Static Evidence Replay vs. Live Measurement Lab**:
+> The public Vercel deployment serves the statically compiled Astro application (`dist/`). The Historical Evidence Explorer and Scenario Analytics Dashboard inspect the authentic pre-compiled demonstration data bundle (`demo_bundle.json`, 17.32 MB) **offline within the user's browser**.
+>
+> A successful static deployment **does not** imply that the Linux measurement lab is executing in production on Vercel. Live network experiments require an isolated Linux kernel environment with network namespaces, `nftables` stateful filtering, `tc netem` link emulation, and root/sudo permissions, as documented in [`docs/PS028_REPRODUCIBILITY_RUNBOOK.md`](docs/PS028_REPRODUCIBILITY_RUNBOOK.md).
 
-`nftables` applies the IPv6 SYN blackhole, TCP reset and S5 packet-loss conditions. `tc netem` applies the configured link delays. Each trial records a `result.json`, packet capture, capture log and browser diagnostic telemetry (Chrome NetLog or Firefox network log). Browser diagnostics supplement, but do not replace, packet-level evidence.
+### Repository Parity, Vercel Integration & Deployment Boundaries
+- **Historical Evidence Bundle Integrity**: The live Vercel deployment serves a `demo_bundle.json` whose byte length (18,157,449 bytes / ~17.32 MiB) and SHA-256 digest (`42fad72c342c0e986c12502b0f9f82dbfc2d22fed0ea7e2709ee4469588c4b86`) match the locally verified historical evidence bundle byte-for-byte.
+- **Static Frontend Functionality**: The deployed web UI is operational, serving routes `/`, `/evidence`, `/analytics`, and `/tests/*`.
+- **Vercel Git Integration**: As recorded in deployment logs, the current Vercel Git integration is connected to a personal repository (`Promothesh-Chatterjee/ps028-happy-eyeballs` @ commit `6d02743`) rather than directly to the official repository (`aiori-hackathon/A3-PS028-TC224`). Direct Git webhook integration to the official repository remains a manual owner decision.
+- **Full Deployment Artifact Identity**: While payload parity of the primary evidence bundle and operational functionality of the frontend are verified, verifying the data bundle digest does not establish byte-for-byte identity of every compiled frontend HTML/JS/CSS asset across independent build environments.
 
-**Recorded campaign environment**
+---
 
-|Component|Recorded version / configuration|
-|-|-|
-|Operating system|Ubuntu 24.04.5 LTS, x86\_64 WSL2 host|
-|Kernel|`6.18.54.1-microsoft-standard-WSL2`|
-|Python|`3.12.3`|
-|Nginx|`1.24.0`|
-|tcpdump|`4.99.4`|
-|TShark|`4.2.2`|
-|nftables|`1.0.9`|
-|Traffic control|`iproute2` / `tc netem`|
+## D. Experimental Design
 
-These values describe the environment recorded for this campaign; they are not a compatibility guarantee for other hosts or software releases.
+The laboratory evaluates the six controlled impairment scenarios required by PS-028, plus **S0** as an unimpaired healthy baseline control. Canonical scenario specifications are maintained in [`lab/scenarios.yaml`](lab/scenarios.yaml).
 
-## Results
+| Scenario ID | Canonical Name | Controlled Network Condition | Measurement Purpose |
+|:---:|:---|:---|:---|
+| **S0** | `healthy_baseline` | Dual-stack baseline; IPv4 & IPv6 RTT ~20 ms; immediate A and AAAA DNS answers | Healthy reference control; observe baseline IPv6 preference per RFC 6724 |
+| **S1** | `ipv6_syn_blackhole` | IPv6 TCP SYN packets silently dropped via `nftables`; IPv4 healthy (~20 ms RTT) | Observe recovery and fallback timing when preferred IPv6 path is completely unresponsive |
+| **S2** | `ipv6_tcp_rst` | IPv6 TCP SYN actively rejected with TCP RST; IPv4 healthy (~20 ms RTT) | Observe browser behavior under immediate active path rejection |
+| **S3** | `ipv6_rtt_150ms` | IPv6 RTT ~150 ms (75 ms link delay); IPv4 RTT ~20 ms | Test racing when IPv6 path is moderately slower than IPv4 |
+| **S4** | `ipv6_rtt_600ms` | IPv6 RTT ~600 ms (300 ms link delay); IPv4 RTT ~20 ms | Test racing when IPv6 RTT substantially exceeds default CAD (250 ms) |
+| **S5** | `ipv6_syn_loss_50pct` | 50% random probabilistic loss on client-to-server IPv6 TCP SYN only | Observe connection racing and retransmission behavior under lossy transport |
+| **S6** | `delay_aaaa_500ms` | IPv4 A answer immediate (0 ms delay); IPv6 AAAA answer delayed by 500 ms | Observe address-family selection under asynchronous DNS resolution delay |
 
-### Winning address family
+### Experimental Matrix & Population
+- **Tested Browsers**:
+  - Google Chrome `156.0.8078.73`
+  - Mozilla Firefox `159.0`
+- **Repetitions**: Exactly 20 valid trials per browser/scenario cohort.
+- **Cohort Structure**: 7 scenarios × 2 browsers = **14 cohorts**.
+- **Recorded Population**: **280 valid live trials** (14 cohorts × 20 repetitions).
+- **Total Recorded Attempts**: **282 attempts** (280 valid live trials + 2 preserved cleanup failure attempts).
+- **Trial Isolation**: Every trial executed inside an ephemeral browser profile, with unique trial identifiers and fail-closed baseline self-test verification.
 
-The winner is classified from the address family of the primary HTTP `GET /` document request and its successful response on the same TCP stream. An IPv4 favicon request or speculative preconnect after an IPv6 document success is not counted as a main-navigation fallback.
+---
 
-|Scenario|Chrome direct IPv6|Chrome IPv4 fallback|Firefox direct IPv6|Firefox IPv4 fallback|
-|:-:|-:|-:|-:|-:|
-|S0|20|0|20|0|
-|S1|0|20|0|20|
-|S2|0|20|0|20|
-|S3|20|0|20|0|
-|S4|0|20|1|19|
-|S5|18|2|15|5|
-|S6|20|0|20|0|
-|**Total**|**98**|**42**|**56**|**84**|
+## E. Results and Scientific Findings
 
-|Overall outcome|Trials|Share|
-|-|-:|-:|
-|Direct IPv6 primary navigation|154|55.00%|
-|IPv4 primary navigation after IPv6 attempt|126|45.00%|
-|**Total HTTP 200 responses**|**280 / 280**|**100%**|
+### 1. Primary Navigation Winner Distribution
+The winning address family is classified strictly from the IP version of the primary HTTP `GET /` document request and its successful HTTP 200 response on the same TCP stream. Secondary favicon requests or speculative preconnects are isolated and never misclassified as main-navigation fallbacks.
 
-### Primary-document TCP timing from raw PCAPs
+| Scenario | Chrome Direct IPv6 | Chrome IPv4 Fallback | Firefox Direct IPv6 | Firefox IPv4 Fallback | Total IPv6 | Total IPv4 | Primary Winner |
+|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---|
+| **S0** | 20 | 0 | 20 | 0 | 40 | 0 | **IPv6 (100%)** |
+| **S1** | 0 | 20 | 0 | 20 | 0 | 40 | **IPv4 (100%)** |
+| **S2** | 0 | 20 | 0 | 20 | 0 | 40 | **IPv4 (100%)** |
+| **S3** | 20 | 0 | 20 | 0 | 40 | 0 | **IPv6 (100%)** |
+| **S4** | 0 | 20 | 1 | 19 | 1 | 39 | **IPv4 (97.5%)** |
+| **S5** | 18 | 2 | 15 | 5 | 33 | 7 | **IPv6 (82.5%)** |
+| **S6** | 20 | 0 | 20 | 0 | 40 | 0 | **IPv6 (100%)** |
+| **Total** | **98** | **42** | **56** | **84** | **154** | **126** | **154 / 126** |
 
-All 280 packet captures were independently re-parsed. The primary `GET /` request was found in all 280 captures, and its TCP stream was correlated with the successful HTTP response. The primary-flow address family agreed with the browser-reported winner in all 280 trials.
+**Summary Population Totals**:
+- **Direct IPv6 Primary Navigation**: 154 / 280 trials (**55.00%**, 95% Wilson CI: [49.16%, 60.72%])
+- **IPv4 Fallback Primary Navigation**: 126 / 280 trials (**45.00%**, 95% Wilson CI: [39.28%, 50.84%])
+- **Valid HTTP 200 Responses**: 280 / 280 trials (**100.0%**)
 
-The values below are the interval from the primary-document TCP SYN to the matching server SYN/ACK on the same stream. This is a packet-derived connection-response / RTT proxy; it is **not** page-load time and does not include the final ACK or application readiness.
+---
 
-|Scenario|Chrome median (IQR), ms|Firefox median (IQR), ms|
-|:-:|-:|-:|
-|S0|20.32 (0.07)|20.42 (0.16)|
-|S1|20.96 (0.45)|20.41 (0.87)|
-|S2|20.31 (0.10)|20.38 (0.24)|
-|S3|150.65 (0.35)|150.39 (0.21)|
-|S4|20.74 (0.72)|20.36 (0.15)|
-|S5|20.46 (0.25)|20.50 (0.22)|
-|S6|20.64 (0.50)|20.42 (0.30)|
+### 2. Connection Timing Metrics: `t_connect_ms` vs `t_setup_total_ms`
+To avoid conflating transport latency with application setup, the analysis explicitly distinguishes two complementary packet-derived timing metrics defined at the client capture interface (`ps028-cl-rt`):
 
-S4 Firefox includes one direct-IPv6 main flow with a 600.95 ms SYN-to-SYN/ACK interval. Since the other 19 trials fell back to IPv4, the median remains near 20 ms; the empirical p95 is 52.24 ms and the maximum is 600.95 ms.
+1. **Primary Handshake Completion Time ($t_{\text{connect\_ms}}$)**: Measures the elapsed time from the initial client SYN of the *winning* TCP stream to its matching final ACK transitioning the socket to `ESTABLISHED` (RFC 9293 §3.5). On fallback trials, this reflects only the secondary IPv4 handshake (~20 ms).
+2. **Total Connection Setup Time ($t_{\text{setup\_total\_ms}}$)**: Measures elapsed time from the client's first target-host SYN of **any** address family to the primary connection's final ACK:
+   $$t_{\text{setup\_total}} = \left( t_{\text{final\_ack, primary}} - \min_{f \in \{\text{IPv4}, \text{IPv6}\}} \left( t_{\text{first\_syn, } f} \right) \right) \times 1000$$
+   In fallback scenarios (S1, S2, S4, S5), $t_{\text{setup\_total\_ms}}$ incorporates the initial failed/delayed IPv6 attempt and Connection Attempt Delay (CAD).
 
-### Findings by scenario
-
-|Scenario|Observed result|Interpretation|
-|:-:|-|-|
-|S0|Both browsers selected IPv6 in all 40 trials.|The healthy baseline behaved as expected in this testbed.|
-|S1|All 40 trials completed over IPv4. Median first inter-family SYN interval: 300.83 ms (Chrome), 408.45 ms (Firefox).|Both clients recovered from the IPv6 SYN blackhole. The interval is attempt pacing, not the main-flow connection time.|
-|S2|All 40 trials completed over IPv4. Chrome's 20 observed family-first-SYN offsets were 0.35–6.82 ms (median 0.71 ms); Firefox's were 130.78–336.23 ms (median 160.43 ms).|Because wire measurements capture family-first-SYN offsets across independent flows without logical attempt pairing or state tracking, S2 cannot be validly assessed against the RFC 8305 Section 5 10 ms floor and remains NOT_ASSESSED. Neither RFC 8305 nor draft HEv3 mandates immediate TCP RST fallback.|
-|S3|All 40 trials completed over IPv6. Main-flow packet interval was approximately 150 ms for both clients.|The slower IPv6 path still won in this 150 ms condition.|
-|S4|IPv4 won in 39/40 trials. In 1 Firefox trial (`trial-20261029222109-5c74c26a`), IPv6 recorded a 600.949 ms SYN-to-SYN/ACK interval (initial SYN to observed client final ACK transmission at 601.045 ms; wire HTTP 200 at 1,298.191 ms).|No IPv4 TCP SYN packet was observed in the monitored PCAP (bounded by capture interface and observation window). Packet captures cannot establish browser-internal timer scheduling or suppression; causality remains INSUFFICIENT_EVIDENCE.|
-|S5|33 main navigations completed over IPv6 (18 Chrome, 15 Firefox); seven completed over IPv4 (two Chrome, five Firefox).|Flow correlation prevents ancillary IPv4 favicon or speculative preconnect traffic from being misclassified as fallback.|
-|S6|All 40 trials completed over IPv6. Median A latency: 4.83 ms (Chrome), 0.83 ms (Firefox). Median AAAA latency: 505.20 ms and 502.56 ms respectively.|In these builds, the primary navigation waited for the delayed AAAA response; no IPv4 primary navigation was observed after the recommended 50 ms Resolution Delay.|
-
-## Evidence quality and exclusions
-
-|Validation item|Recorded result|
-|-|-|
-|Planned / completed matrix slots|280 / 280|
-|Total attempts / valid live trials|282 / 280|
-|Preserved initial cleanup failures|2, both retried with new trial IDs and excluded from valid results|
-|Simulated trials|0|
-|Valid HTTP 200 responses|280 / 280|
-|PCAP captures / PCAP checksum matches|280 / 280|
-|PCAP packet count / reported capture drops|36,225 / 0|
-|Primary `GET /` flows found|280 / 280|
-|Primary-flow / browser winner disagreements|0|
-|Recorded local test run|Final release validation snapshot (15 Nov 2026, authoritative branch `fix/phase-e-bundle-timeline-mapping`): 962 unique automated tests (838 lab + 93 integration + 31 frontend; 100% PASS, 0 failures, 0 errors; separate 16 static smoke checks & 14-stage / 242-assertion real-browser Chromium acceptance suite; reproducible GitHub Actions CI workflow). Historical test baseline progression: 524 (Preflight Baseline) → 818 (Batch C5 Gate) → 881 (Task 5C Deduplication Discovery, PARTIALLY RESOLVED forensic qualification) → 929 (P1 Validated Snapshot) → 952 (Post-P2 Baseline) → 962 (Final Release Validation on exact HEAD).|
-|Recorded remote CI run|Remote GitHub Actions CI Run #3 (Run ID [`43741695912`](https://github.com/aiori-hackathon/A3-PS028-TC224/actions/runs/43741695912), commit `275ebf45eaefc64a40dd02d1f9f5dc9dffb95fe3`): 3/3 jobs passed in 2m 8s (`python-tests`, `frontend-validation`, `artifacts-validation`), validating 966 unique automated tests (842 lab + 93 integration + 31 frontend), 705 historical checksums, 16 smoke checks, 14 browser stages (242 assertions), and generating/uploading submission PDFs to artifact `ps028-submission-artifacts` (ID `14172830625`, SHA-256 `ee16f8048be0511fd576ac327cc0367d84563e82869d9f140e75356b6ae9c333`, size 681,255 bytes). Preceding successful Run #2 (ID [`43733419747`](https://github.com/aiori-hackathon/A3-PS028-TC224/actions/runs/43733419747), commit `afceefb759627f1a1d6bc1a2ba4c1970d0f89656`, 962 tests) and remediated Run #1 (ID `43729601462`) preserved in project records.|
-
-The two excluded attempts were a Firefox S0 preflight baseline self-test failure (`Broken pipe`) and a Chrome S6 cleanup failure caused by a helper operation requiring root privileges. Both records remain in the evidence trail and were retried using unique trial IDs. An early statement in README line 201 claiming "the recorded suite reports 400 tests" was identified during independent repository audit (documented in `docs/phase-cd/finding-verification.md` and `docs/phase-cd/repo-audit-register.md`) as a stale unverified placeholder; the verified initial baseline comprised 524 automated tests (431 lab + 93 synthetic). The test suite expanded through Phase C/D Batch C5 (725 unit + 93 synthetic = 818 tests), Phase C/D baseline (731 unit + 93 synthetic = 824 tests), and Phase E demo readiness (825 unit + 93 synthetic = 918 tests). Following test-suite deduplication in Task 5C (renaming the Batch C5 re-export runner to eliminate 48 duplicate executions), full repository discovery identified 881 unique test cases (788 in `lab/` across 21 modules, 93 in `tests/` across 5 tiers; 0 duplicate executions), incorporating 11 regression tests added during Tasks 1–3A and Task 5B (+2 in `test_demo_bundle.py`, +7 in `test_export_campaign_evidence.py`, +1 in `test_analyze.py`, +1 in `test_impair.py`): 866 passed, 4 failed, 11 errors in an unprivileged environment (all 15 failures/errors in `lab/` classified in aggregate into missing root privileges, unconfigured network namespaces, and read-only crashpad directories; historical status: `PARTIALLY RESOLVED — aggregate post-hoc classification; original per-test tracebacks unavailable`; `tests/` passes 93/93), while a focused offline regression suite of 199 tests executed with a 100% pass rate. The suite expanded further with the integration of 31 frontend unit tests in `setup/webtester/test/historical-evidence.test.mjs` and 16 additional offline lab tests, establishing the historical P0 test-execution baseline of 928 unit tests on source commit `5c84c93eff12903a1288770029a903aec48ac1a4` (804 lab + 93 synthetic + 31 frontend, sealed in `lab/derived/phase-c/test_run_record.json`, frozen at acceptance commit `176f688bacb5858fcc0daedb454200918e427f3f`). The authoritative P1 validation snapshot on 14 November 2026 (commit `ee59362ac3f53fad3bc01e65b5d90815697a93d4`) incorporates 1 additional regression test (`test_scientific_presentation_claims_accuracy` in `lab/test_build_submission_report.py`), achieving 929 unique automated tests (805 lab, 93 integration, 31 frontend). Post-P2 remediation expanded the lab suite to 828 tests (952 total unique tests) with the 14-stage / 242-assertion genuine-Chromium browser acceptance suite. The final release closure on `fix/phase-e-bundle-timeline-mapping` incorporates the automated technical report PDF generator and regression suite (`lab/build_technical_report_pdf.py` and `lab/test_build_technical_report_pdf.py`), establishing 962 unique automated tests (838 lab, 93 integration, 31 frontend) passing 100% with 0 failures, 0 errors, and 0 skips, alongside 16 static smoke checks, 14-stage / 242-assertion real-browser Chromium acceptance suite, an 8-page production build, and an automated GitHub Actions CI workflow (`.github/workflows/ci.yml`). Full reconciliation details are documented in `docs/phase-cd/test-inventory-reconciliation.md`.
-
-The complete evidence checksum index contains 1,411 checksum-indexed artifacts, reconciling the campaign execution log with the archived evidence. The complete archive and the portable analysis ZIP serve different purposes: the complete archive preserves captures and telemetry; the portable bundle provides the analysis inputs and code for offline regeneration.
-
-## Statistical methods and metric definitions
-
-|Item|Definition|
-|-|-|
-|Sample size|`n = 20` valid live trials per scenario and browser|
-|Main-flow timing|Median, IQR and empirical p95 from primary-flow SYN-to-matching-SYN/ACK intervals|
-|Median confidence interval|Deterministic percentile bootstrap, `B = 1,000`, seed `42`|
-|Mean confidence interval in analyzer outputs|Student-t interval, `df = n - 1`|
-|Proportion confidence interval in analyzer outputs|Ordinary Wilson score interval, without continuity correction|
-|Inter-family first-SYN interval|Descriptive first IPv6/IPv4 SYN spacing; not necessarily a fallback delay if an observed connection is ancillary or speculative|
-
-### Principal Connection Timing Metrics (`t_connect_ms` vs `t_setup_total_ms`)
-
-The analysis distinguishes two complementary packet-derived timing metrics defined strictly at the client-side capture vantage point (`ps028-cl`, interface `ps028-cl-rt`):
-
-- **Primary Handshake Completion Time (`t_connect_ms`)**: Measures the primary TCP stream duration from its initial client SYN to its matching final ACK transitioning the socket to `ESTABLISHED` (RFC 9293 §3.5). On winning fallback streams, this captures only the secondary IPv4 handshake (~20 ms) and excludes prior failed attempts.
-- **Fallback Total Setup Time (`t_setup_total_ms`)**: Measures the trial-level elapsed time from the client's first target-host SYN of **any** address family (IPv4 or IPv6) to the primary connection's final ACK:
-  $$t_{\text{setup\_total}} = \left( t_{\text{final\_ack, primary}} - \min_{f \in \{\text{IPv4}, \text{IPv6}\}} \left( t_{\text{first\_syn, } f} \right) \right) \times 1000$$
-- **Why they differ**: In direct IPv6 connections (S0, S3, S6), $t_{\text{setup\_total\_ms}} \approx t_{\text{connect\_ms}}$ because the initial attempt establishes immediately. In fallback scenarios (S1, S2, S4, S5), $t_{\text{connect\_ms}}$ reflects only the secondary IPv4 handshake (~20 ms), whereas $t_{\text{setup\_total\_ms}}$ includes the initial failed/delayed IPv6 attempt and Connection Attempt Delay (CAD), representing the trial-level transport connection setup interval before the selected primary connection completes.
-- **Population & Cohort Structure**: Evaluated across all **280 valid live trials** in campaign `ps028-a10-live-20261030-01` across 14 balanced cohorts (7 scenarios $\times$ 2 browsers $\times$ $n = 20$ repetitions per cohort). Neither metric measures DNS resolution duration, application response, or full browser page load.
-
-| Scenario | Network Condition | Chrome Median `t_connect_ms` | Chrome Median `t_setup_total_ms` | Firefox Median `t_connect_ms` | Firefox Median `t_setup_total_ms` | Valid Trials ($N$) |
-| :--- | :--- | :---: | :---: | :---: | :---: | :---: |
-| **S0** | Baseline (10ms RTT, dual-stack) | 20.39 ms | 20.39 ms | 20.49 ms | 20.49 ms | 20 / 20 |
+| Scenario | Condition | Chrome Median $t_{\text{connect}}$ | Chrome Median $t_{\text{setup\_total}}$ | Firefox Median $t_{\text{connect}}$ | Firefox Median $t_{\text{setup\_total}}$ | Valid Trials ($N$) |
+|:---|:---|:---:|:---:|:---:|:---:|:---:|
+| **S0** | Baseline (20ms RTT, dual-stack) | 20.39 ms | 20.39 ms | 20.49 ms | 20.49 ms | 20 / 20 |
 | **S1** | IPv6 SYN Blackhole (silent drop) | 21.08 ms | 322.00 ms | 20.55 ms | 429.74 ms | 20 / 20 |
 | **S2** | IPv6 TCP RST (active rejection) | 20.37 ms | 21.12 ms | 20.50 ms | 181.87 ms | 20 / 20 |
 | **S3** | IPv6 RTT 150ms (symmetric delay) | 150.76 ms | 150.76 ms | 150.45 ms | 150.45 ms | 20 / 20 |
-| **S4** | IPv6 RTT 600ms, IPv4 10ms (racing) | 20.82 ms | 321.72 ms | 20.48 ms | 420.07 ms | 20 / 20 |
+| **S4** | IPv6 RTT 600ms, IPv4 20ms (racing) | 20.82 ms | 321.72 ms | 20.48 ms | 420.07 ms | 20 / 20 |
 | **S5** | IPv6 50% SYN Loss (probabilistic) | 20.54 ms | 23.10 ms | 20.58 ms | 86.95 ms | 20 / 20 |
 | **S6** | Delayed AAAA 500ms (Resolution Delay) | 20.71 ms | 20.71 ms | 20.47 ms | 20.58 ms | 20 / 20 |
 
-**Metric cautions**
+---
 
-* `response\_body\_bytes` is browser-process stdout length (308 bytes for Chrome and 72 bytes for Firefox), not the HTTP payload size.
-* Browser-duration outputs arise from different capture mechanisms and are not a like-for-like application-readiness measure.
-* The generic stored `connection\_setup\_time\_ms` differed by more than 1 ms from the raw-PCAP primary-flow interval in 144/280 trials. The timing comparison therefore uses the explicitly defined primary-flow packet metric.
-* `rfc8305\_assessment.csv` reflects the authoritative assessment verified against underlying trial evidence (checks covering RFC 8305 Sections 2, 3, 4, and 5), reporting empirical S2 (family-first-SYN offsets on TCP RST, evaluated as NOT_ASSESSED for the 10 ms floor due to absence of attempt pairing) and S6 (late AAAA resolution delay) observations under laboratory conditions without inferring unobserved browser internals or general non-conformance.
+### 3. Scenario-by-Scenario Scientific Findings
 
-## RFC interpretation and scope
+- **S0 (Healthy Baseline)**: Both Chrome and Firefox established primary connections over IPv6 in 100% of trials (40/40), confirming RFC 6724 default address selection favoring IPv6 in healthy conditions.
+- **S1 (IPv6 SYN Blackhole)**: Both browsers successfully recovered and fell back to IPv4 in 100% of trials (40/40). First inter-family SYN spacing: Chrome median was 300.83 ms; Firefox median was 408.45 ms. Both fall comfortably within the RFC 8305 §5 recommended 100–2000 ms window.
+- **S2 (IPv6 TCP RST)**: Both browsers completed over IPv4 in 100% of trials. Chrome initiated IPv4 SYNs almost immediately upon RST (median offset 0.71 ms), whereas Firefox exhibited a paced median offset of 160.43 ms. Because wire captures record family-first SYN timestamps across independent flows without logical attempt pairing or socket causality tracking, S2 cannot be evaluated against the RFC 8305 §5 10 ms mandatory floor and remains classified as **`NOT_ASSESSED`**. Neither RFC 8305 nor HEv3 mandates immediate retry upon receiving TCP RST.
+- **S3 (IPv6 RTT 150 ms)**: IPv6 won 100% of trials (40/40) for both clients with primary handshake times ~150.7 ms, demonstrating that a moderately slower IPv6 path (150 ms vs 20 ms) still completes within typical browser CAD timers before IPv4 completes.
+- **S4 (IPv6 RTT 600 ms)**: IPv4 completed first in 39/40 trials (100% Chrome, 95% Firefox). In 1 Firefox trial (`trial-20261029222109-5c74c26a`), IPv6 completed with a 600.95 ms handshake without an observed IPv4 SYN. Bounded wire captures cannot inspect browser timer scheduling; causality is preserved as `INSUFFICIENT_EVIDENCE`.
+- **S5 (IPv6 50% SYN Loss)**: Primary navigation completed over IPv6 in 33 trials (18 Chrome, 15 Firefox) and fell back to IPv4 in 7 trials (2 Chrome, 5 Firefox). Independent router nftables counters confirmed 50.0% aggregate packet drops, proving the loss model operated as designed.
+- **S6 (Delayed AAAA 500 ms)**: In all 40 trials, both browsers waited for the delayed AAAA response (~505 ms) and connected over IPv6 rather than initiating IPv4 fallback after the RFC 8305 §3 recommended 50 ms Resolution Delay. This is documented as an empirical **`OBSERVED_DEVIATION`** from recommendations under laboratory conditions.
 
-[RFC 8305](https://www.rfc-editor.org/rfc/rfc8305.html) Section 2 ("Overview") assumes the host destination-address preference policy favors IPv6 over IPv4, referencing [RFC 6724](https://www.rfc-editor.org/rfc/rfc6724.html) Section 2.1 (policy table precedence: `::/0` precedence 40 vs `::ffff:0:0/96` precedence 35), Section 6 Rule 6 (Prefer higher precedence; Rule 2 is Prefer matching scope), and Section 10.3 (Configuring Preference for IPv6 or IPv4). RFC 8305 Section 3 ("Hostname Resolution Query Handling") covers asynchronous DNS resolution and recommends a 50 ms Resolution Delay when A arrives before AAAA. Section 4 ("Sorting Addresses") covers destination address sorting using RFC 6724, historical RTT information, and previously used addresses. Section 5 ("Connection Attempts") specifies that a subsequent connection attempt **MUST NOT** begin within 10 ms of the previous attempt (recommended minimum CAD 100 ms, recommended default 250 ms, recommended maximum 2 s). Immediate retry upon TCP RST is not mandated by RFC 8305 or HEv3. Section 7 ("Supporting IPv6-Only Networks with NAT64 and DNS64") addresses NAT64 and DNS64 operation on IPv6-only networks.
+---
 
-The Chrome S2 family-first-SYN offsets are reported as empirical observations, but without verified logical attempt pairing between IPv6 and IPv4 flows, the RFC 8305 Section 5 10 ms mandatory floor cannot be assessed (status remains NOT_ASSESSED). Furthermore, neither RFC 8305 nor HEv3 mandates immediate retry upon receiving TCP RST. The pinned HEv3 reference is [`draft-ietf-happy-happyeyeballs-v3-04`](https://datatracker.ietf.org/doc/html/draft-ietf-happy-happyeyeballs-v3-04), published on 1 July 2026; it was an active Internet-Draft, not an RFC, at the 31 October 2026 report snapshot. This campaign primarily evaluates HTTP/1.1 over TCP. It does not test HTTP/3/QUIC, SVCB/HTTPS processing, cross-session statefulness or all HEv3 features.
+## F. Architecture and Instrumentation
 
-## Repository guide
+The experimental testbed uses three isolated Linux network namespaces interconnected by virtual ethernet (`veth`) pairs:
 
-|Path|Purpose|
-|-|-|
-|[`lab/scenarios.yaml`](lab/scenarios.yaml)|Canonical S0–S6 scenario configuration|
-|[`lab/run\_campaign.py`](lab/run_campaign.py)|Campaign matrix orchestration and manifest management|
-|[`lab/run\_trial.py`](lab/run_trial.py)|Browser trial execution, PCAP parsing and classification|
-|[`lab/analyze.py`](lab/analyze.py)|Offline validation, statistics and analysis outputs|
-|[`lab/test\_\*.py`](lab/)|Test modules; suite contains 788 unit and regression tests across 21 modules (0 duplicate discovery)|
-|[`lab/campaigns/ps028-a10-live-20261030-01/`](lab/campaigns/ps028-a10-live-20261030-01/)|Campaign manifest, trial results, captures, checksums, archives and summaries|
-|[`lab/logs/unit\_tests\_run.log`](lab/logs/unit_tests_run.log)|Recorded local test-run output|
-|[`lab/logs/ps028-a10-live-20261030-01.log`](lab/logs/ps028-a10-live-20261030-01.log)|Live campaign console log|
-|[`PS028 Detailed Analysis & Report PDF.pdf`](PS028%20Detailed%20Analysis%20%26%20Report%20PDF.pdf)|Final technical report (AIORI submission PDF)|
-
-## Reproduce offline analysis on Windows
-
-The analyzer uses the Python standard library. These commands regenerate analysis outputs from the committed campaign data; they do **not** rerun the live network experiment.
-
-Run from the repository root in PowerShell:
-
-```powershell
-py -3 --version
-py -3 .\\lab\\analyze.py `
-  --campaign-dir .\\lab\\campaigns\\ps028-a10-live-20261030-01 `
-  --output-dir .\\analysis\_out `
-  --resamples 1000 --seed 42
+```
++---------------------------------------------------------------------------------------+
+|                                    PROJECT TOPOLOGY                                   |
+|                                                                                       |
+|  [ps028-cl (Client Namespace)]       [ps028-rt (Router)]       [ps028-sv (Server)]     |
+|  IPv4: 198.51.100.2 / IPv6: 2001:db8:1::2                       198.51.100.10 /       |
+|  Google Chrome 156 / Firefox 159    <-->   tc netem / nft   <-->  2001:db8:2::10      |
+|  tcpdump capture on ps028-cl-rt                                Nginx (HTTP/1.1)       |
+|  Controlled DNS resolver                                       DNS Responder          |
++---------------------------------------------------------------------------------------+
 ```
 
-For the standalone portable ZIP, extract the bundle first. Its root contains `campaign/` and `lab/`; run from that extracted root:
+### Namespace Roles & Core Modules
+1. **Client Namespace (`ps028-cl`)**: Runs browser binaries with ephemeral profiles (`--user-data-dir` / `-profile`), client-side packet capture via `tcpdump` / `tshark`, and browser diagnostic telemetry collectors. Managed by [`lab/run_trial.py`](lab/run_trial.py).
+2. **Router Namespace (`ps028-rt`)**: Acts as dual-stack gateway and traffic controller. Implements link latency and jitter via `tc netem` and stateful packet filtering/dropping via `nftables`. Controlled by [`lab/impair.py`](lab/impair.py) and [`lab/privileged_helper.py`](lab/privileged_helper.py).
+3. **Server Namespace (`ps028-sv`)**: Hosts dual-stack Nginx HTTP/1.1 origin server and controlled UDP DNS responder ([`lab/dns_server.py`](lab/dns_server.py)) configured to inject independent delays for A and AAAA queries.
 
-```powershell
-py -3 .\\lab\\analyze.py `
-  --campaign-dir .\\campaign `
-  --output-dir .\\analysis\_out `
-  --resamples 1000 --seed 42
+---
+
+## G. Frontend Architecture and Routes
+
+The frontend web application is located in [`setup/webtester/`](setup/webtester) and statically generated using Astro v5.
+
+| Route | Source Component | Purpose & Description |
+|---|---|---|
+| `/` | `src/pages/index.astro` | **Laboratory Home Page**: Central navigational dashboard linking to evidence explorer, analytics, and browser tests. |
+| `/evidence` | `src/pages/evidence.astro` | **Historical Evidence Explorer**: Interactive data grid of 280 trials, multi-source timeline (28,330 events), TCP attempt inspector, and SHA-256 integrity verification. |
+| `/analytics` | `src/pages/analytics.astro` | **Scenario Analytics Dashboard**: Tukey box plots, latency distributions, address-family winner ratios, and custom PDF report export. |
+| `/tests/connection-attempt-delay` | `src/pages/tests/connection-attempt-delay.astro` | **CAD Test**: Interactive browser test measuring Connection Attempt Delay. |
+| `/tests/resolution-delay` | `src/pages/tests/resolution-delay.astro` | **Resolution Delay Test**: Evaluates client fallback when AAAA is delayed. |
+| `/tests/http3-availability` | `src/pages/tests/http3-availability.astro` | **HTTP/3 Availability Test**: Checks client HTTP/3 (QUIC) capability. |
+| `/tests/hev3-quic-tls` | `src/pages/tests/hev3-quic-tls.astro` | **HEv3 QUIC & TLS Test**: Evaluates Happy Eyeballs v3 protocol racing across QUIC and TLS. |
+| `/tests/hev3-combined` | `src/pages/tests/hev3-combined.astro` | **HEv3 Combined Test**: Comprehensive Happy Eyeballs v3 feature evaluation suite. |
+
+---
+
+## H. Repository Map
+
+```
+A3-PS028-TC224/
+├── README.md                                  # Authoritative judge-facing entry point
+├── LICENSE                                    # Mozilla Public License Version 2.0 (MPL-2.0)
+├── LICENSES/                                  # Upstream third-party licenses (MIT for shadcn UI)
+├── UPSTREAM_README.md                         # Upstream WebTester project documentation
+├── PROJECT.md                                 # Archived project specifications & roadmap
+├── PHASE_CD_PROGRESS.md                       # Archived Phase C/D milestone progress tracker
+├── TEST_INFRA.md                              # 5-tier test infrastructure specification
+├── TEST_READY.md                              # Historical test readiness report
+├── PS028 Detailed Analysis & Report PDF.pdf   # Official 22-page technical report (AIORI submission)
+├── PS028_Hackathon_Submission_Presentation.pdf # Official 11-page Beamer presentation deck
+├── AIORI_PS028_Happy_Eyeballs_Presentation.pdf# Preserved historical submission artifact
+├── Proposed-structure-hackathon.pdf           # Organizer hackathon guidelines & structure
+├── requirements.lock                          # Pinned Python dependencies with SHA-256 hashes
+├── .github/workflows/
+│   └── ci.yml                                 # 3-job GitHub Actions CI workflow (Python, Frontend, PDFs)
+├── docs/                                      # Central scientific and technical documentation
+│   ├── README.md                              # Central documentation directory index
+│   ├── PS028_FINAL_EXPERIMENTAL_REPORT.md     # Authoritative technical report Markdown source
+│   ├── PS028_REPRODUCIBILITY_RUNBOOK.md       # Laboratory reproducibility runbook
+│   ├── phase-c-metric-contract.md             # Phase C metric contract and Schema 1.1.0
+│   ├── phase-d-experiment-protocol.md         # Pre-registered research sweep protocol
+│   ├── phase-e/                               # Demonstration data bundle documentation
+│   └── phase-cd/                              # Compliance matrix, glossary, audits, gates
+├── lab/                                       # Core measurement lab, impairment engine & analysis
+│   ├── scenarios.yaml                         # Canonical S0–S6 scenario definitions
+│   ├── run_campaign.py                        # Sequential campaign matrix orchestrator
+│   ├── run_trial.py                           # Single-trial runner, browser launcher, PCAP classifier
+│   ├── analyze.py                             # Statistical analysis CLI & RFC 8305 evaluator
+│   ├── impair.py                              # Traffic control (netem) and packet filter (nft) manager
+│   ├── dns_server.py                          # Controlled delay-injecting DNS responder
+│   ├── privileged_helper.py                   # Root-authorized helper with argument validation
+│   ├── build_submission_report.py             # Compiles presentation slide deck PDF
+│   ├── build_technical_report_pdf.py          # Compiles publication technical report PDF
+│   ├── demo_replay.py                         # Standalone offline PCAP replay utility
+│   ├── build_demo_bundle.py                   # Rebuilds deterministic demo bundle JSON
+│   ├── campaigns/                             # Historical raw campaign evidence
+│   │   └── ps028-a10-live-20261030-01/        # 280 valid PCAPs, JSON logs, NetLog, checksums
+│   ├── derived/                               # Deterministic derived evidence & reports
+│   │   ├── phase-c/                           # Re-derived trial results, attempts.csv, timelines
+│   │   └── phase-e/                           # demo_bundle.json, provenance, metric registry
+│   └── test_*.py                              # 26 Python lab unit & regression test modules
+├── setup/                                     # Setup tooling & frontend application
+│   └── webtester/                             # Astro v5 / React 19 web application source
+│       ├── README.md                          # Frontend development & operational guide
+│       ├── package.json                       # Node dependencies & package scripts
+│       ├── scripts/                           # Bundle preparation & distribution smoke tests
+│       ├── src/                               # Frontend source: pages, components, lib
+│       └── test/                              # Frontend unit tests & Playwright browser acceptance
+├── src/                                       # Hackathon template placeholder
+│   └── README.md                              # Architecture disclaimer pointing to lab/ & setup/
+└── tests/                                     # 5-tier independent E2E & adversarial test suite
+    ├── test_tier1_features.py                 # Tier 1: Canonical features S0–S6 & racing
+    ├── test_tier2_boundaries.py               # Tier 2: Timing boundaries & schema invariants
+    ├── test_tier3_combinations.py             # Tier 3: Cross-feature impairment combinations
+    ├── test_tier4_scenarios.py                # Tier 4: Real-world network profiles
+    └── test_tier5_adversarial_c5.py           # Tier 5: Adversarial privilege isolation & DNS
 ```
 
-Live experiment execution is a separate Linux workflow requiring network namespaces, `nftables`, `iproute2` / `tc netem`, tcpdump, TShark, Nginx and the recorded browser builds. The Windows instructions above are for offline analysis only.
+---
 
-## Limitations and threats to validity
+## I. Reproducibility
 
-1. Results reflect one x86\_64 Ubuntu 24.04.5 / WSL2 environment and the recorded Chrome 156 and Firefox 159 builds. They should not be generalized to all releases, operating systems or networks.
-2. The campaign covers HTTP/1.1 over TCP, not HTTPS/TLS behaviour, HTTP/3/QUIC or SVCB/HTTPS endpoint selection.
-3. Ephemeral profiles isolate individual trials but do not measure persistent cross-session failure memory.
-4. Browser telemetry is diagnostic and version-dependent; PCAPs are the primary network evidence.
-5. The generic setup-time field and browser-duration/body-byte fields are not all directly comparable with the primary-flow PCAP metric.
-6. The auxiliary `rfc8305\_assessment.csv` has been regenerated and verified against the 280 empirical trial results; its S2 and S6 assessments reflect laboratory observations under controlled network impairments and do not imply protocol non-conformance across unobserved releases.
-7. The organizer's `Proposed-structure-hackathon.pdf` template has been inspected and integrated. The report structure adheres strictly to the organizer's 11-section Beamer slide and technical report layout.
+Reproducibility is organized into distinct, validated operational tiers:
 
-## Git branch and submission strategy
+### 1. Verify Historical Evidence Integrity (Rule R2)
+Verify all 705 original PCAPs, JSON results, and campaign manifests against the cryptographic seal:
+```bash
+sha256sum -c lab/derived/phase-c/historical_integrity_before.sha256
+```
+*Expected: 705/705 OK (100% pass).*
 
-The repository maintains an explicit separation between development/integration activities and the final submission branch:
+### 2. Run Offline Deterministic Test Suites
+These tests run completely offline without root privileges, network namespaces, or browser processes:
+```bash
+# Python Lab Test Suite (1,243 tests)
+python3 -m unittest discover -s lab -p "test_*.py"
 
-* **Final submission branch (`main`)**: The authoritative submission branch for the hackathon is `main`. Currently, `main` remains untouched at commit [`fc4fef7df5b9638dd438e6b4acaadf4d219b3e26`](https://github.com/aiori-hackathon/A3-PS028-TC224/commit/fc4fef7df5b9638dd438e6b4acaadf4d219b3e26). No direct commits or unreviewed merges are permitted on `main`.
-* **Active development and integration branch (`fix/phase-e-bundle-timeline-mapping`)**: All ongoing maintenance, documentation reconciliation, automated test verification, and CI configuration take place on `fix/phase-e-bundle-timeline-mapping` (current verified commit [`275ebf45eaefc64a40dd02d1f9f5dc9dffb95fe3`](https://github.com/aiori-hackathon/A3-PS028-TC224/commit/275ebf45eaefc64a40dd02d1f9f5dc9dffb95fe3)). Historical PR #10 merged `work/ps028-p1-remediation` into this integration branch, not into `main`. The integration branch is currently 52 commits ahead of `main`.
-* **Final pull request and merge gate**: Merging into `main` will occur via pull request only after all planned tasks (including the separate final partner replication milestone, if retained by the owner) are completed and explicit owner authorization is granted.
+# Python Integration Test Suite (93 tests)
+python3 -m unittest discover -s tests -p "test_*.py"
 
-## Submission checklist
+# Frontend Unit Tests (44 tests)
+cd setup/webtester && npm test
+```
 
-- [x] P0 acceptance baseline preserved (`ps028-p0-accepted-2026-11-14` at `176f688bacb5858fcc0daedb454200918e427f3f`).
-- [x] Historical campaign `ps028-a10-live-20261030-01` cryptographically sealed (705/705 checksums verified).
-- [x] Unique automated test suite passing locally: 966+ tests (lab + integration + frontend; 0 failures, 0 errors).
-- [x] Separate frontend smoke (16/16) and genuine Chromium acceptance suite (14 stages, 242 assertions) passing.
-- [x] Remote continuous integration verified on GitHub Actions runners (Run #3 [`43741695912`](https://github.com/aiori-hackathon/A3-PS028-TC224/actions/runs/43741695912), 3/3 jobs passed, 966 tests; Run #2 [`43733419747`](https://github.com/aiori-hackathon/A3-PS028-TC224/actions/runs/43733419747), 3/3 jobs passed, 962 tests).
-- [x] Presentation slide deck generated matching organizer geometry (`PS028_Hackathon_Submission_Presentation.pdf`, 11 pages).
-- [x] Publication-quality technical report generated (`PS028 Detailed Analysis & Report PDF.pdf`, 22 pages).
-- [x] Standalone prototype replay utility operational (`lab/demo_replay.py`).
-- [x] Problem Statement compliance verified: 17/18 MET (94.4%), 0 PARTIAL, 1 PENDING (5.6%).
-- [ ] Manual owner actions: Judge/collaborator access confirmation, final portal PDF uploads, and demonstration video URL submission.
-- [ ] Final PR from `fix/phase-e-bundle-timeline-mapping` to `main` (pending final milestone completion & owner authorization).
+### 3. Rebuild Demonstration Data Bundle & Staged Assets
+Recompile the deterministic demonstration bundle from Phase C sources:
+```bash
+python3 lab/build_demo_bundle.py
+cd setup/webtester && npm run prepare:data
+```
 
-## References
+### 4. Build and Test the Frontend Application
+```bash
+cd setup/webtester
 
-1. [RFC 8305 - Happy Eyeballs Version 2](https://www.rfc-editor.org/rfc/rfc8305.html), especially Sections 3–5.
-2. [RFC 6724 - Default Address Selection for IPv6](https://www.rfc-editor.org/rfc/rfc6724.html).
-3. [RFC 6555 - Happy Eyeballs: Success with Dual-Stack Hosts](https://www.rfc-editor.org/rfc/rfc6555.html), obsoleted by RFC 8305.
-4. [RFC 6556 - Testing Eyeball Happiness](https://www.rfc-editor.org/rfc/rfc6556.html), informational measurement methodology.
-5. [Happy Eyeballs v3 - draft-ietf-happy-happyeyeballs-v3-04](https://datatracker.ietf.org/doc/html/draft-ietf-happy-happyeyeballs-v3-04), 1 July 2026; pinned Internet-Draft of record.
-6. Sattler et al., [Lazy Eye Inspection: Capturing the State of Happy Eyeballs Implementations](https://happy-eyeballs.github.io/), ACM IMC 2025.
-7. APNIC, [Analysing the state of Happy Eyeballs implementations](https://blog.apnic.net/2025/10/07/analysing-the-state-of-happy-eyeballs-implementations/), 7 October 2025.
-8. [IETF 126 Happy Eyeballs WebTester hackathon materials](https://datatracker.ietf.org/meeting/126/materials/slides-126-hackathon-sessd-happy-eyeballs-webtester-00).
-9. [Happy Eyeballs WebTester source repository](https://github.com/happy-eyeballs/he-webtester).
-10. [Chromium NetLog documentation](https://chromium.googlesource.com/chromium/src/+/main/net/docs/net-log.md).
-11. [Firefox networking and HTTP logging documentation](https://firefox-source-docs.mozilla.org/networking/http/logging.html).
-12. [`tc-netem` manual](https://man7.org/linux/man-pages/man8/tc-netem.8.html).
+# Astro type checking and diagnostic checks
+npm run check
+
+# Static production build (compiles 8 pages into dist/)
+npm run build
+
+# Run distribution preview smoke tests (16 checks)
+npm run test:smoke
+
+# Run genuine Playwright browser acceptance tests (Chromium, 19 stages, 260 assertions)
+npx playwright install --with-deps chromium
+npm run test:browser
+```
+
+### 5. Replay Authentic Historical Trials Offline
+```bash
+# Tabular summary of 14 representative trials
+python3 lab/demo_replay.py --summary
+
+# Event-level synchronized timeline cards
+python3 lab/demo_replay.py --events
+
+# Display canonical RFC 8305 pseudocode snippet
+python3 lab/demo_replay.py --pseudocode
+```
+
+### 6. Regenerate Official Submission PDFs
+```bash
+# Rebuild 11-slide Beamer presentation deck
+python3 lab/build_submission_report.py
+
+# Rebuild 22-page publication technical report
+python3 lab/build_technical_report_pdf.py
+```
+
+### 7. Live Measurement Lab Requirements (Linux Only)
+To execute genuinely new live experiments:
+- **Operating System**: Linux (Ubuntu 24.04 LTS tested).
+- **Prerequisites**: `iproute2` (`ip netns`, `tc netem`), `nftables`, `nginx`, `tshark`, `google-chrome`, `firefox`.
+- **Privileges**: `sudo` permissions for namespace creation and impairment rules.
+- Execution runbook: [`docs/PS028_REPRODUCIBILITY_RUNBOOK.md`](docs/PS028_REPRODUCIBILITY_RUNBOOK.md).
+
+---
+
+## J. Testing and Continuous Integration
+
+Automated continuous integration is executed on GitHub Actions via [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+
+The CI pipeline runs across three dedicated jobs:
+1. **`python-tests`**: Runs on Ubuntu 24.04; installs pinned TShark, sets up Python 3.12 with locked dependencies, validates 705 historical checksums, executes 1,243 Python lab unit tests, and executes 93 integration tests.
+2. **`frontend-validation`**: Runs on Ubuntu 24.04; sets up Node.js 22, executes 44 frontend unit tests, runs Astro diagnostic check, compiles the 8-page production build, runs 16 distribution smoke checks, and executes the 19-stage / 260-assertion Playwright browser acceptance suite in genuine Chromium.
+3. **`artifacts-validation`**: Builds both official submission PDFs (`PS028_Hackathon_Submission_Presentation.pdf` and `PS028 Detailed Analysis & Report PDF.pdf`), verifies page counts (11 and 22 pages) and byte-size thresholds, and uploads the artifacts to GitHub Actions.
+
+### Fresh Current Test Execution Results (Local Working Tree based on `7cf178d` / `main` `c6e561e`)
+- **Python Lab Test Suite (`lab/`)**: 1,243 discovered; 1,242 passed; 1 skipped.
+- **Python Integration Test Suite (`tests/`)**: 93 passed.
+- **Frontend Unit Test Suite (`setup/webtester/test/`)**: 44 passed.
+- **Total Suite Outcome**: **1,380 unique automated tests discovered; 1,379 passed, 1 skipped due to an unprivileged host environment, zero failures and zero errors.**
+- **Distribution Smoke Checks**: 16 checks passed.
+- **Real-Browser Chromium Acceptance Suite**: 19 stages passed, 260 assertions verified.
+- **Historical Checksums**: 705 / 705 files OK (`historical_integrity_before.sha256`).
 
 > [!NOTE]
-> **Happy Eyeballs v3 Draft Status and Historical Baseline Notice (as of 13 November 2026)**
->
-> - **Historical Experimental Baseline**: The October 2026 PS-028 campaign used [`draft-ietf-happy-happyeyeballs-v3-04`](https://datatracker.ietf.org/doc/html/draft-ietf-happy-happyeyeballs-v3-04), published on 1 July 2026. The campaign's methodology and historical RFC/draft assessments retain that revision as their immutable experimental reference.
-> - **Subsequent Revision**: On 2 November 2026, the IETF published [`draft-ietf-happy-happyeyeballs-v3-05`](https://datatracker.ietf.org/doc/html/draft-ietf-happy-happyeyeballs-v3-05). As of 13 November 2026, this revision is an active Internet-Draft in the HAPPY Working Group, with intended status Standards Track (IESG state: I-D Exists, expiring on 6 May 2027). It is not a published RFC or finalized standard.
-> - **Scope Limitation**: The October 2026 campaign predates publication of revision -05. Its historical observations and assessment results have not been evaluated or reclassified against revision -05. Revision -05 does not retroactively alter or invalidate the empirical findings obtained under revision -04.
+> **Provenance & CI Execution Notice**:
+> These test results reflect local validation against the current working tree based on commit `7cf178dfb4df796c705ba9f439a10ad33322fd75` (whose tree is identical to official `main` commit `c6e561ed11a72682b72973dd829fdc910ee908bc`). The newly updated documentation and CI triggers are local working-tree modifications until published. The newly added push trigger for `main` in `.github/workflows/ci.yml` will be exercised by GitHub Actions once changes are committed and pushed to `main`.
 
-\---
+---
+
+## K. Limitations and Threats to Validity
+
+1. **Single Laboratory Host**: All live measurements were conducted in one x86_64 Ubuntu 24.04 LTS / WSL2 environment. Results reflect this specific host kernel, network virtualization layer, and TCP implementation.
+2. **Pinned Browser Builds**: Observations apply strictly to **Google Chrome 156.0.8078.73** and **Mozilla Firefox 159.0**. They should not be generalized across all versions, operating systems, or architectures.
+3. **HTTP/1.1 over TCP Scope**: The historical campaign evaluates unencrypted HTTP/1.1 over TCP. It does not evaluate TLS handshake racing, HTTP/3 over QUIC, or SVCB/HTTPS endpoint resolution racing.
+4. **Wire Observations vs. Internal Timers**: Packet captures record observable wire traffic at the network interface. They cannot directly observe browser-internal timer scheduling, socket state machines, or asynchronous task prioritization.
+5. **No General Conformance Claims**: In accordance with Rule R7, empirical deviations under artificial impairments (e.g., S6 late AAAA delay) describe laboratory observations for the pinned builds; they do not assert general non-conformance of browser networking engines.
+6. **RFC & Draft Specifications**: Conformance evaluations use [RFC 8305 (Happy Eyeballs v2)](https://www.rfc-editor.org/rfc/rfc8305.html). Happy Eyeballs v3 is evaluated strictly against the pinned historical reference [`draft-ietf-happy-happyeyeballs-v3-04`](https://datatracker.ietf.org/doc/html/draft-ietf-happy-happyeyeballs-v3-04) (1 July 2026), which was an active Internet-Draft, not an RFC, at the time of campaign execution.
+7. **Ephemeral Profile Isolation**: Browser profiles were cleared before every trial to guarantee trial independence. This explicitly prevents evaluating multi-trial cache memory or persistent address-sorting history across sessions.
+
+---
+
+## L. Submission and Project Resources
+
+| Deliverable | File / Location | Description |
+|---|---|---|
+| **Technical Validation Report** | [`PS028 Detailed Analysis & Report PDF.pdf`](PS028%20Detailed%20Analysis%20%26%20Report%20PDF.pdf) | Canonical 22-page technical report generated via `lab/build_technical_report_pdf.py` |
+| **Presentation Slide Deck** | [`PS028_Hackathon_Submission_Presentation.pdf`](PS028_Hackathon_Submission_Presentation.pdf) | Canonical 11-slide Beamer presentation deck generated via `lab/build_submission_report.py` |
+| **Historical Presentation Artifact** | [`AIORI_PS028_Happy_Eyeballs_Presentation.pdf`](AIORI_PS028_Happy_Eyeballs_Presentation.pdf) | Preserved historical presentation artifact from initial project upload |
+| **Project Demonstration Video** | [YouTube: Final Project Demonstration](https://youtu.be/LYngp7dzoRI?si=1mPrapHizazV41zB) | Video demonstration of offline replay, WebTester, and analytics |
+| **Team Introduction Video** | [YouTube: Team Introduction](https://youtu.be/5LLxlW9f6r4?si=EQjgtt3bIgkQ4Nix) | Team video introducing AlgoRhythm members |
+| **Live Web Application** | [ps028-happy-eyeballs.vercel.app](https://ps028-happy-eyeballs.vercel.app/) | Deployed interactive Historical Evidence Explorer and Analytics Dashboard |
+| **Problem Statement Compliance** | [`docs/phase-cd/ps028-compliance-matrix.md`](docs/phase-cd/ps028-compliance-matrix.md) | Requirement-to-evidence compliance mapping (17/18 MET, 1 PENDING partner execution) |
+
+---
+
+## M. Licensing and Upstream Attribution
+
+### Repository License Boundaries
+- **Project Root & Measurement Lab**: Licensed under the **Mozilla Public License Version 2.0** ([`LICENSE`](LICENSE)).
+- **Frontend UI Components**: UI components under `setup/webtester/src/components/ui/` are adapted from [shadcn/ui](https://ui.shadcn.com/) and licensed under the **MIT License** ([`LICENSES/MIT.txt`](LICENSES/MIT.txt)).
+
+### Upstream Project Attribution
+The frontend WebTester framework is adapted from the original open-source [Happy Eyeballs WebTester](https://github.com/happy-eyeballs/he-webtester) developed by Patrick Sattler, Johannes Zirngibl, Matthias Kirstein, and Tim Betzer at the Technical University of Munich (TUM), accompanying the research paper:
+> Patrick Sattler, Matthias Kirstein, Lars Wüstrich, Johannes Zirngibl, and Georg Carle. 2025. *Lazy Eye Inspection: Capturing the State of Happy Eyeballs Implementations*. In Proceedings of the 2025 Internet Measurement Conference (IMC '25). ACM, New York, NY, USA. [https://doi.org/10.1145/3694834.3694850](https://doi.org/10.1145/3694834.3694850).
+
+See [`UPSTREAM_README.md`](UPSTREAM_README.md) for original upstream documentation and deployment instructions.
+
+---
 
 **Team AlgoRhythm** · *Measure. Compare. Improve.*
-

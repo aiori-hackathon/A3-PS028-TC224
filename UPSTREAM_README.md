@@ -1,4 +1,15 @@
-# Happy Eyeballs Webtester
+# Upstream Documentation: Happy Eyeballs Webtester
+
+> [!NOTE]
+> **Upstream Documentation Notice**:
+> This file preserves the upstream documentation from the original [Happy Eyeballs WebTester](https://github.com/happy-eyeballs/he-webtester) project ([www.happy-eyeballs.net](https://www.happy-eyeballs.net)), developed as part of *"Lazy Eye Inspection: Capturing the State of Happy Eyeballs Implementations"* (ACM IMC 2025).
+> It describes upstream Ansible deployment configurations and multi-IP server topologies, not the PS-028 network-namespace laboratory testbed.
+>
+> For authoritative PS-028 documentation:
+> - Project Overview & Results: [`README.md`](./README.md)
+> - Central Documentation Index: [`docs/README.md`](./docs/README.md)
+> - Laboratory Reproducibility Runbook: [`docs/PS028_REPRODUCIBILITY_RUNBOOK.md`](./docs/PS028_REPRODUCIBILITY_RUNBOOK.md)
+> - Frontend Application Guide: [`setup/webtester/README.md`](./setup/webtester/README.md)
 
 This is the source code for the online Happy Eyeballs webtester: [www.happy-eyeballs.net](https://www.happy-eyeballs.net).
 It was initially developed as part of the paper "Lazy Eye Inspection: Capturing the State of Happy Eyeballs Implementations" by Patrick Sattler.
