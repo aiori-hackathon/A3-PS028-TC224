@@ -36,15 +36,12 @@ import TestCard from "@/components/test-card.astro";
     </TestCard>
 
     <TestCard
-      title="Connection Attempt Delay Test"
-      href="tests/connection-attempt-delay"
+      title="How to run your own tests?"
+      href="/procedure"
+      actionText="See procedure"
     >
       <span class="text-black">
-      Happy Eyeballs version 1 defines the racing of IPv4 vs. IPv6. The term
-      Connection Attempt Delay (CAD) describes the delay a client waits for the
-      IPv6 response before issuing an IPv4 connection. We test this behavior of
-      your client by artificially adding latency to IPv6 packets. Depending on
-      your client's settings, it will wait for the IPv6 connection attempt.
+      Reproducibility in our project means making it possible for another researcher to repeat our IPv4/IPv6 fallback experiments under the same documented conditions and independently verify our findings. We have prepared an independent replication runbook so another researcher can set up the laboratory, execute the same 280-trial experiment, process the evidence, and compare their results with ours. In essence, we want our results to be independently verifiable—not just something others have to trust.
       </span>
     </TestCard>
 
