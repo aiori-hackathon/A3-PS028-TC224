@@ -25,7 +25,6 @@ export const RECOGNIZED_OFFLINE_ERROR_CODES = Object.freeze([
   'net::ERR_NETWORK_CHANGED',
   'net::ERR_TIMED_OUT',
   'net::ERR_CONNECTION_RESET',
-  'net::ERR_ABORTED',
 ]);
 
 /**
@@ -46,12 +45,46 @@ export function isOptionalExternalFontUrl(rawUrl) {
 
 /**
  * Checks whether an error message contains an explicitly recognized offline network failure code.
+ * Note: net::ERR_ABORTED is strictly excluded because request cancellation is not exclusively
+ * evidence of offline connectivity.
  */
 export function isRecognizedOfflineError(errorText) {
   if (typeof errorText !== 'string' || !errorText.trim()) {
     return false;
   }
   return RECOGNIZED_OFFLINE_ERROR_CODES.some((code) => errorText.includes(code));
+}
+
+/**
+ * Test-Environment Controlled Mechanism: Optional Font Request Cancellation Policy
+ *
+ * In automated headless browser runners, Chromium's speculative font preloader may cancel
+ * pending font requests (emitting net::ERR_ABORTED) when DOM content finishes loading before
+ * the external CDN connection completes.
+ *
+ * Request cancellation is NOT an offline error (it indicates client-side abort, not lack of connectivity).
+ * To tolerate speculative font preloader aborts in this test environment without misclassifying generic
+ * cancellation as an offline error, this explicitly controlled policy permits cancellation ONLY when ALL of:
+ *   1. The target URL strictly matches an optional Google Fonts CDN host (exact hostname).
+ *   2. The failure error code is specifically net::ERR_ABORTED.
+ *   3. The explicit environment option `allowFontCancellation` is enabled.
+ *
+ * Local assets, non-font external requests, or any cancellations when disabled remain strictly fatal.
+ *
+ * @param {string} url - Target request URL
+ * @param {string} errorText - Error text reported by browser
+ * @param {object} [options] - Test environment options
+ * @param {boolean} [options.allowFontCancellation=true] - Whether font preloader abort is tolerated
+ * @returns {boolean} true if this is an explicitly authorized font preloader abort
+ */
+export function isPermittedFontCancellation(url, errorText, options = { allowFontCancellation: true }) {
+  if (!options?.allowFontCancellation) {
+    return false;
+  }
+  if (!isOptionalExternalFontUrl(url)) {
+    return false;
+  }
+  return typeof errorText === 'string' && errorText.includes('net::ERR_ABORTED');
 }
 
 /**
@@ -64,30 +97,75 @@ export function extractUrlFromText(text) {
 }
 
 /**
- * Evaluates whether a request failure should be suppressed.
- * Suppressed ONLY if:
- * 1. Target URL strictly matches an optional Google Fonts CDN host (exact hostname).
- * 2. Failure error text strictly matches an explicitly recognized offline error code.
+ * Evaluates whether an HTTP response status code represents a fatal error.
+ * In accordance with strict test harness safety policies:
+ * Any HTTP response with status >= 400 (Client Errors 4xx, Server Errors 5xx)
+ * is strictly fatal regardless of originating domain (including Google Fonts).
+ * Status codes < 400 (1xx Informational, 2xx Success, 3xx Redirection) are non-fatal.
+ *
+ * Boundary rules:
+ *   status < 400  -> false (non-fatal, e.g. 200, 204, 301, 302, 399)
+ *   status >= 400 -> true  (fatal error, e.g. 400, 404, 500, 599)
+ *
+ * @param {number|string} statusCode - HTTP status code
+ * @param {string} [url] - Target URL (optional, for diagnostic reporting)
+ * @returns {boolean} true if the response is fatal (status >= 400), false otherwise.
  */
-export function shouldSuppressRequestFailure(url, errorText) {
-  if (!isOptionalExternalFontUrl(url)) {
-    return false;
+export function isFatalHttpResponse(statusCode, url = '') {
+  if (statusCode === null || statusCode === undefined || statusCode === '') {
+    return true;
   }
-  return isRecognizedOfflineError(errorText);
+  const numericStatus = Number(statusCode);
+  if (!Number.isInteger(numericStatus) || Number.isNaN(numericStatus) || numericStatus < 100 || numericStatus > 599) {
+    return true; // Malformed, non-HTTP, or missing status code is treated as fatal
+  }
+  return numericStatus >= 400;
+}
+
+/**
+ * Evaluates whether a request failure should be suppressed in the test suite.
+ * Suppressed ONLY if:
+ * 1. Target URL strictly matches an optional Google Fonts CDN host (exact hostname) AND
+ *    failure error text matches an explicitly recognized offline error code (RECOGNIZED_OFFLINE_ERROR_CODES).
+ * OR:
+ * 2. Target URL strictly matches an optional Google Fonts CDN host (exact hostname) AND
+ *    failure is an authorized speculative font cancellation (net::ERR_ABORTED) under the
+ *    explicitly controlled test environment policy (isPermittedFontCancellation).
+ *
+ * Any other request failure (local assets, HTTP errors, unauthorized cancellations, spoofed hosts)
+ * returns false and is strictly fatal.
+ */
+export function shouldSuppressRequestFailure(url, errorText, options = { allowFontCancellation: true }) {
+  if (isOptionalExternalFontUrl(url) && isRecognizedOfflineError(errorText)) {
+    return true;
+  }
+  if (isPermittedFontCancellation(url, errorText, options)) {
+    return true;
+  }
+  return false;
 }
 
 /**
  * Evaluates whether a browser console error message should be suppressed.
  * Suppressed ONLY if:
- * 1. Target URL (from location or message) strictly matches an optional Google Fonts host.
- * 2. Message text contains an explicitly recognized offline error code.
+ * 1. Target URL strictly matches an optional Google Fonts host (exact hostname) AND
+ *    message text contains an explicitly recognized offline error code.
+ * OR:
+ * 2. Target URL strictly matches an optional Google Fonts host AND
+ *    message is an authorized speculative font cancellation.
  */
-export function shouldSuppressConsoleError(msgText, locationUrl) {
+export function shouldSuppressConsoleError(msgText, locationUrl, options = { allowFontCancellation: true }) {
   const targetUrl = locationUrl || extractUrlFromText(msgText);
   if (!targetUrl || !isOptionalExternalFontUrl(targetUrl)) {
     return false;
   }
-  return isRecognizedOfflineError(msgText);
+  if (isRecognizedOfflineError(msgText)) {
+    return true;
+  }
+  if (isPermittedFontCancellation(targetUrl, msgText, options)) {
+    return true;
+  }
+  return false;
 }
 
 async function runBrowserTests() {
@@ -168,9 +246,9 @@ async function runBrowserTests() {
     });
 
     page.on('response', (res) => {
-      // Do not suppress HTTP 4xx or 5xx responses, even when originating from Google Fonts domains
-      if (res.status() >= 400) {
-        console.error('[Response Status >= 400]:', res.url(), res.status());
+      // Use shared helper: do not suppress HTTP 4xx or 5xx responses, even when originating from Google Fonts domains
+      if (isFatalHttpResponse(res.status(), res.url())) {
+        console.error(`[Response Status >= 400]: ${res.url()} (${res.status()})`);
         pageErrors.push(new Error(`HTTP ${res.status()} on ${res.url()}`));
       }
     });

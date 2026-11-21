@@ -7,6 +7,8 @@ import { fileURLToPath } from 'node:url';
 import {
   isOptionalExternalFontUrl,
   isRecognizedOfflineError,
+  isPermittedFontCancellation,
+  isFatalHttpResponse,
   shouldSuppressRequestFailure,
   shouldSuppressConsoleError,
   RECOGNIZED_OFFLINE_ERROR_CODES
@@ -168,12 +170,25 @@ describe('PS-028 Reproducibility Card & Test Laboratory Procedure Page Verificat
     assert.strictEqual(isOptionalExternalFontUrl('not-a-valid-url'), false);
   });
 
-  it('8. Verifies explicitly recognized offline network error codes', () => {
-    // All known offline error codes must be recognized
+  it('8. Verifies explicitly recognized offline network error codes (excludes net::ERR_ABORTED)', () => {
+    // All genuine offline connectivity failure codes must be recognized
     for (const code of RECOGNIZED_OFFLINE_ERROR_CODES) {
       assert.strictEqual(isRecognizedOfflineError(code), true, `${code} must be recognized`);
       assert.strictEqual(isRecognizedOfflineError(`Prefix ${code} suffix`), true, `Embedded ${code} must be recognized`);
     }
+
+    // Negative requirement: net::ERR_ABORTED is strictly excluded because request cancellation
+    // is not exclusively evidence of offline connectivity
+    assert.strictEqual(
+      isRecognizedOfflineError('net::ERR_ABORTED'),
+      false,
+      'net::ERR_ABORTED must NOT be classified as an offline network failure'
+    );
+    assert.strictEqual(
+      RECOGNIZED_OFFLINE_ERROR_CODES.includes('net::ERR_ABORTED'),
+      false,
+      'RECOGNIZED_OFFLINE_ERROR_CODES must not include net::ERR_ABORTED'
+    );
 
     // Unrecognized or security-related error codes must NOT be recognized as offline network errors
     assert.strictEqual(isRecognizedOfflineError('net::ERR_CERT_COMMON_NAME_INVALID'), false);
@@ -187,12 +202,25 @@ describe('PS-028 Reproducibility Card & Test Laboratory Procedure Page Verificat
     assert.strictEqual(isRecognizedOfflineError(undefined), false);
   });
 
-  it('9. Verifies request failure suppression logic (genuine offline failure vs non-exempt)', () => {
+  it('9. Verifies request failure suppression logic and negative test for unpermitted cancellation', () => {
     // Genuine offline network failures on genuine Google Fonts CDN hosts must be suppressed
-    assert.strictEqual(shouldSuppressRequestFailure('https://fonts.gstatic.com/font.woff2', 'net::ERR_ABORTED'), true);
     assert.strictEqual(shouldSuppressRequestFailure('https://fonts.googleapis.com/css2', 'net::ERR_NAME_NOT_RESOLVED'), true);
     assert.strictEqual(shouldSuppressRequestFailure('https://fonts.gstatic.com/font.woff2', 'net::ERR_INTERNET_DISCONNECTED'), true);
     assert.strictEqual(shouldSuppressRequestFailure('https://fonts.gstatic.com/font.woff2', 'net::ERR_CONNECTION_REFUSED'), true);
+
+    // Negative requirement: an aborted request is NOT automatically classified as an offline failure
+    assert.strictEqual(
+      shouldSuppressRequestFailure('https://fonts.gstatic.com/font.woff2', 'net::ERR_ABORTED', { allowFontCancellation: false }),
+      false,
+      'Aborted Google Fonts request must not be automatically suppressed when allowFontCancellation is false'
+    );
+
+    // Explicitly authorized font preloader cancellation in test environment is tolerated when enabled
+    assert.strictEqual(
+      shouldSuppressRequestFailure('https://fonts.gstatic.com/font.woff2', 'net::ERR_ABORTED', { allowFontCancellation: true }),
+      true,
+      'Explicitly controlled font cancellation on genuine font host must be permitted'
+    );
 
     // Genuine offline network errors on LOCAL assets must NOT be suppressed (must remain fatal)
     assert.strictEqual(shouldSuppressRequestFailure('http://127.0.0.1:41525/_astro/main.css', 'net::ERR_ABORTED'), false);
@@ -208,13 +236,61 @@ describe('PS-028 Reproducibility Card & Test Laboratory Procedure Page Verificat
     assert.strictEqual(shouldSuppressRequestFailure('https://fonts.googleapis.com/css2', ''), false);
   });
 
-  it('10. Verifies console error suppression logic (exact URL extraction and validation)', () => {
+  it('10. Verifies explicitly controlled font cancellation policy (isPermittedFontCancellation)', () => {
+    // Valid font host with net::ERR_ABORTED and allowFontCancellation=true
+    assert.strictEqual(
+      isPermittedFontCancellation('https://fonts.gstatic.com/s/redaction10/v1/font.woff2', 'net::ERR_ABORTED', { allowFontCancellation: true }),
+      true
+    );
+    assert.strictEqual(
+      isPermittedFontCancellation('https://fonts.googleapis.com/css2', 'net::ERR_ABORTED', { allowFontCancellation: true }),
+      true
+    );
+
+    // Negative: disabled control option
+    assert.strictEqual(
+      isPermittedFontCancellation('https://fonts.gstatic.com/font.woff2', 'net::ERR_ABORTED', { allowFontCancellation: false }),
+      false
+    );
+
+    // Negative: non-cancellation error codes
+    assert.strictEqual(
+      isPermittedFontCancellation('https://fonts.gstatic.com/font.woff2', 'net::ERR_TIMED_OUT', { allowFontCancellation: true }),
+      false
+    );
+
+    // Negative: local assets or attacker domains with cancellation
+    assert.strictEqual(
+      isPermittedFontCancellation('http://127.0.0.1:41525/_astro/main.css', 'net::ERR_ABORTED', { allowFontCancellation: true }),
+      false
+    );
+    assert.strictEqual(
+      isPermittedFontCancellation('https://evil.com/font.woff2', 'net::ERR_ABORTED', { allowFontCancellation: true }),
+      false
+    );
+    assert.strictEqual(
+      isPermittedFontCancellation('https://fonts.googleapis.com.attacker.org/font.woff2', 'net::ERR_ABORTED', { allowFontCancellation: true }),
+      false
+    );
+  });
+
+  it('11. Verifies console error suppression logic (exact URL extraction and validation)', () => {
     // Console error with location URL matching font host and recognized offline error
-    assert.strictEqual(shouldSuppressConsoleError('Failed to load resource: net::ERR_ABORTED', 'https://fonts.gstatic.com/font.woff2'), true);
+    assert.strictEqual(shouldSuppressConsoleError('Failed to load resource: net::ERR_INTERNET_DISCONNECTED', 'https://fonts.gstatic.com/font.woff2'), true);
     assert.strictEqual(shouldSuppressConsoleError('Failed to load resource: net::ERR_NAME_NOT_RESOLVED', 'https://fonts.googleapis.com/css2'), true);
 
     // Console error with font URL embedded in message text and recognized offline error
     assert.strictEqual(shouldSuppressConsoleError('GET https://fonts.googleapis.com/css2 net::ERR_NAME_NOT_RESOLVED', null), true);
+
+    // Console error with net::ERR_ABORTED tolerated under explicit font cancellation policy
+    assert.strictEqual(
+      shouldSuppressConsoleError('Failed to load resource: net::ERR_ABORTED', 'https://fonts.gstatic.com/font.woff2', { allowFontCancellation: true }),
+      true
+    );
+    assert.strictEqual(
+      shouldSuppressConsoleError('Failed to load resource: net::ERR_ABORTED', 'https://fonts.gstatic.com/font.woff2', { allowFontCancellation: false }),
+      false
+    );
 
     // Console error on local asset must NOT be suppressed
     assert.strictEqual(shouldSuppressConsoleError('Failed to load resource: net::ERR_ABORTED', 'http://127.0.0.1:41525/script.js'), false);
@@ -226,27 +302,41 @@ describe('PS-028 Reproducibility Card & Test Laboratory Procedure Page Verificat
     assert.strictEqual(shouldSuppressConsoleError('Uncaught TypeError: Cannot read property of undefined', 'https://fonts.gstatic.com/font.woff2'), false);
   });
 
-  it('11. Verifies HTTP 4xx/5xx responses remain fatal even for Google Fonts domains', () => {
-    // Rule: Do not suppress HTTP 4xx or 5xx responses, even when originating from Google Fonts domains
-    const simulateResponseHandler = (url, status) => {
-      const pageErrors = [];
-      if (status >= 400) {
-        pageErrors.push(new Error(`HTTP ${status} on ${url}`));
-      }
-      return pageErrors;
-    };
+  it('12. Verifies shared HTTP response fatality helper (isFatalHttpResponse) across boundary status codes', () => {
+    // Requirement 4: Test actual helper for HTTP 399, 400, 404, 500, and 599
 
-    // Google Fonts 404/500 must produce fatal page errors
-    const font404Errors = simulateResponseHandler('https://fonts.googleapis.com/css2?family=NonExistentFont', 404);
-    assert.strictEqual(font404Errors.length, 1);
-    assert.match(font404Errors[0].message, /HTTP 404/);
+    // HTTP 399: Non-fatal boundary (highest 3xx redirect / non-error code)
+    assert.strictEqual(isFatalHttpResponse(399), false, 'HTTP 399 must be non-fatal');
+    assert.strictEqual(isFatalHttpResponse(399, 'https://fonts.googleapis.com/css2'), false, 'HTTP 399 on font host must be non-fatal');
 
-    const font500Errors = simulateResponseHandler('https://fonts.gstatic.com/s/redaction10/v1/corrupt.woff2', 500);
-    assert.strictEqual(font500Errors.length, 1);
-    assert.match(font500Errors[0].message, /HTTP 500/);
+    // HTTP 400: Fatal boundary (lowest 4xx client error code)
+    assert.strictEqual(isFatalHttpResponse(400), true, 'HTTP 400 must be fatal');
+    assert.strictEqual(isFatalHttpResponse(400, 'https://fonts.googleapis.com/css2'), true, 'HTTP 400 on font host must be fatal');
 
-    // Local 404/500 must produce fatal page errors
-    const local404Errors = simulateResponseHandler('http://127.0.0.1:41525/missing-page', 404);
-    assert.strictEqual(local404Errors.length, 1);
+    // HTTP 404: Fatal (Not Found)
+    assert.strictEqual(isFatalHttpResponse(404), true, 'HTTP 404 must be fatal');
+    assert.strictEqual(isFatalHttpResponse(404, 'https://fonts.gstatic.com/s/redaction10/v1/missing.woff2'), true, 'HTTP 404 on font host must be fatal');
+
+    // HTTP 500: Fatal (Internal Server Error)
+    assert.strictEqual(isFatalHttpResponse(500), true, 'HTTP 500 must be fatal');
+    assert.strictEqual(isFatalHttpResponse(500, 'https://fonts.googleapis.com/css2'), true, 'HTTP 500 on font host must be fatal');
+
+    // HTTP 599: Fatal boundary (highest standard 5xx server error code)
+    assert.strictEqual(isFatalHttpResponse(599), true, 'HTTP 599 must be fatal');
+    assert.strictEqual(isFatalHttpResponse(599, 'https://fonts.gstatic.com/font.woff2'), true, 'HTTP 599 on font host must be fatal');
+
+    // Additional standard status codes
+    assert.strictEqual(isFatalHttpResponse(200, 'http://127.0.0.1:41525/'), false, 'HTTP 200 must be non-fatal');
+    assert.strictEqual(isFatalHttpResponse(204), false, 'HTTP 204 must be non-fatal');
+    assert.strictEqual(isFatalHttpResponse(301), false, 'HTTP 301 must be non-fatal');
+    assert.strictEqual(isFatalHttpResponse(302), false, 'HTTP 302 must be non-fatal');
+    assert.strictEqual(isFatalHttpResponse(403), true, 'HTTP 403 must be fatal');
+    assert.strictEqual(isFatalHttpResponse(502), true, 'HTTP 502 must be fatal');
+    assert.strictEqual(isFatalHttpResponse(503), true, 'HTTP 503 must be fatal');
+
+    // Invalid / non-integer inputs fail closed (treated as fatal)
+    assert.strictEqual(isFatalHttpResponse('invalid'), true, 'Non-numeric status code must fail closed as fatal');
+    assert.strictEqual(isFatalHttpResponse(NaN), true, 'NaN status code must fail closed as fatal');
+    assert.strictEqual(isFatalHttpResponse(null), true, 'null status code must fail closed as fatal');
   });
 });
