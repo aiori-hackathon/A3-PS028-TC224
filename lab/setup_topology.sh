@@ -88,15 +88,15 @@ snapshot_host_state() {
     log_info "Capturing portable host network configuration snapshot to $outfile..."
     {
         echo "=== HOST INTERFACES ==="
-        ip -d addr show 2>/dev/null | sed -E 's/(valid_lft|preferred_lft) [0-9a-z_]+/\1 <dynamic>/g'
+        ip -d addr show 2>/dev/null | sed -E -e 's/(valid_lft|preferred_lft) [0-9a-z_]+/\1 <dynamic>/g' -e 's/expires [0-9]+sec/expires <dynamic>/g'
         echo "=== IPV4 ROUTES ==="
-        ip -4 route show
+        ip -4 route show | sed -E -e 's/expires [0-9]+sec/expires <dynamic>/g' -e 's/cache <[^>]+>//g' | LC_ALL=C sort
         echo "=== IPV6 ROUTES ==="
-        ip -6 route show
+        ip -6 route show | sed -E -e 's/expires [0-9]+sec/expires <dynamic>/g' -e 's/cache <[^>]+>//g' | LC_ALL=C sort
         echo "=== IPV4 RULES ==="
-        ip -4 rule show
+        ip -4 rule show | LC_ALL=C sort
         echo "=== IPV6 RULES ==="
-        ip -6 rule show
+        ip -6 rule show | LC_ALL=C sort
     } > "$outfile"
     log_ok "Host snapshot captured."
 }

@@ -17,6 +17,19 @@ const MIME_TYPES = {
   '.woff2': 'font/woff2',
 };
 
+/**
+ * Validates whether a URL corresponds strictly to the optional external Google Fonts CDN.
+ * Uses exact hostname matching to prevent spoofing or accidental exemption of local assets.
+ */
+export function isOptionalExternalFontUrl(rawUrl) {
+  try {
+    const parsed = new URL(rawUrl);
+    return parsed.hostname === 'fonts.googleapis.com' || parsed.hostname === 'fonts.gstatic.com';
+  } catch {
+    return false;
+  }
+}
+
 async function runBrowserTests() {
   console.log('================================================================================');
   console.log('PS-028 Reproducibility Card & Procedure Page Browser Acceptance Test');
@@ -78,20 +91,22 @@ async function runBrowserTests() {
       // Ignore sandbox offline external resource disconnection
       if (text.includes('ERR_INTERNET_DISCONNECTED')) return;
       if (msg.type() === 'error') {
+        if (text.includes('fonts.googleapis.com') || text.includes('fonts.gstatic.com')) return;
         console.error('[Console Error]:', text);
         consoleErrors.push(text);
       }
     });
 
     page.on('requestfailed', (req) => {
-      // Ignore external offline fonts in sandbox
-      if (req.url().includes('fonts.googleapis.com')) return;
+      // Ignore optional external font CDN requests in offline/sandbox environments (exact hostname)
+      if (isOptionalExternalFontUrl(req.url())) return;
       console.error('[Request Failed]:', req.url(), req.failure()?.errorText);
       pageErrors.push(new Error(`Request failed: ${req.url()}`));
     });
 
     page.on('response', (res) => {
       if (res.status() >= 400) {
+        if (isOptionalExternalFontUrl(res.url())) return;
         console.error('[Response Status >= 400]:', res.url(), res.status());
         pageErrors.push(new Error(`HTTP ${res.status()} on ${res.url()}`));
       }
@@ -243,7 +258,9 @@ async function runBrowserTests() {
   }
 }
 
-runBrowserTests().catch((err) => {
-  console.error('[FATAL]:', err);
-  process.exit(1);
-});
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  runBrowserTests().catch((err) => {
+    console.error('[FATAL]:', err);
+    process.exit(1);
+  });
+}

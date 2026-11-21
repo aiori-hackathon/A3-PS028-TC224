@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { isOptionalExternalFontUrl } from './reproducibility-browser.test.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -138,5 +139,20 @@ describe('PS-028 Reproducibility Card & Test Laboratory Procedure Page Verificat
 
     assert.match(html, /Submit the independent evidence/, 'Step 7 exact heading');
     assert.match(html, /Submit the evidence archive and its SHA-256 checksum to the project maintainers\./, 'Step 7 text');
+  });
+
+  it('7. Verifies exact-hostname exemption for optional external Google Fonts CDNs', () => {
+    // Fonts CSS host and Font binary CDN host must match exactly
+    assert.strictEqual(isOptionalExternalFontUrl('https://fonts.googleapis.com/css2?family=Redaction+10'), true);
+    assert.strictEqual(isOptionalExternalFontUrl('https://fonts.gstatic.com/s/redaction10/v1/nKKP-GMjH5FfZdL7VGuARJRZiF9jHc_7.woff2'), true);
+
+    // Negative tests: local assets, IP addresses, subdomains, attacker spoofing must NOT be exempted
+    assert.strictEqual(isOptionalExternalFontUrl('http://127.0.0.1:41525/procedure'), false);
+    assert.strictEqual(isOptionalExternalFontUrl('http://127.0.0.1:41525/_astro/main.css'), false);
+    assert.strictEqual(isOptionalExternalFontUrl('http://localhost:3000/script.js'), false);
+    assert.strictEqual(isOptionalExternalFontUrl('https://fonts.googleapis.com.evil.com/fake.css'), false);
+    assert.strictEqual(isOptionalExternalFontUrl('https://attacker.org/fonts.gstatic.com/font.woff2'), false);
+    assert.strictEqual(isOptionalExternalFontUrl('https://fake-fonts.googleapis.com/test'), false);
+    assert.strictEqual(isOptionalExternalFontUrl('not-a-valid-url'), false);
   });
 });
