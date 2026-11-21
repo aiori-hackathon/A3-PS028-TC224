@@ -277,6 +277,15 @@ class TestNFTablesManagement(unittest.TestCase):
                     impair.validate_nftables_rule(rule)
                 self.assertIn("numgen loss parameters", str(ctx.exception).lower())
 
+    def test_s5_stochastic_policy_metadata_and_rejection_of_false_seed_claims(self):
+        """Verifies S5 stochastic policy metadata and ensures no false deterministic seed claims."""
+        from lab.replication_contract import S5_RANDOMNESS_POLICY
+        self.assertEqual(S5_RANDOMNESS_POLICY["policy_type"], "PROBABILISTIC_KERNEL_NUMGEN")
+        self.assertFalse(S5_RANDOMNESS_POLICY["kernel_seedable"])
+        self.assertEqual(S5_RANDOMNESS_POLICY["nominal_drop_rate"], 0.50)
+        self.assertIn("kernel CSPRNG entropy", S5_RANDOMNESS_POLICY["scientific_rationale"])
+        self.assertIn("not seedable from userland", S5_RANDOMNESS_POLICY["scientific_rationale"])
+
     def test_negative_rejects_cross_scenario_rule_mismatch(self):
         """Reject rules that don't match the designated scenario structure."""
         s1_rule = 'oifname "ps028-rt-sv6" ip6 daddr 2001:db8:2::10 tcp flags syn / syn,ack drop'

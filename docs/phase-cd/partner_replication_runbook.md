@@ -139,12 +139,16 @@ mkdir -p "${PARTNER_EVIDENCE_DIR}"
 mkdir -p "${PARTNER_DERIVED_DIR}"
 
 python3 lab/run_campaign.py \
+  --strict-partner \
+  --partner-institution "<PARTNER_INSTITUTION>" \
+  --operator-id "<OPERATOR_ID>" \
   --output-dir "${PARTNER_EVIDENCE_DIR}" \
   --repetitions 20 \
   --browsers "google-chrome,firefox" \
   --scenarios "S0,S1,S2,S3,S4,S5,S6"
 ```
 Verify that the campaign finishes with status `COMPLETED` and execution mode `LIVE`:
+- `--strict-partner` guarantees that only live trials are executed, exactly canonical scenarios S0–S6 and pinned browsers Google Chrome 156.0.8078.73 and Mozilla Firefox 159.0 are used, and 280 slots are planned.
 - The output manifest `${PARTNER_EVIDENCE_DIR}/campaign_manifest.json` tracks exactly 280 unique matrix slots (`matrix_slots`).
 - Every planned matrix slot records status `COMPLETED` and contains a successful attempt with validity `VALID_LIVE`.
 - If any retry occurred due to transient measurement or cleanup anomalies, failed-attempt history is preserved (`status: "FAILED"`, validity `MEASUREMENT_FAILURE` or `CLEANUP_FAILURE`) with its corresponding `failed_attempt_record.json` preserved under `trials/<trial_id>/`.
@@ -188,7 +192,20 @@ cd - > /dev/null
 # 4. Verify handover package against all PS-028 criteria before submission
 python3 lab/verify_partner_handover.py \
   --archive "${HOME}/ps028-partner-evidence/${PARTNER_CAMPAIGN}.tar.gz" \
-  --derived-dir "${PARTNER_DERIVED_DIR}"
+  --derived-dir "${PARTNER_DERIVED_DIR}" \
+  --require-checksum-manifest \
+  --require-partner-info
+```
+
+### Step 6: Comparative Scientific Evaluation
+Statistically compare the newly replicated campaign against the authoritative historical baseline (`lab/campaigns/ps028-a10-live-20261030-01`):
+```bash
+python3 lab/compare_campaigns.py \
+  --baseline lab/campaigns/ps028-a10-live-20261030-01 \
+  --partner "${PARTNER_EVIDENCE_DIR}" \
+  --output-json "${PARTNER_DERIVED_DIR}/replication_comparison.json" \
+  --output-md "${PARTNER_DERIVED_DIR}/replication_comparison.md"
+```
 ```
 
 **Portable Verification & Architecture Guarantees:**

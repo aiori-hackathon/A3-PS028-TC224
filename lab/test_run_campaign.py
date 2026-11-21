@@ -178,6 +178,86 @@ class TestCampaignCLIAndConfig(unittest.TestCase):
             run_campaign.CampaignRunner(browsers=["nonexistent-browser"], is_simulation=False)
         self.assertIn("Browser validation failed", str(ctx.exception))
 
+    def test_strict_partner_cli_parsing(self):
+        args = run_campaign.parse_args(["--strict-partner"])
+        self.assertTrue(args.strict_partner)
+
+    def test_strict_partner_rejects_simulation(self):
+        with self.assertRaises(run_campaign.CampaignConfigError) as ctx:
+            run_campaign.CampaignRunner(strict_partner=True, is_simulation=True)
+        self.assertIn("forbids simulation mode", str(ctx.exception))
+
+    def test_strict_partner_rejects_non_canonical_scenarios(self):
+        with self.assertRaises(run_campaign.CampaignConfigError) as ctx:
+            run_campaign.CampaignRunner(
+                strict_partner=True,
+                scenarios=["S0", "S1"],
+                repetitions=20,
+                browsers=["google-chrome", "firefox"]
+            )
+        self.assertIn("requires exactly 7 canonical scenarios", str(ctx.exception))
+
+    def test_strict_partner_rejects_non_20_repetitions(self):
+        with self.assertRaises(run_campaign.CampaignConfigError) as ctx:
+            run_campaign.CampaignRunner(
+                strict_partner=True,
+                repetitions=5,
+                scenarios=["S0", "S1", "S2", "S3", "S4", "S5", "S6"],
+                browsers=["google-chrome", "firefox"]
+            )
+        self.assertIn("requires exactly 20 repetitions", str(ctx.exception))
+
+    def test_strict_partner_rejects_non_canonical_browsers(self):
+        with self.assertRaises(run_campaign.CampaignConfigError) as ctx:
+            run_campaign.CampaignRunner(
+                strict_partner=True,
+                repetitions=20,
+                scenarios=["S0", "S1", "S2", "S3", "S4", "S5", "S6"],
+                browsers=["google-chrome"]
+            )
+        self.assertIn("requires both canonical browsers", str(ctx.exception))
+
+    @patch("lab.partner_preflight.get_browser_runtimes")
+    def test_strict_partner_aborts_on_browser_preflight_failure(self, mock_runtimes):
+        mock_runtimes.return_value = {
+            "all_exact_match": False,
+            "browsers": {
+                "google-chrome": {"status": "VERSION_MISMATCH", "raw_version_output": "Chrome 120", "pinned_expected": "156.0.8078.73"},
+                "firefox": {"status": "NOT_FOUND", "raw_version_output": None, "pinned_expected": "159.0"}
+            }
+        }
+        with self.assertRaises(run_campaign.CampaignConfigError) as ctx:
+            run_campaign.CampaignRunner(
+                strict_partner=True,
+                repetitions=20,
+                scenarios=["S0", "S1", "S2", "S3", "S4", "S5", "S6"],
+                browsers=["google-chrome", "firefox"]
+            )
+        self.assertIn("Strict partner replication failed browser preflight", str(ctx.exception))
+
+    @patch("lab.partner_preflight.get_browser_runtimes")
+    def test_strict_partner_succeeds_and_initializes_280_slots(self, mock_runtimes):
+        mock_runtimes.return_value = {
+            "all_exact_match": True,
+            "browsers": {
+                "google-chrome": {"status": "READY", "pinned_expected": "156.0.8078.73"},
+                "firefox": {"status": "READY", "pinned_expected": "159.0"}
+            }
+        }
+        with tempfile.TemporaryDirectory() as td:
+            runner = run_campaign.CampaignRunner(
+                strict_partner=True,
+                repetitions=20,
+                scenarios=["S0", "S1", "S2", "S3", "S4", "S5", "S6"],
+                browsers=["google-chrome", "firefox"],
+                output_dir=Path(td) / "test_campaign"
+            )
+            manifest = runner.initialize_manifest()
+            self.assertEqual(len(manifest.matrix_slots), 280)
+            self.assertTrue(manifest.strict_partner)
+            self.assertEqual(manifest.protocol_version, "1.0.0")
+
+
 
 class TestMatrixAndAttemptSeparation(unittest.TestCase):
     """

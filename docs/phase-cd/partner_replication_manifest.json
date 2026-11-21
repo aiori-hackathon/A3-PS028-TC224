@@ -85,12 +85,52 @@
     }
   ],
   "planned_trial_count": 280,
+  "specification_of_record": "draft-ietf-happy-happyeyeballs-v3-04",
+  "specification_status_note": "draft-ietf-happy-happyeyeballs-v3-04 (published 1 July 2026; dated status check: 2026-11-13). HEv3 remains an Internet-Draft and must not be described as a published RFC.",
   "required_toolchain": {
     "python_minimum": "3.10",
     "iproute2_minimum": "6.1.0",
     "nftables_minimum": "1.0.0",
     "tshark_minimum": "4.0.0",
-    "nginx_minimum": "1.24.0"
+    "nginx_minimum": "1.24.0",
+    "tcpdump_minimum": "4.99.0",
+    "curl_minimum": "7.80.0"
+  },
+  "dns_requirements": {
+    "domain_suffix": "he.test.",
+    "wildcard_pattern": "*.he.test.",
+    "server_ip": "10.0.1.1",
+    "port": 53,
+    "https_type65_nodata": true
+  },
+  "capture_vantage_point": {
+    "namespace": "ps028-cl",
+    "interface": "ps028-cl-rt",
+    "filter": "tcp port 80 or udp port 53"
+  },
+  "s5_randomness_policy": {
+    "policy_type": "PROBABILISTIC_KERNEL_NUMGEN",
+    "mechanism": "nftables 'numgen random mod 100 < 50 drop'",
+    "kernel_seedable": false,
+    "scientific_rationale": "Linux kernel nftables numgen random relies on kernel CSPRNG entropy (get_random_u32()) and is not seedable from userland. S5 is therefore formally documented and evaluated as a stochastic/probabilistic impairment with nominal drop probability p=0.50. Realized loss is measured from raw PCAP stream attempts and router nftables counters, and reported with binomial Wilson score confidence intervals rather than claiming false deterministic seed control across independent hosts.",
+    "nominal_drop_rate": 0.50,
+    "evaluation_method": "raw_pcap_attempts_and_nftables_counters"
+  },
+  "evidence_requirements": {
+    "mandatory_internal_checksum_file": "partner_evidence.sha256",
+    "required_derived_ledgers": [
+      "attempts.csv",
+      "connection_attempts.csv",
+      "trial_timeline.csv"
+    ]
+  },
+  "host_restoration_requirements": {
+    "isolated_namespaces": [
+      "ps028-cl",
+      "ps028-rt",
+      "ps028-sv"
+    ],
+    "host_invariance_verification": true
   },
   "replication_partner": {
     "partner_institution": "UNASSIGNED",

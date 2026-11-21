@@ -85,10 +85,10 @@ cleanup_on_error() {
 # ------------------------------------------------------------------------------
 snapshot_host_state() {
     local outfile="$1"
-    log_info "Capturing host network configuration snapshot to $outfile..."
+    log_info "Capturing portable host network configuration snapshot to $outfile..."
     {
-        echo "=== HOST INTERFACES (eth0) ==="
-        ip -d addr show dev eth0 2>/dev/null || ip addr show dev eth0
+        echo "=== HOST INTERFACES ==="
+        ip -d addr show 2>/dev/null | sed -E 's/(valid_lft|preferred_lft) [0-9a-z_]+/\1 <dynamic>/g'
         echo "=== IPV4 ROUTES ==="
         ip -4 route show
         echo "=== IPV6 ROUTES ==="
@@ -109,7 +109,7 @@ check_host_invariance() {
 
     log_info "Comparing host network state against baseline ($baseline)..."
     if diff -u "$baseline" "$current"; then
-        log_ok "HOST INVARIANCE VERIFIED: eth0, IPv4/IPv6 routes, and routing rules are 100% identical."
+        log_ok "HOST INVARIANCE VERIFIED: Host interfaces, IPv4/IPv6 routes, and routing rules are 100% identical."
         rm -f "$current"
         return 0
     else

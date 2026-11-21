@@ -112,13 +112,14 @@ def make_synthetic_campaign(
                     (succ_tdir / "capture.pcap").write_bytes(pcap_data)
                     pcap_sha = hashlib.sha256(pcap_data).hexdigest()
 
+                    br_ver = "156.0.8078.73" if br in ("google-chrome", "chrome") else "159.0"
                     succ_res = {
                         "schema_version": schema_version,
                         "trial_id": succ_tid,
                         "scenario_id": sc,
                         "execution_mode": execution_mode,
                         "is_simulation": is_simulation,
-                        "browser": {"name": br, "executable": f"/usr/bin/{br}"},
+                        "browser": {"name": br, "version": br_ver, "executable": f"/usr/bin/{br}"},
                         "timestamps": {
                             "start_time": "2026-11-18T00:00:10.000000+00:00",
                             "end_time": "2026-11-18T00:00:15.000000+00:00",
@@ -184,13 +185,14 @@ def make_synthetic_campaign(
                 (tdir / "capture.pcap").write_bytes(pcap_data)
                 pcap_sha = hashlib.sha256(pcap_data).hexdigest()
 
+                br_ver = "156.0.8078.73" if br in ("google-chrome", "chrome") else "159.0"
                 res_data = {
                     "schema_version": schema_version,
                     "trial_id": tid,
                     "scenario_id": sc,
                     "execution_mode": execution_mode,
                     "is_simulation": is_simulation,
-                    "browser": {"name": br, "executable": f"/usr/bin/{br}"},
+                    "browser": {"name": br, "version": br_ver, "executable": f"/usr/bin/{br}"},
                     "timestamps": {
                         "start_time": "2026-11-18T00:00:00.000000+00:00",
                         "end_time": "2026-11-18T00:00:05.000000+00:00",
@@ -414,9 +416,11 @@ class TestVerifyPartnerHandover(unittest.TestCase):
 
     def setUp(self):
         self.temp_dir = Path(tempfile.mkdtemp(prefix="ps028_partner_test_"))
+        verify_partner_handover._DISSECTION_CACHE.clear()
 
     def tearDown(self):
         shutil.rmtree(self.temp_dir, ignore_errors=True)
+        verify_partner_handover._DISSECTION_CACHE.clear()
 
     def test_valid_synthetic_campaign_passes(self):
         """A complete 280-slot non-simulated live campaign passes verification."""
@@ -1313,6 +1317,397 @@ class TestVerifyPartnerHandover(unittest.TestCase):
 
         derived = make_synthetic_derived_directory(camp, self.temp_dir / "derived")
         verify_partner_handover.verify_partner_campaign_directory(camp, derived_dir=derived)
+
+    def test_browser_version_mismatch_rejected(self):
+        """Trial result.json recording unpinned browser build is rejected."""
+        camp = make_synthetic_campaign(self.temp_dir, repetitions=20)
+        mpath = camp / "campaign_manifest.json"
+        data = json.loads(mpath.read_text(encoding="utf-8"))
+        first_tid = data["matrix_slots"][0]["attempts"][0]["trial_id"]
+        res_file = camp / "trials" / first_tid / "result.json"
+        rdata = json.loads(res_file.read_text(encoding="utf-8"))
+        rdata["browser"]["version"] = "Google Chrome 155.0.0.0"
+        res_file.write_text(json.dumps(rdata, indent=2), encoding="utf-8")
+
+        with self.assertRaises(verify_partner_handover.VerificationError) as ctx:
+            verify_partner_handover.verify_partner_campaign_directory(camp)
+        self.assertIn("browser version mismatch", str(ctx.exception).lower())
+
+    def test_require_partner_info_enforced(self):
+        """--require-partner-info fails on placeholder metadata and passes when populated."""
+        camp = make_synthetic_campaign(self.temp_dir, repetitions=20)
+        mpath = camp / "campaign_manifest.json"
+
+        # Missing or default placeholder info fails closed
+        with self.assertRaises(verify_partner_handover.VerificationError) as ctx:
+            verify_partner_handover.verify_partner_campaign_directory(camp, require_partner_info=True)
+        self.assertIn("partner_institution", str(ctx.exception).lower())
+
+        # Populated valid partner metadata passes
+        mdata = json.loads(mpath.read_text(encoding="utf-8"))
+        mdata["partner_info"] = {
+            "partner_institution": "University Partner Laboratory",
+            "operator_id": "REPL-OP-01"
+        }
+        mpath.write_text(json.dumps(mdata, indent=2), encoding="utf-8")
+
+        res = verify_partner_handover.verify_partner_campaign_directory(camp, require_partner_info=True)
+        self.assertEqual(res["status"], "PASS")
+
+    def test_require_checksum_manifest_missing_rejected(self):
+        """--require-checksum-manifest fails closed when partner_evidence.sha256 is missing."""
+        camp = make_synthetic_campaign(self.temp_dir, repetitions=20)
+        with self.assertRaises(verify_partner_handover.VerificationError) as ctx:
+            verify_partner_handover.verify_partner_campaign_directory(camp, require_checksum_manifest=True)
+        self.assertIn("missing mandatory checksum manifest", str(ctx.exception).lower())
+
+    def test_require_checksum_manifest_incomplete_coverage_rejected(self):
+        """--require-checksum-manifest fails closed when partner_evidence.sha256 omits required files."""
+        camp = make_synthetic_campaign(self.temp_dir, repetitions=20)
+        sha_f = camp / "partner_evidence.sha256"
+        # Only list campaign_manifest.json, omitting trial evidence
+        m_hash = hashlib.sha256((camp / "campaign_manifest.json").read_bytes()).hexdigest()
+        sha_f.write_text(f"{m_hash}  campaign_manifest.json\n", encoding="utf-8")
+
+        with self.assertRaises(verify_partner_handover.VerificationError) as ctx:
+            verify_partner_handover.verify_partner_campaign_directory(camp, require_checksum_manifest=True)
+        self.assertIn("incomplete", str(ctx.exception).lower())
+
+    def test_require_checksum_manifest_full_coverage_passes(self):
+        """--require-checksum-manifest passes when partner_evidence.sha256 covers all artifacts."""
+        camp = make_synthetic_campaign(self.temp_dir, repetitions=20)
+        sha_f = camp / "partner_evidence.sha256"
+        lines = []
+        for f in sorted(camp.rglob("*")):
+            if f.is_file() and f.name != "partner_evidence.sha256":
+                rel = f.relative_to(camp).as_posix()
+                h = hashlib.sha256(f.read_bytes()).hexdigest()
+                lines.append(f"{h}  {rel}")
+        sha_f.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+        res = verify_partner_handover.verify_partner_campaign_directory(camp, require_checksum_manifest=True)
+        self.assertEqual(res["status"], "PASS")
+        self.assertGreaterEqual(res["checksum_files_checked"], 561)
+
+    def test_pcap_semantic_contradiction_winning_family_rejected(self):
+        """result.json claiming IPv6 when PCAP dissection indicates IPv4 is rejected."""
+        camp = make_synthetic_campaign(self.temp_dir, repetitions=20)
+        mpath = camp / "campaign_manifest.json"
+        data = json.loads(mpath.read_text(encoding="utf-8"))
+        first_tid = data["matrix_slots"][0]["attempts"][0]["trial_id"]
+        res_file = camp / "trials" / first_tid / "result.json"
+        pcap_file = camp / "trials" / first_tid / "capture.pcap"
+        rdata = json.loads(res_file.read_text(encoding="utf-8"))
+        rdata["http_outcome"] = {"winning_address_family": "IPv6", "status_code": 200}
+        res_file.write_text(json.dumps(rdata, indent=2), encoding="utf-8")
+
+        pcap_sha = rdata["capture_metadata"]["pcap_sha256"]
+        verify_partner_handover._DISSECTION_CACHE[(str(pcap_file.resolve()), pcap_sha)] = {
+            "main_http_flow": {"family": "IPv4", "status_code": 200},
+            "ipv4": {}, "ipv6": {}, "metrics": {}
+        }
+
+        with self.assertRaises(verify_partner_handover.VerificationError) as ctx:
+            verify_partner_handover.verify_partner_campaign_directory(camp)
+        self.assertIn("winning family semantic contradiction", str(ctx.exception).lower())
+
+    def test_pcap_semantic_contradiction_http_status_rejected(self):
+        """result.json claiming HTTP 200 when PCAP shows HTTP 500 is rejected."""
+        camp = make_synthetic_campaign(self.temp_dir, repetitions=20)
+        mpath = camp / "campaign_manifest.json"
+        data = json.loads(mpath.read_text(encoding="utf-8"))
+        first_tid = data["matrix_slots"][0]["attempts"][0]["trial_id"]
+        res_file = camp / "trials" / first_tid / "result.json"
+        pcap_file = camp / "trials" / first_tid / "capture.pcap"
+        rdata = json.loads(res_file.read_text(encoding="utf-8"))
+        rdata["http_outcome"] = {"winning_address_family": "IPv6", "status_code": 200}
+        res_file.write_text(json.dumps(rdata, indent=2), encoding="utf-8")
+
+        pcap_sha = rdata["capture_metadata"]["pcap_sha256"]
+        verify_partner_handover._DISSECTION_CACHE[(str(pcap_file.resolve()), pcap_sha)] = {
+            "main_http_flow": {"family": "IPv6", "status_code": 500},
+            "ipv4": {}, "ipv6": {}, "metrics": {}
+        }
+
+        with self.assertRaises(verify_partner_handover.VerificationError) as ctx:
+            verify_partner_handover.verify_partner_campaign_directory(camp)
+        self.assertIn("http status code contradiction", str(ctx.exception).lower())
+
+    def test_pcap_semantic_timing_tolerance_rejected(self):
+        """result.json timing deviating from PCAP dissection by >2.0ms is rejected."""
+        camp = make_synthetic_campaign(self.temp_dir, repetitions=20)
+        mpath = camp / "campaign_manifest.json"
+        data = json.loads(mpath.read_text(encoding="utf-8"))
+        first_tid = data["matrix_slots"][0]["attempts"][0]["trial_id"]
+        res_file = camp / "trials" / first_tid / "result.json"
+        pcap_file = camp / "trials" / first_tid / "capture.pcap"
+        rdata = json.loads(res_file.read_text(encoding="utf-8"))
+        rdata["metrics"] = {"t_connect_ms": 28.5, "t_setup_total_ms": 35.0}
+        res_file.write_text(json.dumps(rdata, indent=2), encoding="utf-8")
+
+        pcap_sha = rdata["capture_metadata"]["pcap_sha256"]
+        verify_partner_handover._DISSECTION_CACHE[(str(pcap_file.resolve()), pcap_sha)] = {
+            "metrics": {"t_connect_ms": 25.0, "t_setup_total_ms": 35.0},
+            "main_http_flow": {}, "ipv4": {}, "ipv6": {}
+        }
+
+        with self.assertRaises(verify_partner_handover.VerificationError) as ctx:
+            verify_partner_handover.verify_partner_campaign_directory(camp)
+        self.assertIn("t_connect_ms discrepancy", str(ctx.exception).lower())
+
+    def test_pcap_semantic_timing_tolerance_boundary_strictly_below(self):
+        """Timing tolerance boundary test: delta = 1.99ms (< 2.0ms) is ACCEPTED."""
+        camp = make_synthetic_campaign(self.temp_dir, repetitions=20)
+        mpath = camp / "campaign_manifest.json"
+        data = json.loads(mpath.read_text(encoding="utf-8"))
+        first_tid = data["matrix_slots"][0]["attempts"][0]["trial_id"]
+        res_file = camp / "trials" / first_tid / "result.json"
+        pcap_file = camp / "trials" / first_tid / "capture.pcap"
+        rdata = json.loads(res_file.read_text(encoding="utf-8"))
+        rdata["metrics"] = {"t_connect_ms": 26.99, "t_setup_total_ms": 35.0}
+        res_file.write_text(json.dumps(rdata, indent=2), encoding="utf-8")
+
+        pcap_sha = rdata["capture_metadata"]["pcap_sha256"]
+        verify_partner_handover._DISSECTION_CACHE[(str(pcap_file.resolve()), pcap_sha)] = {
+            "metrics": {"t_connect_ms": 25.0, "t_setup_total_ms": 35.0},
+            "main_http_flow": {}, "ipv4": {}, "ipv6": {}
+        }
+
+        # Delta is 1.99ms <= 2.0ms -> should pass verification
+        summary = verify_partner_handover.verify_partner_campaign_directory(camp)
+        self.assertEqual(summary["valid_trials_count"], 280)
+        self.assertEqual(summary["status"], "PASS")
+
+    def test_pcap_semantic_timing_tolerance_boundary_exact(self):
+        """Timing tolerance boundary test: delta = 2.00ms (== 2.0ms) is ACCEPTED."""
+        camp = make_synthetic_campaign(self.temp_dir, repetitions=20)
+        mpath = camp / "campaign_manifest.json"
+        data = json.loads(mpath.read_text(encoding="utf-8"))
+        first_tid = data["matrix_slots"][0]["attempts"][0]["trial_id"]
+        res_file = camp / "trials" / first_tid / "result.json"
+        pcap_file = camp / "trials" / first_tid / "capture.pcap"
+        rdata = json.loads(res_file.read_text(encoding="utf-8"))
+        rdata["metrics"] = {"t_connect_ms": 27.00, "t_setup_total_ms": 35.0}
+        res_file.write_text(json.dumps(rdata, indent=2), encoding="utf-8")
+
+        pcap_sha = rdata["capture_metadata"]["pcap_sha256"]
+        verify_partner_handover._DISSECTION_CACHE[(str(pcap_file.resolve()), pcap_sha)] = {
+            "metrics": {"t_connect_ms": 25.0, "t_setup_total_ms": 35.0},
+            "main_http_flow": {}, "ipv4": {}, "ipv6": {}
+        }
+
+        # Delta is exactly 2.00ms <= 2.0ms -> should pass verification
+        summary = verify_partner_handover.verify_partner_campaign_directory(camp)
+        self.assertEqual(summary["valid_trials_count"], 280)
+        self.assertEqual(summary["status"], "PASS")
+
+    def test_pcap_semantic_timing_tolerance_boundary_strictly_above(self):
+        """Timing tolerance boundary test: delta = 2.01ms (> 2.0ms) is REJECTED."""
+        camp = make_synthetic_campaign(self.temp_dir, repetitions=20)
+        mpath = camp / "campaign_manifest.json"
+        data = json.loads(mpath.read_text(encoding="utf-8"))
+        first_tid = data["matrix_slots"][0]["attempts"][0]["trial_id"]
+        res_file = camp / "trials" / first_tid / "result.json"
+        pcap_file = camp / "trials" / first_tid / "capture.pcap"
+        rdata = json.loads(res_file.read_text(encoding="utf-8"))
+        rdata["metrics"] = {"t_connect_ms": 27.01, "t_setup_total_ms": 35.0}
+        res_file.write_text(json.dumps(rdata, indent=2), encoding="utf-8")
+
+        pcap_sha = rdata["capture_metadata"]["pcap_sha256"]
+        verify_partner_handover._DISSECTION_CACHE[(str(pcap_file.resolve()), pcap_sha)] = {
+            "metrics": {"t_connect_ms": 25.0, "t_setup_total_ms": 35.0},
+            "main_http_flow": {}, "ipv4": {}, "ipv6": {}
+        }
+
+        # Delta is 2.01ms > 2.0ms -> must raise VerificationError
+        with self.assertRaises(verify_partner_handover.VerificationError) as ctx:
+            verify_partner_handover.verify_partner_campaign_directory(camp)
+        self.assertIn("t_connect_ms discrepancy", str(ctx.exception).lower())
+        self.assertIn("diff > 2.0ms tolerance", str(ctx.exception).lower())
+
+    def test_s1_impairment_violation_in_pcap_rejected(self):
+        """S1 trial where PCAP shows completed IPv6 TCP handshake is rejected."""
+        camp = make_synthetic_campaign(self.temp_dir, repetitions=20)
+        mpath = camp / "campaign_manifest.json"
+        data = json.loads(mpath.read_text(encoding="utf-8"))
+        s1_slot = next(s for s in data["matrix_slots"] if s["scenario_id"] == "S1")
+        s1_tid = s1_slot["attempts"][0]["trial_id"]
+        res_file = camp / "trials" / s1_tid / "result.json"
+        pcap_file = camp / "trials" / s1_tid / "capture.pcap"
+        rdata = json.loads(res_file.read_text(encoding="utf-8"))
+
+        pcap_sha = rdata["capture_metadata"]["pcap_sha256"]
+        verify_partner_handover._DISSECTION_CACHE[(str(pcap_file.resolve()), pcap_sha)] = {
+            "ipv6": {"tcp_handshake_completed": True},
+            "main_http_flow": {}, "metrics": {}
+        }
+
+        with self.assertRaises(verify_partner_handover.VerificationError) as ctx:
+            verify_partner_handover.verify_partner_campaign_directory(camp)
+        self.assertIn("s1 impairment violation", str(ctx.exception).lower())
+
+    def test_s2_impairment_violation_in_pcap_rejected(self):
+        """S2 trial where PCAP shows completed IPv6 TCP handshake is rejected."""
+        camp = make_synthetic_campaign(self.temp_dir, repetitions=20)
+        mpath = camp / "campaign_manifest.json"
+        data = json.loads(mpath.read_text(encoding="utf-8"))
+        s2_slot = next(s for s in data["matrix_slots"] if s["scenario_id"] == "S2")
+        s2_tid = s2_slot["attempts"][0]["trial_id"]
+        res_file = camp / "trials" / s2_tid / "result.json"
+        pcap_file = camp / "trials" / s2_tid / "capture.pcap"
+        rdata = json.loads(res_file.read_text(encoding="utf-8"))
+
+        pcap_sha = rdata["capture_metadata"]["pcap_sha256"]
+        verify_partner_handover._DISSECTION_CACHE[(str(pcap_file.resolve()), pcap_sha)] = {
+            "ipv6": {"tcp_handshake_completed": True},
+            "main_http_flow": {}, "metrics": {}
+        }
+
+        with self.assertRaises(verify_partner_handover.VerificationError) as ctx:
+            verify_partner_handover.verify_partner_campaign_directory(camp)
+        self.assertIn("s2 impairment violation", str(ctx.exception).lower())
+
+    def test_s6_impairment_violation_in_pcap_rejected(self):
+        """S6 trial where AAAA response was not delayed relative to A is rejected."""
+        camp = make_synthetic_campaign(self.temp_dir, repetitions=20)
+        mpath = camp / "campaign_manifest.json"
+        data = json.loads(mpath.read_text(encoding="utf-8"))
+        s6_slot = next(s for s in data["matrix_slots"] if s["scenario_id"] == "S6")
+        s6_tid = s6_slot["attempts"][0]["trial_id"]
+        res_file = camp / "trials" / s6_tid / "result.json"
+        pcap_file = camp / "trials" / s6_tid / "capture.pcap"
+        rdata = json.loads(res_file.read_text(encoding="utf-8"))
+
+        pcap_sha = rdata["capture_metadata"]["pcap_sha256"]
+        verify_partner_handover._DISSECTION_CACHE[(str(pcap_file.resolve()), pcap_sha)] = {
+            "dns_metrics": {"dns_latency_a_ms": 20.0, "dns_latency_aaaa_ms": 25.0},
+            "main_http_flow": {}, "metrics": {}
+        }
+
+        with self.assertRaises(verify_partner_handover.VerificationError) as ctx:
+            verify_partner_handover.verify_partner_campaign_directory(camp)
+        self.assertIn("s6 impairment violation", str(ctx.exception).lower())
+
+    def test_s0_valid_ipv4_winner_accepted(self):
+        """
+        Scientific Correction (Issue B):
+        S0 trial where browser genuine observable result selects IPv4 on healthy baseline
+        is accepted as a valid observation, NOT rejected as an experimental invalidity.
+        """
+        camp = make_synthetic_campaign(self.temp_dir, repetitions=20)
+        mpath = camp / "campaign_manifest.json"
+        data = json.loads(mpath.read_text(encoding="utf-8"))
+        s0_slot = next(s for s in data["matrix_slots"] if s["scenario_id"] == "S0")
+        s0_tid = s0_slot["attempts"][0]["trial_id"]
+        res_file = camp / "trials" / s0_tid / "result.json"
+        pcap_file = camp / "trials" / s0_tid / "capture.pcap"
+        rdata = json.loads(res_file.read_text(encoding="utf-8"))
+        rdata["http_outcome"] = {"winning_address_family": "IPv4", "status_code": 200}
+        rdata["metrics"] = {"t_connect_ms": 20.0, "t_setup_total_ms": 25.0}
+        res_file.write_text(json.dumps(rdata, indent=2), encoding="utf-8")
+
+        pcap_sha = rdata["capture_metadata"]["pcap_sha256"]
+        verify_partner_handover._DISSECTION_CACHE[(str(pcap_file.resolve()), pcap_sha)] = {
+            "main_http_flow": {"family": "IPv4", "status_code": 200},
+            "metrics": {"t_connect_ms": 20.0, "t_setup_total_ms": 25.0},
+            "ipv4": {"tcp_handshake_completed": True},
+            "ipv6": {"tcp_handshake_completed": False}
+        }
+
+        # Must verify without error (valid live observation)
+        summary = verify_partner_handover.verify_partner_campaign_directory(camp)
+        self.assertEqual(summary["valid_trials_count"], 280)
+        self.assertEqual(summary["status"], "PASS")
+
+    def test_s0_impairment_violation_excessive_latency_rejected(self):
+        """S0 trial where PCAP shows t_connect_ms > 100ms on 20ms link is rejected as physical experiment violation."""
+        camp = make_synthetic_campaign(self.temp_dir, repetitions=20)
+        mpath = camp / "campaign_manifest.json"
+        data = json.loads(mpath.read_text(encoding="utf-8"))
+        s0_slot = next(s for s in data["matrix_slots"] if s["scenario_id"] == "S0")
+        s0_tid = s0_slot["attempts"][0]["trial_id"]
+        res_file = camp / "trials" / s0_tid / "result.json"
+        pcap_file = camp / "trials" / s0_tid / "capture.pcap"
+        rdata = json.loads(res_file.read_text(encoding="utf-8"))
+
+        pcap_sha = rdata["capture_metadata"]["pcap_sha256"]
+        verify_partner_handover._DISSECTION_CACHE[(str(pcap_file.resolve()), pcap_sha)] = {
+            "main_http_flow": {"family": "IPv6", "status_code": 200},
+            "metrics": {"t_connect_ms": 150.0, "t_setup_total_ms": 155.0},
+            "ipv4": {}, "ipv6": {"tcp_handshake_completed": True}
+        }
+
+        with self.assertRaises(verify_partner_handover.VerificationError) as ctx:
+            verify_partner_handover.verify_partner_campaign_directory(camp)
+        self.assertIn("s0 impairment violation", str(ctx.exception).lower())
+
+    def test_s3_impairment_violation_in_pcap_rejected(self):
+        """S3 trial where PCAP shows IPv6 connect latency < 100ms on 150ms link is rejected."""
+        camp = make_synthetic_campaign(self.temp_dir, repetitions=20)
+        mpath = camp / "campaign_manifest.json"
+        data = json.loads(mpath.read_text(encoding="utf-8"))
+        s3_slot = next(s for s in data["matrix_slots"] if s["scenario_id"] == "S3")
+        s3_tid = s3_slot["attempts"][0]["trial_id"]
+        res_file = camp / "trials" / s3_tid / "result.json"
+        pcap_file = camp / "trials" / s3_tid / "capture.pcap"
+        rdata = json.loads(res_file.read_text(encoding="utf-8"))
+
+        pcap_sha = rdata["capture_metadata"]["pcap_sha256"]
+        verify_partner_handover._DISSECTION_CACHE[(str(pcap_file.resolve()), pcap_sha)] = {
+            "main_http_flow": {"family": "IPv6", "status_code": 200},
+            "metrics": {"t_connect_ms": 25.0, "t_setup_total_ms": 30.0},
+            "ipv4": {}, "ipv6": {"tcp_handshake_completed": True}
+        }
+
+        with self.assertRaises(verify_partner_handover.VerificationError) as ctx:
+            verify_partner_handover.verify_partner_campaign_directory(camp)
+        self.assertIn("s3 impairment violation", str(ctx.exception).lower())
+
+    def test_s4_impairment_violation_in_pcap_rejected(self):
+        """S4 trial where PCAP shows IPv4 fallback connect latency > 150ms on 20ms IPv4 link is rejected."""
+        camp = make_synthetic_campaign(self.temp_dir, repetitions=20)
+        mpath = camp / "campaign_manifest.json"
+        data = json.loads(mpath.read_text(encoding="utf-8"))
+        s4_slot = next(s for s in data["matrix_slots"] if s["scenario_id"] == "S4")
+        s4_tid = s4_slot["attempts"][0]["trial_id"]
+        res_file = camp / "trials" / s4_tid / "result.json"
+        pcap_file = camp / "trials" / s4_tid / "capture.pcap"
+        rdata = json.loads(res_file.read_text(encoding="utf-8"))
+
+        pcap_sha = rdata["capture_metadata"]["pcap_sha256"]
+        verify_partner_handover._DISSECTION_CACHE[(str(pcap_file.resolve()), pcap_sha)] = {
+            "main_http_flow": {"family": "IPv4", "status_code": 200},
+            "metrics": {"t_connect_ms": 200.0, "t_setup_total_ms": 450.0},
+            "ipv4": {"tcp_handshake_completed": True}, "ipv6": {}
+        }
+
+        with self.assertRaises(verify_partner_handover.VerificationError) as ctx:
+            verify_partner_handover.verify_partner_campaign_directory(camp)
+        self.assertIn("s4 impairment violation", str(ctx.exception).lower())
+
+    def test_s5_impairment_violation_in_pcap_rejected(self):
+        """S5 trial claiming valid HTTP 200 but neither IPv6 nor IPv4 handshake completed is rejected."""
+        camp = make_synthetic_campaign(self.temp_dir, repetitions=20)
+        mpath = camp / "campaign_manifest.json"
+        data = json.loads(mpath.read_text(encoding="utf-8"))
+        s5_slot = next(s for s in data["matrix_slots"] if s["scenario_id"] == "S5")
+        s5_tid = s5_slot["attempts"][0]["trial_id"]
+        res_file = camp / "trials" / s5_tid / "result.json"
+        pcap_file = camp / "trials" / s5_tid / "capture.pcap"
+        rdata = json.loads(res_file.read_text(encoding="utf-8"))
+
+        pcap_sha = rdata["capture_metadata"]["pcap_sha256"]
+        verify_partner_handover._DISSECTION_CACHE[(str(pcap_file.resolve()), pcap_sha)] = {
+            "main_http_flow": {"family": "IPv6", "status_code": 200},
+            "http_status_code": 200,
+            "metrics": {"t_connect_ms": 25.0, "t_setup_total_ms": 30.0},
+            "ipv4": {"tcp_handshake_completed": False},
+            "ipv6": {"tcp_handshake_completed": False}
+        }
+
+        with self.assertRaises(verify_partner_handover.VerificationError) as ctx:
+            verify_partner_handover.verify_partner_campaign_directory(camp)
+        self.assertIn("s5 impairment violation", str(ctx.exception).lower())
 
 
 if __name__ == "__main__":

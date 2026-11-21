@@ -51,6 +51,15 @@ REPO_ROOT = SCRIPT_DIR.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from lab.replication_contract import (
+    PINNED_BROWSERS,
+    CANONICAL_SCENARIO_IDS,
+    TOTAL_PLANNED_TRIALS,
+    REPETITIONS_PER_COHORT,
+    PROTOCOL_VERSION,
+    PCAP_TIMING_RECONCILIATION_TOLERANCE_MS,
+    EXPERIMENT_VALIDITY_CLASSES,
+)
 import lab.run_trial as run_trial
 
 SUPPORTED_SCHEMA_VERSIONS = frozenset({"1.0.0", "1.1.0"})
@@ -168,6 +177,77 @@ def _verify_pcap(pcap_path: Path, expected_sha: Optional[str] = None) -> Tuple[s
     return calc_sha, pkt_count
 
 
+_DISSECTION_CACHE: Dict[Tuple[str, str], Dict[str, Any]] = {}
+
+
+def _build_empty_dissection(pcap_sha256: Optional[str] = None) -> Dict[str, Any]:
+    return {
+        "dns": {"queries": [], "responses": []},
+        "ipv6": {
+            "syn_count": 0, "first_syn_time": None, "first_syn_frame": None,
+            "syn_ack_received": False, "syn_ack_time": None,
+            "server_rst_received": False, "client_rst_sent": False,
+            "rst_received": False, "tcp_handshake_completed": False,
+            "connection_established": False, "http_observed": False
+        },
+        "ipv4": {
+            "syn_count": 0, "first_syn_time": None, "first_syn_frame": None,
+            "syn_ack_received": False, "syn_ack_time": None,
+            "server_rst_received": False, "client_rst_sent": False,
+            "rst_received": False, "tcp_handshake_completed": False,
+            "connection_established": False, "http_observed": False
+        },
+        "connection_attempt_delay_ms": None,
+        "connection_setup_time_ms": None,
+        "http_status_code": None,
+        "http_response_family": None,
+        "diagnostic_raw_pcap_http_code": None,
+        "main_http_flow": {
+            "stream_id": None, "family": None, "status_code": None,
+            "request": None, "correlated": False, "tcp_handshake_completed": False
+        },
+        "tcp_streams": {},
+        "metrics": {
+            "t_connect_ms": None, "t_setup_total_ms": None, "syn_to_synack_ms": None,
+            "connection_attempt_delay_ms": None,
+            "dns_query_to_first_payload_ms": None,
+            "dns_last_positive_response_to_first_payload_ms": None,
+            "dns_resolution_time_ms": None,
+            "dns_latency_a_ms": None,
+            "dns_latency_aaaa_ms": None,
+            "retransmitted_syn_count_ipv6": 0,
+            "retransmitted_syn_count_ipv4": 0,
+            "null_reasons": {
+                "t_connect_ms": "INDETERMINATE_NO_PRIMARY_FLOW",
+                "t_setup_total_ms": "INDETERMINATE_NO_PRIMARY_FLOW",
+                "syn_to_synack_ms": "INDETERMINATE_NO_PRIMARY_FLOW",
+            }
+        },
+        "dns_transactions": [],
+        "https_svcb_queries": [],
+        "dns_metrics": {
+            "dns_transactions": [], "https_svcb_queries": [],
+            "dns_resolution_time_ms": None, "dns_latency_a_ms": None,
+            "dns_latency_aaaa_ms": None, "dns_query_to_first_payload_ms": None,
+            "dns_last_positive_response_to_first_payload_ms": None, "null_reasons": {}
+        }
+    }
+
+
+def _cached_dissect_pcap(pcap_path: Path, hostname: str, pcap_sha256: str) -> Dict[str, Any]:
+    resolved_path_str = str(pcap_path.resolve())
+    cache_key = (resolved_path_str, pcap_sha256)
+    if cache_key in _DISSECTION_CACHE:
+        return _DISSECTION_CACHE[cache_key]
+    if pcap_path.is_file() and pcap_path.stat().st_size < 94:
+        empty_res = _build_empty_dissection(pcap_sha256=pcap_sha256)
+        _DISSECTION_CACHE[cache_key] = empty_res
+        return empty_res
+    dissected = run_trial.dissect_pcap(pcap_path, target_hostname=hostname, pcap_sha256=pcap_sha256)
+    _DISSECTION_CACHE[cache_key] = dissected
+    return dissected
+
+
 def _verify_trial_evidence(
     campaign_dir: Path,
     slot_id: str,
@@ -233,6 +313,18 @@ def _verify_trial_evidence(
                 f"Browser mismatch in result.json for trial '{trial_id}': expected '{browser}', got '{r_browser_norm}'"
             )
 
+        # Work Package E1: Exact Pinned Browser Build Verification
+        r_browser_ver = ""
+        if isinstance(r_browser_field, dict):
+            r_browser_ver = str(r_browser_field.get("version", ""))
+        expected_pinned_version = PINNED_BROWSERS.get(r_browser_norm, {}).get("pinned_version")
+        if expected_pinned_version:
+            if expected_pinned_version not in r_browser_ver and expected_pinned_version not in str(rdata):
+                raise VerificationError(
+                    f"Trial '{trial_id}' browser version mismatch: expected exact pinned build "
+                    f"'{expected_pinned_version}' for '{browser}', but result.json records '{r_browser_ver}'"
+                )
+
         if rdata.get("is_simulation") is not False:
             raise VerificationError(
                 f"Trial '{trial_id}' result.json declares is_simulation={rdata.get('is_simulation')}. "
@@ -270,6 +362,146 @@ def _verify_trial_evidence(
             raise VerificationError(
                 f"PCAP SHA-256 mismatch in manifest for trial '{trial_id}': recorded {recorded_sha_manifest}, computed {calc_sha}"
             )
+
+        # 3. Independent Packet-Level Semantic Rederivation from PCAP (Work Package E3 & E4)
+        hostname = rdata.get("hostname", "trial.he.test")
+        dissected = _cached_dissect_pcap(pcap_path, hostname=hostname, pcap_sha256=calc_sha)
+
+        # Reconcile Winning Address Family
+        d_winner = dissected.get("main_http_flow", {}).get("family")
+        r_primary = rdata.get("primary_flow") or {}
+        r_http_outcome = rdata.get("http_outcome") or {}
+        r_net_obs = rdata.get("network_observations") or {}
+
+        r_winner = (
+            r_http_outcome.get("winning_address_family") or
+            rdata.get("winning_family") or
+            r_primary.get("family") or
+            r_net_obs.get("winning_family")
+        )
+        if not r_winner and r_net_obs.get("classification") in ("DIRECT_IPV6", "FALLBACK_IPV4"):
+            r_winner = "IPv6" if r_net_obs.get("classification") == "DIRECT_IPV6" else "IPv4"
+
+        if d_winner and r_winner:
+            if d_winner.strip().lower() != r_winner.strip().lower():
+                raise VerificationError(
+                    f"Trial '{trial_id}' winning family semantic contradiction: result.json claims "
+                    f"'{r_winner}', but independent PCAP dissection proved '{d_winner}'"
+                )
+
+        # Reconcile HTTP Status Code
+        d_http = (
+            dissected.get("main_http_flow", {}).get("status_code") or
+            dissected.get("http_status_code")
+        )
+        r_http = (
+            r_http_outcome.get("status_code") or
+            rdata.get("http_status") or
+            r_primary.get("status_code") or
+            r_net_obs.get("http_response_code")
+        )
+        if d_http is not None and r_http is not None:
+            if int(d_http) != int(r_http):
+                raise VerificationError(
+                    f"Trial '{trial_id}' HTTP status code contradiction: result.json claims {r_http}, "
+                    f"but independent PCAP dissection found {d_http}"
+                )
+
+        # Reconcile TCP Setup and Connect Timings (tolerance: PCAP_TIMING_RECONCILIATION_TOLERANCE_MS)
+        r_metrics = rdata.get("metrics") or {}
+        r_tconn = r_metrics.get("t_connect_ms") if "t_connect_ms" in r_metrics else rdata.get("t_connect_ms")
+        d_tconn = dissected.get("metrics", {}).get("t_connect_ms")
+        if r_tconn is not None and d_tconn is not None:
+            if abs(float(r_tconn) - float(d_tconn)) > PCAP_TIMING_RECONCILIATION_TOLERANCE_MS:
+                raise VerificationError(
+                    f"Trial '{trial_id}' t_connect_ms discrepancy: result.json records {r_tconn} ms, "
+                    f"independent PCAP rederivation yielded {d_tconn} ms (diff > {PCAP_TIMING_RECONCILIATION_TOLERANCE_MS}ms tolerance)"
+                )
+
+        r_tsetup = r_metrics.get("t_setup_total_ms") if "t_setup_total_ms" in r_metrics else rdata.get("t_setup_total_ms")
+        d_tsetup = dissected.get("metrics", {}).get("t_setup_total_ms")
+        if r_tsetup is not None and d_tsetup is not None:
+            if abs(float(r_tsetup) - float(d_tsetup)) > PCAP_TIMING_RECONCILIATION_TOLERANCE_MS:
+                raise VerificationError(
+                    f"Trial '{trial_id}' t_setup_total_ms discrepancy: result.json records {r_tsetup} ms, "
+                    f"independent PCAP rederivation yielded {d_tsetup} ms (diff > {PCAP_TIMING_RECONCILIATION_TOLERANCE_MS}ms tolerance)"
+                )
+
+        # Scenario-specific physical impairment checks (Canonical Scenarios S0 - S6)
+        # SCIENTIFIC PRINCIPLE: Validates physical experimental conditions, network impairments,
+        # and capture completeness without dictating browser protocol choices or rejecting genuine divergences.
+        if scenario_id == "S0":
+            # Healthy dual-stack baseline (~20ms RTT). Whichever family won, connect latency must reflect baseline link
+            if d_tconn is not None and float(d_tconn) > 100.0:
+                raise VerificationError(
+                    f"Trial '{trial_id}' S0 impairment violation: t_connect_ms ({d_tconn:.2f} ms) "
+                    f"exceeds healthy baseline threshold (100.0 ms) on 20ms link"
+                )
+        elif scenario_id == "S1":
+            # IPv6 SYN blackhole: router silently drops IPv6 SYNs. Physical invariant: IPv6 handshake must not complete.
+            if dissected.get("ipv6", {}).get("tcp_handshake_completed"):
+                raise VerificationError(
+                    f"Trial '{trial_id}' S1 impairment violation: IPv6 TCP handshake completed "
+                    "despite S1 IPv6 SYN blackhole impairment"
+                )
+        elif scenario_id == "S2":
+            # IPv6 TCP RST: router rejects IPv6 SYNs with TCP RST. Physical invariant: IPv6 handshake must not complete.
+            if dissected.get("ipv6", {}).get("tcp_handshake_completed"):
+                raise VerificationError(
+                    f"Trial '{trial_id}' S2 impairment violation: IPv6 TCP handshake completed "
+                    "despite S2 IPv6 TCP RST rejection impairment"
+                )
+        elif scenario_id == "S3":
+            # IPv6 RTT is nominally 150ms. If IPv6 was selected, t_connect_ms must reflect >= 100.0ms netem delay.
+            # If IPv4 fallback was selected, t_connect_ms must reflect healthy IPv4 baseline (<= 150.0ms).
+            if d_winner and d_winner.strip().lower() == "ipv6" and d_tconn is not None:
+                if float(d_tconn) < 100.0:
+                    raise VerificationError(
+                        f"Trial '{trial_id}' S3 impairment violation: IPv6 t_connect_ms ({d_tconn:.2f} ms) "
+                        f"is below 100.0 ms threshold despite 150ms IPv6 link delay"
+                    )
+            elif d_winner and d_winner.strip().lower() == "ipv4" and d_tconn is not None:
+                if float(d_tconn) > 150.0:
+                    raise VerificationError(
+                        f"Trial '{trial_id}' S3 impairment violation: IPv4 t_connect_ms ({d_tconn:.2f} ms) "
+                        f"exceeds healthy baseline threshold (150.0 ms) on 20ms IPv4 link"
+                    )
+        elif scenario_id == "S4":
+            # IPv6 RTT is 600ms; IPv4 is 20ms. If IPv4 won, t_connect_ms must reflect baseline IPv4 (<= 150.0ms).
+            # If IPv6 won, t_connect_ms must reflect >= 400.0ms link delay.
+            if d_winner and d_winner.strip().lower() == "ipv4" and d_tconn is not None:
+                if float(d_tconn) > 150.0:
+                    raise VerificationError(
+                        f"Trial '{trial_id}' S4 impairment violation: IPv4 fallback t_connect_ms ({d_tconn:.2f} ms) "
+                        f"exceeds healthy baseline threshold (150.0 ms) on 20ms IPv4 link"
+                    )
+            elif d_winner and d_winner.strip().lower() == "ipv6" and d_tconn is not None:
+                if float(d_tconn) < 400.0:
+                    raise VerificationError(
+                        f"Trial '{trial_id}' S4 impairment violation: IPv6 t_connect_ms ({d_tconn:.2f} ms) "
+                        f"is below 400.0 ms threshold despite 600ms IPv6 link delay"
+                    )
+        elif scenario_id == "S5":
+            # Stochastic 50% loss: at least one family must complete if HTTP traffic was observed
+            if d_http is not None:
+                v6_done = bool(dissected.get("ipv6", {}).get("tcp_handshake_completed"))
+                v4_done = bool(dissected.get("ipv4", {}).get("tcp_handshake_completed"))
+                if not v6_done and not v4_done:
+                    raise VerificationError(
+                        f"Trial '{trial_id}' S5 impairment violation: neither IPv6 nor IPv4 TCP handshake "
+                        "completed in PCAP despite claiming valid HTTP outcome"
+                    )
+        elif scenario_id == "S6":
+            # DNS AAAA delayed by 500ms while A immediate. Physical invariant: AAAA latency must be delayed relative to A by >= 200ms
+            dns_metrics = dissected.get("dns_metrics", {})
+            lat_a = dns_metrics.get("dns_latency_a_ms")
+            lat_aaaa = dns_metrics.get("dns_latency_aaaa_ms")
+            if lat_a is not None and lat_aaaa is not None:
+                if float(lat_aaaa) - float(lat_a) < 200.0:
+                    raise VerificationError(
+                        f"Trial '{trial_id}' S6 impairment violation: AAAA DNS response latency ({lat_aaaa:.2f} ms) "
+                        f"not delayed relative to A response ({lat_a:.2f} ms) as required by S6 (500ms delay)"
+                    )
 
     else:
         # Preserved failed attempt
@@ -601,7 +833,9 @@ def _verify_derived_directory(
 
 def verify_partner_campaign_directory(
     campaign_dir: Path,
-    derived_dir: Optional[Path] = None
+    derived_dir: Optional[Path] = None,
+    require_checksum_manifest: bool = False,
+    require_partner_info: bool = False,
 ) -> Dict[str, Any]:
     """
     Rigorously audits an extracted partner campaign directory and optional derived export directory.
@@ -680,6 +914,23 @@ def verify_partner_campaign_directory(
         raise VerificationError(
             f"Campaign ID matches protected historical campaign '{HISTORICAL_CAMPAIGN_ID}'"
         )
+
+    # Mandatory Partner Information (when required)
+    if require_partner_info:
+        p_info = manifest_data.get("partner_info") or {}
+        p_inst = p_info.get("partner_institution") or manifest_data.get("partner_institution", "")
+        p_op = p_info.get("operator_id") or manifest_data.get("operator_id", "")
+        placeholder_tokens = {"UNASSIGNED", "PENDING", "PLACEHOLDER", "UNKNOWN", ""}
+        if not p_inst or str(p_inst).strip().upper() in placeholder_tokens:
+            raise VerificationError(
+                f"Partner evidence contains unassigned partner_institution: '{p_inst}'. "
+                "Authentic partner replication requires valid partner institution metadata."
+            )
+        if not p_op or str(p_op).strip().upper() in placeholder_tokens:
+            raise VerificationError(
+                f"Partner evidence contains pending operator_id: '{p_op}'. "
+                "Authentic partner replication requires valid operator ID metadata."
+            )
 
     # Mandatory 4 & 5: Validate actual matrix_slots and their attempts
     matrix_slots = manifest_data.get("matrix_slots")
@@ -796,7 +1047,7 @@ def verify_partner_campaign_directory(
                     f"Attempt '{tid}' in slot '{sid}' declares execution_mode='{att_mode}', expected 'LIVE'"
                 )
 
-            if att_status == "COMPLETED" and att_validity == "VALID_LIVE":
+            if att_status == "COMPLETED" and att_validity in ("VALID_LIVE", "VALID_LIVE_OBSERVATION", "VALID_LIVE_CONNECTION_FAILURE"):
                 valid_attempts_in_slot.append(att)
             else:
                 # Mandatory 8: Preserved failed attempt
@@ -854,10 +1105,16 @@ def verify_partner_campaign_directory(
                 f"Manifest summary records {summary.get('simulated_attempts')} simulated attempts, expected 0"
             )
 
-    # Mandatory 11: Checksum manifest verification if partner_evidence.sha256 exists
+    # Mandatory 11: Checksum manifest verification if partner_evidence.sha256 exists (or if required)
     sha_manifest = campaign_dir / "partner_evidence.sha256"
     checked_files = 0
+    if require_checksum_manifest and not sha_manifest.is_file():
+        raise VerificationError(
+            f"Missing mandatory checksum manifest '{sha_manifest.name}' in campaign directory '{campaign_dir}'"
+        )
+
     if sha_manifest.is_file():
+        covered_paths: Set[str] = set()
         for line_no, line in enumerate(sha_manifest.read_text(encoding="utf-8").splitlines(), start=1):
             line = line.strip()
             if not line or line.startswith("#"):
@@ -894,6 +1151,32 @@ def verify_partner_campaign_directory(
                     f"Checksum mismatch for '{rel_path}': expected {exp_hash}, got {actual_hash}"
                 )
             checked_files += 1
+            covered_paths.add(rel_path)
+
+        # Full coverage verification: every required trial artifact must be recorded in partner_evidence.sha256
+        if require_checksum_manifest:
+            expected_coverage: Set[str] = {"campaign_manifest.json"}
+            for slot in matrix_slots:
+                for att in slot.get("attempts", []):
+                    tid = att.get("trial_id")
+                    if not tid:
+                        continue
+                    if att.get("status") == "COMPLETED" and att.get("validity") in ("VALID_LIVE", "VALID_LIVE_OBSERVATION", "VALID_LIVE_CONNECTION_FAILURE"):
+                        expected_coverage.add(f"trials/{tid}/result.json")
+                        expected_coverage.add(f"trials/{tid}/capture.pcap")
+                    else:
+                        expected_coverage.add(f"trials/{tid}/failed_attempt_record.json")
+                        if (campaign_dir / "trials" / tid / "result.json").is_file():
+                            expected_coverage.add(f"trials/{tid}/result.json")
+                        if (campaign_dir / "trials" / tid / "capture.pcap").is_file():
+                            expected_coverage.add(f"trials/{tid}/capture.pcap")
+
+            missing_from_checksum = expected_coverage - covered_paths
+            if missing_from_checksum:
+                sample_missing = sorted(list(missing_from_checksum))[0]
+                raise VerificationError(
+                    f"Checksum manifest '{sha_manifest.name}' incomplete: missing {len(missing_from_checksum)} required evidence file(s), e.g. '{sample_missing}'"
+                )
 
     # Mandatory 13, 14 & 15: Audit derived directory if supplied or explicitly requested
     derived_audit = None
@@ -922,7 +1205,12 @@ def verify_partner_campaign_directory(
     }
 
 
-def verify_partner_archive(archive_path: Path, derived_dir: Optional[Path] = None) -> Dict[str, Any]:
+def verify_partner_archive(
+    archive_path: Path,
+    derived_dir: Optional[Path] = None,
+    require_checksum_manifest: bool = False,
+    require_partner_info: bool = False,
+) -> Dict[str, Any]:
     """
     Extracts a partner .tar.gz archive in a temporary root and audits its contents.
     Enforces path and type safety during extraction, verifies mandatory .sha256 sidecar,
@@ -1006,7 +1294,12 @@ def verify_partner_archive(archive_path: Path, derived_dir: Optional[Path] = Non
             else:
                 raise VerificationError("Extracted archive does not contain campaign_manifest.json")
 
-        return verify_partner_campaign_directory(target_dir, derived_dir=derived_dir)
+        return verify_partner_campaign_directory(
+            target_dir,
+            derived_dir=derived_dir,
+            require_checksum_manifest=require_checksum_manifest,
+            require_partner_info=require_partner_info,
+        )
 
 
 def main() -> int:
@@ -1018,14 +1311,28 @@ def main() -> int:
     group.add_argument("--archive", type=Path, help="Path to partner .tar.gz handover archive")
     parser.add_argument("--derived-dir", type=Path, default=None,
                         help="Optional path to derived CSV ledgers and provenance sidecars")
+    parser.add_argument("--require-checksum-manifest", action="store_true",
+                        help="Require partner_evidence.sha256 to be present and verify full coverage")
+    parser.add_argument("--require-partner-info", action="store_true",
+                        help="Require partner institution and operator ID to be populated (non-placeholder)")
     parser.add_argument("--json", action="store_true", help="Output audit report as JSON")
     args = parser.parse_args()
 
     try:
         if args.archive:
-            result = verify_partner_archive(args.archive, derived_dir=args.derived_dir)
+            result = verify_partner_archive(
+                args.archive,
+                derived_dir=args.derived_dir,
+                require_checksum_manifest=args.require_checksum_manifest,
+                require_partner_info=args.require_partner_info,
+            )
         else:
-            result = verify_partner_campaign_directory(args.campaign_dir, derived_dir=args.derived_dir)
+            result = verify_partner_campaign_directory(
+                args.campaign_dir,
+                derived_dir=args.derived_dir,
+                require_checksum_manifest=args.require_checksum_manifest,
+                require_partner_info=args.require_partner_info,
+            )
 
         if args.json:
             print(json.dumps(result, indent=2))

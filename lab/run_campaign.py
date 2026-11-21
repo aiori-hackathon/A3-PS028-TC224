@@ -50,6 +50,14 @@ if str(REPO_ROOT) not in sys.path:
 
 import lab.concurrency as concurrency
 import lab.impair as impair
+import lab.partner_preflight as partner_preflight
+from lab.replication_contract import (
+    PROTOCOL_VERSION,
+    PINNED_BROWSERS,
+    CANONICAL_SCENARIO_IDS,
+    TOTAL_PLANNED_TRIALS,
+    REPETITIONS_PER_COHORT,
+)
 import lab.run_trial as run_trial
 
 SCHEMA_VERSION = "1.1.0"
@@ -603,7 +611,9 @@ class CampaignManifest:
         created_at: Optional[str] = None,
         updated_at: Optional[str] = None,
         completed_at: Optional[str] = None,
-        halt_reason: Optional[str] = None
+        halt_reason: Optional[str] = None,
+        strict_partner: bool = False,
+        protocol_version: str = PROTOCOL_VERSION
     ):
         self.campaign_id = campaign_id
         self.output_dir = Path(output_dir).resolve()
@@ -617,6 +627,8 @@ class CampaignManifest:
         self.updated_at = updated_at or self.created_at
         self.completed_at = completed_at
         self.halt_reason = halt_reason
+        self.strict_partner = strict_partner
+        self.protocol_version = protocol_version
         self.manifest_path = self.output_dir / MANIFEST_FILENAME
         self.lock_path = self.output_dir / LOCK_FILENAME
 
@@ -649,11 +661,13 @@ class CampaignManifest:
         self.updated_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
         return {
             "schema_version": SCHEMA_VERSION,
+            "protocol_version": self.protocol_version,
             "campaign_id": self.campaign_id,
             "status": self.status,
             "halt_reason": self.halt_reason,
             "execution_mode": "SIMULATION" if self.is_simulation else "LIVE",
             "is_simulation": self.is_simulation,
+            "strict_partner": self.strict_partner,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "completed_at": self.completed_at,
@@ -715,7 +729,9 @@ class CampaignManifest:
             created_at=data.get("created_at"),
             updated_at=data.get("updated_at"),
             completed_at=data.get("completed_at"),
-            halt_reason=data.get("summary", {}).get("halt_reason")
+            halt_reason=data.get("summary", {}).get("halt_reason"),
+            strict_partner=data.get("strict_partner", False),
+            protocol_version=data.get("protocol_version", PROTOCOL_VERSION)
         )
 
 
@@ -1016,12 +1032,36 @@ class CampaignRunner:
         lock_timeout: float = 10.0,
         exit_on_interruption: bool = True,
         coordinator: Optional[InterruptionCoordinator] = None,
-        browser_cmd_override: Optional[List[str]] = None
+        browser_cmd_override: Optional[List[str]] = None,
+        strict_partner: bool = False
     ):
+        self.strict_partner = strict_partner
         self.scenarios = [s.upper() for s in (scenarios or DEFAULT_SCENARIOS)]
         for sc in self.scenarios:
             if sc not in run_trial.ALLOWED_SCENARIOS:
                 raise CampaignConfigError(f"Invalid scenario '{sc}'. Allowed: {run_trial.ALLOWED_SCENARIOS}")
+
+        if self.strict_partner:
+            if is_simulation:
+                raise CampaignConfigError(
+                    "Strict partner replication mode forbids simulation mode (--simulation). "
+                    "Authentic live measurements required."
+                )
+            if set(self.scenarios) != set(CANONICAL_SCENARIO_IDS) or len(self.scenarios) != 7:
+                raise CampaignConfigError(
+                    f"Strict partner replication requires exactly 7 canonical scenarios {CANONICAL_SCENARIO_IDS}, "
+                    f"got {self.scenarios}"
+                )
+            if repetitions != REPETITIONS_PER_COHORT:
+                raise CampaignConfigError(
+                    f"Strict partner replication requires exactly {REPETITIONS_PER_COHORT} repetitions per cohort "
+                    f"({TOTAL_PLANNED_TRIALS} total planned trials), got {repetitions}"
+                )
+            if browsers is not None and (set(browsers) != {"google-chrome", "firefox"} or len(browsers) != 2):
+                raise CampaignConfigError(
+                    f"Strict partner replication requires both canonical browsers ['google-chrome', 'firefox'], "
+                    f"got {browsers}"
+                )
 
         if repetitions < 1:
             raise CampaignConfigError(f"Repetitions must be >= 1, got {repetitions}")
@@ -1090,6 +1130,32 @@ class CampaignRunner:
 
     def _resolve_browsers(self, requested: Optional[List[str]], is_simulation: bool) -> List[str]:
         """Resolves and validates available browsers."""
+        if self.strict_partner:
+            canonical_browsers = ["google-chrome", "firefox"]
+            target_list = requested or canonical_browsers
+            if set(target_list) != set(canonical_browsers) or len(target_list) != 2:
+                raise CampaignConfigError(
+                    f"Strict partner replication mode requires both canonical browsers {canonical_browsers}, "
+                    f"got {target_list}"
+                )
+            # Enforce exact pinned browser builds via partner_preflight BEFORE initialization
+            browsers_info = partner_preflight.get_browser_runtimes()
+            if not browsers_info.get("all_exact_match", False):
+                err_msgs = []
+                for bname, bdata in browsers_info.get("browsers", {}).items():
+                    if bdata.get("status") != "READY":
+                        err_msgs.append(
+                            f"{bname}: status={bdata.get('status')}, "
+                            f"found='{bdata.get('raw_version_output')}', "
+                            f"expected='{bdata.get('pinned_expected')}'"
+                        )
+                raise CampaignConfigError(
+                    f"Strict partner replication failed browser preflight: {'; '.join(err_msgs)}. "
+                    f"Exact pinned versions (Chrome {PINNED_BROWSERS['google-chrome']['pinned_version']}, "
+                    f"Firefox {PINNED_BROWSERS['firefox']['pinned_version']}) and non-Snap binaries required."
+                )
+            return canonical_browsers
+
         if requested:
             resolved = []
             for b in requested:
@@ -1139,6 +1205,10 @@ class CampaignRunner:
 
         # New campaign manifest
         slots = build_matrix_slots(self.scenarios, self.browsers, self.repetitions)
+        if self.strict_partner and len(slots) != TOTAL_PLANNED_TRIALS:
+            raise CampaignConfigError(
+                f"Strict partner mode requires exactly {TOTAL_PLANNED_TRIALS} planned matrix slots, got {len(slots)}"
+            )
         manifest = CampaignManifest(
             campaign_id=self.campaign_id,
             output_dir=self.output_dir,
@@ -1147,7 +1217,9 @@ class CampaignRunner:
             repetitions=self.repetitions,
             is_simulation=self.is_simulation,
             matrix_slots=slots,
-            status="IN_PROGRESS"
+            status="IN_PROGRESS",
+            strict_partner=self.strict_partner,
+            protocol_version=PROTOCOL_VERSION,
         )
         manifest.save_atomically()
         return manifest
@@ -1229,6 +1301,15 @@ class CampaignRunner:
         self._active_slot = slot
         self._active_trial_id = trial_id
         self._active_trial_dir = trial_dir
+
+        if self.strict_partner and not self.is_simulation:
+            b_runtimes = partner_preflight.get_browser_runtimes().get("browsers", {})
+            b_info = b_runtimes.get(slot.browser, {})
+            if b_info.get("status") != "READY":
+                raise CampaignHaltedError(
+                    f"Strict partner runtime check failed for browser '{slot.browser}': "
+                    f"status={b_info.get('status')}, expected={b_info.get('pinned_expected')}"
+                )
 
         try:
             trial_result = run_trial.run_trial(
@@ -1665,6 +1746,11 @@ def parse_args(args: Optional[List[str]] = None) -> argparse.Namespace:
         help="Safely resume an incomplete or interrupted campaign from --output-dir"
     )
     parser.add_argument(
+        "--strict-partner",
+        action="store_true",
+        help="Enforce strict partner replication profile: 280 trials (S0-S6 x 2 pinned browsers x 20 reps), live execution only, exact pinned browser versions required"
+    )
+    parser.add_argument(
         "--simulation",
         action="store_true",
         help="Execute in simulation mode (offline/dry-run, clearly tagged in manifest)"
@@ -1738,21 +1824,31 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(f"\033[1;31m[FINALIZATION ERROR]\033[0m {e}", file=sys.stderr)
             return 1
 
-    scenarios = [s.strip().upper() for s in args.scenarios.split(",") if s.strip()]
-    browsers = [b.strip() for b in args.browsers.split(",")] if args.browsers else None
+    if args.strict_partner:
+        if args.simulation:
+            print("\033[1;31m[ERROR]\033[0m --strict-partner forbids simulation mode (--simulation). Authentic live measurements required.", file=sys.stderr)
+            return 1
+        scenarios = DEFAULT_SCENARIOS
+        browsers = ["google-chrome", "firefox"]
+        repetitions = 20
+    else:
+        scenarios = [s.strip().upper() for s in args.scenarios.split(",") if s.strip()]
+        browsers = [b.strip() for b in args.browsers.split(",")] if args.browsers else None
+        repetitions = args.repetitions
 
     try:
         runner = CampaignRunner(
             scenarios=scenarios,
             browsers=browsers,
-            repetitions=args.repetitions,
+            repetitions=repetitions,
             campaign_id=args.campaign_id,
             output_dir=args.output_dir,
             is_simulation=args.simulation,
             resume=args.resume,
             trial_timeout=args.timeout,
             browser_timeout=args.browser_timeout,
-            fail_fast_on_measurement=args.fail_fast
+            fail_fast_on_measurement=args.fail_fast,
+            strict_partner=args.strict_partner
         )
         res = runner.run()
 

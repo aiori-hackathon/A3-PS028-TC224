@@ -340,14 +340,19 @@ def wilson_score_interval(
     if k > n:
         k = n
 
-    z = Z_CRITICAL_95 if abs(confidence - 0.95) < 1e-4 else 1.95996
+    if abs(confidence - 0.99) < 1e-3:
+        z = 2.575829
+    elif abs(confidence - 0.90) < 1e-3:
+        z = 1.644854
+    else:
+        z = Z_CRITICAL_95
     p = k / n
     denom = 1.0 + (z ** 2) / n
     center = (p + (z ** 2) / (2.0 * n)) / denom
     margin = (z * math.sqrt((p * (1.0 - p) / n) + ((z ** 2) / (4.0 * (n ** 2))))) / denom
 
-    lower = max(0.0, center - margin)
-    upper = min(1.0, center + margin)
+    lower = 0.0 if k <= 0 else max(0.0, center - margin)
+    upper = 1.0 if k >= n else min(1.0, center + margin)
     return (round(lower, 4), round(upper, 4))
 
 
