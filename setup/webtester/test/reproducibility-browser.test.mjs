@@ -67,17 +67,17 @@ export function isRecognizedOfflineError(errorText) {
  * cancellation as an offline error, this explicitly controlled policy permits cancellation ONLY when ALL of:
  *   1. The target URL strictly matches an optional Google Fonts CDN host (exact hostname).
  *   2. The failure error code is specifically net::ERR_ABORTED.
- *   3. The explicit environment option `allowFontCancellation` is enabled.
+ *   3. The explicit environment option `allowFontCancellation` is enabled (strictly opt-in; defaults to false).
  *
- * Local assets, non-font external requests, or any cancellations when disabled remain strictly fatal.
+ * Local assets, non-font external requests, or any cancellations when omitted or disabled remain strictly fatal.
  *
  * @param {string} url - Target request URL
  * @param {string} errorText - Error text reported by browser
  * @param {object} [options] - Test environment options
- * @param {boolean} [options.allowFontCancellation=true] - Whether font preloader abort is tolerated
+ * @param {boolean} [options.allowFontCancellation=false] - Whether font preloader abort is tolerated (defaults to false)
  * @returns {boolean} true if this is an explicitly authorized font preloader abort
  */
-export function isPermittedFontCancellation(url, errorText, options = { allowFontCancellation: true }) {
+export function isPermittedFontCancellation(url, errorText, options = { allowFontCancellation: false }) {
   if (!options?.allowFontCancellation) {
     return false;
   }
@@ -130,12 +130,17 @@ export function isFatalHttpResponse(statusCode, url = '') {
  * OR:
  * 2. Target URL strictly matches an optional Google Fonts CDN host (exact hostname) AND
  *    failure is an authorized speculative font cancellation (net::ERR_ABORTED) under the
- *    explicitly controlled test environment policy (isPermittedFontCancellation).
+ *    explicitly controlled test environment policy (isPermittedFontCancellation with explicit allowFontCancellation: true).
  *
- * Any other request failure (local assets, HTTP errors, unauthorized cancellations, spoofed hosts)
- * returns false and is strictly fatal.
+ * Any other request failure (local assets, HTTP errors, unauthorized cancellations, spoofed hosts,
+ * or cancellations when allowFontCancellation is omitted or false) returns false and is strictly fatal.
+ *
+ * @param {string} url - Request URL
+ * @param {string} errorText - Error description reported by browser
+ * @param {object} [options] - Test options (defaults to { allowFontCancellation: false })
+ * @returns {boolean}
  */
-export function shouldSuppressRequestFailure(url, errorText, options = { allowFontCancellation: true }) {
+export function shouldSuppressRequestFailure(url, errorText, options = { allowFontCancellation: false }) {
   if (isOptionalExternalFontUrl(url) && isRecognizedOfflineError(errorText)) {
     return true;
   }
@@ -152,9 +157,15 @@ export function shouldSuppressRequestFailure(url, errorText, options = { allowFo
  *    message text contains an explicitly recognized offline error code.
  * OR:
  * 2. Target URL strictly matches an optional Google Fonts host AND
- *    message is an authorized speculative font cancellation.
+ *    message is an authorized speculative font cancellation under an explicit opt-in
+ *    (options.allowFontCancellation === true).
+ *
+ * @param {string} msgText - Console error text
+ * @param {string} [locationUrl] - Source URL reported by browser location
+ * @param {object} [options] - Test options (defaults to { allowFontCancellation: false })
+ * @returns {boolean}
  */
-export function shouldSuppressConsoleError(msgText, locationUrl, options = { allowFontCancellation: true }) {
+export function shouldSuppressConsoleError(msgText, locationUrl, options = { allowFontCancellation: false }) {
   const targetUrl = locationUrl || extractUrlFromText(msgText);
   if (!targetUrl || !isOptionalExternalFontUrl(targetUrl)) {
     return false;
@@ -228,7 +239,9 @@ async function runBrowserTests() {
       if (msg.type() === 'error') {
         const text = msg.text();
         const loc = msg.location();
-        if (shouldSuppressConsoleError(text, loc?.url)) {
+        // In this controlled headless browser harness, explicitly pass allowFontCancellation: true
+        // to tolerate speculative font preloader aborts (net::ERR_ABORTED) from headless Chromium.
+        if (shouldSuppressConsoleError(text, loc?.url, { allowFontCancellation: true })) {
           return;
         }
         console.error('[Console Error]:', text);
@@ -238,7 +251,9 @@ async function runBrowserTests() {
 
     page.on('requestfailed', (req) => {
       const errorText = req.failure()?.errorText || '';
-      if (shouldSuppressRequestFailure(req.url(), errorText)) {
+      // In this controlled headless browser harness, explicitly pass allowFontCancellation: true
+      // to tolerate speculative font preloader aborts (net::ERR_ABORTED) from headless Chromium.
+      if (shouldSuppressRequestFailure(req.url(), errorText, { allowFontCancellation: true })) {
         return;
       }
       console.error('[Request Failed]:', req.url(), errorText);

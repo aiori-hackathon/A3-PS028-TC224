@@ -202,64 +202,127 @@ describe('PS-028 Reproducibility Card & Test Laboratory Procedure Page Verificat
     assert.strictEqual(isRecognizedOfflineError(undefined), false);
   });
 
-  it('9. Verifies request failure suppression logic and negative test for unpermitted cancellation', () => {
-    // Genuine offline network failures on genuine Google Fonts CDN hosts must be suppressed
+  it('9. Verifies request failure suppression logic and opt-in font cancellation policy', () => {
+    // 1. Genuine offline network failures on genuine Google Fonts CDN hosts must be suppressed
+    // (verifying both omitted options and explicit allowFontCancellation: false preserve offline suppression)
     assert.strictEqual(shouldSuppressRequestFailure('https://fonts.googleapis.com/css2', 'net::ERR_NAME_NOT_RESOLVED'), true);
     assert.strictEqual(shouldSuppressRequestFailure('https://fonts.gstatic.com/font.woff2', 'net::ERR_INTERNET_DISCONNECTED'), true);
-    assert.strictEqual(shouldSuppressRequestFailure('https://fonts.gstatic.com/font.woff2', 'net::ERR_CONNECTION_REFUSED'), true);
+    assert.strictEqual(
+      shouldSuppressRequestFailure('https://fonts.gstatic.com/font.woff2', 'net::ERR_CONNECTION_REFUSED', { allowFontCancellation: false }),
+      true
+    );
 
-    // Negative requirement: an aborted request is NOT automatically classified as an offline failure
+    // 2. Omitted options: cancellation (net::ERR_ABORTED) is NOT permitted by default
+    assert.strictEqual(
+      shouldSuppressRequestFailure('https://fonts.gstatic.com/font.woff2', 'net::ERR_ABORTED'),
+      false,
+      'Omitted options must not permit font cancellation'
+    );
+    assert.strictEqual(
+      shouldSuppressRequestFailure('https://fonts.googleapis.com/css2', 'net::ERR_ABORTED'),
+      false,
+      'Omitted options must not permit font cancellation on fonts.googleapis.com'
+    );
+
+    // 3. Explicit allowFontCancellation: false: cancellation is NOT permitted
     assert.strictEqual(
       shouldSuppressRequestFailure('https://fonts.gstatic.com/font.woff2', 'net::ERR_ABORTED', { allowFontCancellation: false }),
       false,
-      'Aborted Google Fonts request must not be automatically suppressed when allowFontCancellation is false'
+      'Explicit allowFontCancellation: false must not permit cancellation'
+    );
+    assert.strictEqual(
+      shouldSuppressRequestFailure('https://fonts.googleapis.com/css2', 'net::ERR_ABORTED', { allowFontCancellation: false }),
+      false,
+      'Explicit allowFontCancellation: false must not permit cancellation'
     );
 
-    // Explicitly authorized font preloader cancellation in test environment is tolerated when enabled
+    // 4. Explicit allowFontCancellation: true + exact permitted font hostname + net::ERR_ABORTED: permitted
     assert.strictEqual(
       shouldSuppressRequestFailure('https://fonts.gstatic.com/font.woff2', 'net::ERR_ABORTED', { allowFontCancellation: true }),
       true,
-      'Explicitly controlled font cancellation on genuine font host must be permitted'
+      'Explicit allowFontCancellation: true on genuine font host must be permitted'
+    );
+    assert.strictEqual(
+      shouldSuppressRequestFailure('https://fonts.googleapis.com/css2', 'net::ERR_ABORTED', { allowFontCancellation: true }),
+      true,
+      'Explicit allowFontCancellation: true on fonts.googleapis.com must be permitted'
     );
 
-    // Genuine offline network errors on LOCAL assets must NOT be suppressed (must remain fatal)
-    assert.strictEqual(shouldSuppressRequestFailure('http://127.0.0.1:41525/_astro/main.css', 'net::ERR_ABORTED'), false);
+    // 5. Explicit true with a non-font hostname: cancellation is NOT permitted
+    assert.strictEqual(
+      shouldSuppressRequestFailure('http://127.0.0.1:41525/_astro/main.css', 'net::ERR_ABORTED', { allowFontCancellation: true }),
+      false
+    );
+    assert.strictEqual(
+      shouldSuppressRequestFailure('http://localhost:3000/app.js', 'net::ERR_ABORTED', { allowFontCancellation: true }),
+      false
+    );
+    assert.strictEqual(
+      shouldSuppressRequestFailure('https://fonts.googleapis.com.evil.com/font.woff2', 'net::ERR_ABORTED', { allowFontCancellation: true }),
+      false
+    );
+    assert.strictEqual(
+      shouldSuppressRequestFailure('https://evil.com/fonts.gstatic.com', 'net::ERR_ABORTED', { allowFontCancellation: true }),
+      false
+    );
+
+    // 6. Explicit true with a non-cancellation error code: NOT permitted
+    assert.strictEqual(
+      shouldSuppressRequestFailure('https://fonts.gstatic.com/font.woff2', 'net::ERR_CERT_AUTHORITY_INVALID', { allowFontCancellation: true }),
+      false
+    );
+    assert.strictEqual(
+      shouldSuppressRequestFailure('https://fonts.googleapis.com/css2', 'net::ERR_BLOCKED_BY_ADMINISTRATOR', { allowFontCancellation: true }),
+      false
+    );
+    assert.strictEqual(
+      shouldSuppressRequestFailure('https://fonts.googleapis.com/css2', '', { allowFontCancellation: true }),
+      false
+    );
+
+    // Genuine offline network errors on LOCAL assets or spoofed hosts must NOT be suppressed
     assert.strictEqual(shouldSuppressRequestFailure('http://localhost:3000/app.js', 'net::ERR_CONNECTION_REFUSED'), false);
-
-    // Genuine offline network errors on ATTACKER spoofed URLs must NOT be suppressed
-    assert.strictEqual(shouldSuppressRequestFailure('https://fonts.googleapis.com.evil.com/font.woff2', 'net::ERR_ABORTED'), false);
     assert.strictEqual(shouldSuppressRequestFailure('https://evil.com/fonts.gstatic.com', 'net::ERR_NAME_NOT_RESOLVED'), false);
-
-    // NON-OFFLINE errors on genuine Google Fonts CDN hosts must NOT be suppressed (must remain fatal)
-    assert.strictEqual(shouldSuppressRequestFailure('https://fonts.gstatic.com/font.woff2', 'net::ERR_CERT_AUTHORITY_INVALID'), false);
-    assert.strictEqual(shouldSuppressRequestFailure('https://fonts.googleapis.com/css2', 'net::ERR_BLOCKED_BY_ADMINISTRATOR'), false);
-    assert.strictEqual(shouldSuppressRequestFailure('https://fonts.googleapis.com/css2', ''), false);
   });
 
   it('10. Verifies explicitly controlled font cancellation policy (isPermittedFontCancellation)', () => {
-    // Valid font host with net::ERR_ABORTED and allowFontCancellation=true
+    // 1. Omitted options: cancellation is NOT permitted by default
+    assert.strictEqual(
+      isPermittedFontCancellation('https://fonts.gstatic.com/s/redaction10/v1/font.woff2', 'net::ERR_ABORTED'),
+      false,
+      'Omitted options must default to allowFontCancellation: false'
+    );
+    assert.strictEqual(
+      isPermittedFontCancellation('https://fonts.googleapis.com/css2', 'net::ERR_ABORTED'),
+      false,
+      'Omitted options must default to allowFontCancellation: false'
+    );
+
+    // 2. Explicit allowFontCancellation: false: cancellation is NOT permitted
+    assert.strictEqual(
+      isPermittedFontCancellation('https://fonts.gstatic.com/font.woff2', 'net::ERR_ABORTED', { allowFontCancellation: false }),
+      false,
+      'Explicit allowFontCancellation: false must reject cancellation'
+    );
+    assert.strictEqual(
+      isPermittedFontCancellation('https://fonts.googleapis.com/css2', 'net::ERR_ABORTED', { allowFontCancellation: false }),
+      false,
+      'Explicit allowFontCancellation: false must reject cancellation'
+    );
+
+    // 3. Explicit allowFontCancellation: true + exact permitted font hostname + net::ERR_ABORTED: permitted
     assert.strictEqual(
       isPermittedFontCancellation('https://fonts.gstatic.com/s/redaction10/v1/font.woff2', 'net::ERR_ABORTED', { allowFontCancellation: true }),
-      true
+      true,
+      'Explicit allowFontCancellation: true on gstatic must be permitted'
     );
     assert.strictEqual(
       isPermittedFontCancellation('https://fonts.googleapis.com/css2', 'net::ERR_ABORTED', { allowFontCancellation: true }),
-      true
+      true,
+      'Explicit allowFontCancellation: true on googleapis must be permitted'
     );
 
-    // Negative: disabled control option
-    assert.strictEqual(
-      isPermittedFontCancellation('https://fonts.gstatic.com/font.woff2', 'net::ERR_ABORTED', { allowFontCancellation: false }),
-      false
-    );
-
-    // Negative: non-cancellation error codes
-    assert.strictEqual(
-      isPermittedFontCancellation('https://fonts.gstatic.com/font.woff2', 'net::ERR_TIMED_OUT', { allowFontCancellation: true }),
-      false
-    );
-
-    // Negative: local assets or attacker domains with cancellation
+    // 4. Explicit true with a non-font hostname: cancellation is NOT permitted
     assert.strictEqual(
       isPermittedFontCancellation('http://127.0.0.1:41525/_astro/main.css', 'net::ERR_ABORTED', { allowFontCancellation: true }),
       false
@@ -272,34 +335,89 @@ describe('PS-028 Reproducibility Card & Test Laboratory Procedure Page Verificat
       isPermittedFontCancellation('https://fonts.googleapis.com.attacker.org/font.woff2', 'net::ERR_ABORTED', { allowFontCancellation: true }),
       false
     );
-  });
-
-  it('11. Verifies console error suppression logic (exact URL extraction and validation)', () => {
-    // Console error with location URL matching font host and recognized offline error
-    assert.strictEqual(shouldSuppressConsoleError('Failed to load resource: net::ERR_INTERNET_DISCONNECTED', 'https://fonts.gstatic.com/font.woff2'), true);
-    assert.strictEqual(shouldSuppressConsoleError('Failed to load resource: net::ERR_NAME_NOT_RESOLVED', 'https://fonts.googleapis.com/css2'), true);
-
-    // Console error with font URL embedded in message text and recognized offline error
-    assert.strictEqual(shouldSuppressConsoleError('GET https://fonts.googleapis.com/css2 net::ERR_NAME_NOT_RESOLVED', null), true);
-
-    // Console error with net::ERR_ABORTED tolerated under explicit font cancellation policy
     assert.strictEqual(
-      shouldSuppressConsoleError('Failed to load resource: net::ERR_ABORTED', 'https://fonts.gstatic.com/font.woff2', { allowFontCancellation: true }),
-      true
-    );
-    assert.strictEqual(
-      shouldSuppressConsoleError('Failed to load resource: net::ERR_ABORTED', 'https://fonts.gstatic.com/font.woff2', { allowFontCancellation: false }),
+      isPermittedFontCancellation('https://fonts.googleapis.com.evil.com/font.woff2', 'net::ERR_ABORTED', { allowFontCancellation: true }),
       false
     );
 
-    // Console error on local asset must NOT be suppressed
-    assert.strictEqual(shouldSuppressConsoleError('Failed to load resource: net::ERR_ABORTED', 'http://127.0.0.1:41525/script.js'), false);
+    // 5. Explicit true with a different error code on permitted font hostname: NOT permitted
+    assert.strictEqual(
+      isPermittedFontCancellation('https://fonts.gstatic.com/font.woff2', 'net::ERR_TIMED_OUT', { allowFontCancellation: true }),
+      false
+    );
+    assert.strictEqual(
+      isPermittedFontCancellation('https://fonts.gstatic.com/font.woff2', 'net::ERR_CERT_AUTHORITY_INVALID', { allowFontCancellation: true }),
+      false
+    );
+    assert.strictEqual(
+      isPermittedFontCancellation('https://fonts.googleapis.com/css2', 'net::ERR_CONNECTION_REFUSED', { allowFontCancellation: true }),
+      false
+    );
+    assert.strictEqual(
+      isPermittedFontCancellation('https://fonts.googleapis.com/css2', '', { allowFontCancellation: true }),
+      false
+    );
+    assert.strictEqual(
+      isPermittedFontCancellation('https://fonts.googleapis.com/css2', null, { allowFontCancellation: true }),
+      false
+    );
+    assert.strictEqual(
+      isPermittedFontCancellation('https://fonts.googleapis.com/css2', undefined, { allowFontCancellation: true }),
+      false
+    );
+  });
 
-    // Console error on attacker URL must NOT be suppressed
-    assert.strictEqual(shouldSuppressConsoleError('Failed to load resource: net::ERR_ABORTED', 'https://fonts.googleapis.com.evil.com/x'), false);
+  it('11. Verifies console error suppression logic (exact URL extraction and validation)', () => {
+    // 1. Genuine recognized offline errors on font host are suppressed (both omitted options and explicit false)
+    assert.strictEqual(
+      shouldSuppressConsoleError('Failed to load resource: net::ERR_INTERNET_DISCONNECTED', 'https://fonts.gstatic.com/font.woff2'),
+      true
+    );
+    assert.strictEqual(
+      shouldSuppressConsoleError('Failed to load resource: net::ERR_NAME_NOT_RESOLVED', 'https://fonts.googleapis.com/css2', { allowFontCancellation: false }),
+      true
+    );
+    assert.strictEqual(
+      shouldSuppressConsoleError('GET https://fonts.googleapis.com/css2 net::ERR_NAME_NOT_RESOLVED', null),
+      true
+    );
 
-    // Non-offline console error on genuine font host must NOT be suppressed (e.g. JS error)
-    assert.strictEqual(shouldSuppressConsoleError('Uncaught TypeError: Cannot read property of undefined', 'https://fonts.gstatic.com/font.woff2'), false);
+    // 2. Omitted options: cancellation (net::ERR_ABORTED) is NOT permitted
+    assert.strictEqual(
+      shouldSuppressConsoleError('Failed to load resource: net::ERR_ABORTED', 'https://fonts.gstatic.com/font.woff2'),
+      false,
+      'Omitted options must not permit console error suppression for net::ERR_ABORTED'
+    );
+
+    // 3. Explicit allowFontCancellation: false: cancellation is NOT permitted
+    assert.strictEqual(
+      shouldSuppressConsoleError('Failed to load resource: net::ERR_ABORTED', 'https://fonts.gstatic.com/font.woff2', { allowFontCancellation: false }),
+      false,
+      'Explicit allowFontCancellation: false must not permit console error suppression for net::ERR_ABORTED'
+    );
+
+    // 4. Explicit allowFontCancellation: true + exact permitted font hostname + net::ERR_ABORTED: permitted
+    assert.strictEqual(
+      shouldSuppressConsoleError('Failed to load resource: net::ERR_ABORTED', 'https://fonts.gstatic.com/font.woff2', { allowFontCancellation: true }),
+      true,
+      'Explicit allowFontCancellation: true must permit font cancellation console error'
+    );
+
+    // 5. Explicit true with a non-font URL: NOT permitted
+    assert.strictEqual(
+      shouldSuppressConsoleError('Failed to load resource: net::ERR_ABORTED', 'http://127.0.0.1:41525/script.js', { allowFontCancellation: true }),
+      false
+    );
+    assert.strictEqual(
+      shouldSuppressConsoleError('Failed to load resource: net::ERR_ABORTED', 'https://fonts.googleapis.com.evil.com/x', { allowFontCancellation: true }),
+      false
+    );
+
+    // 6. Non-cancellation, non-offline console error on genuine font host: NOT permitted
+    assert.strictEqual(
+      shouldSuppressConsoleError('Uncaught TypeError: Cannot read property of undefined', 'https://fonts.gstatic.com/font.woff2', { allowFontCancellation: true }),
+      false
+    );
   });
 
   it('12. Verifies shared HTTP response fatality helper (isFatalHttpResponse) across boundary status codes', () => {
