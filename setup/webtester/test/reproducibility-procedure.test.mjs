@@ -4,7 +4,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { isOptionalExternalFontUrl } from './reproducibility-browser.test.mjs';
+import {
+  isOptionalExternalFontUrl,
+  isRecognizedOfflineError,
+  shouldSuppressRequestFailure,
+  shouldSuppressConsoleError,
+  RECOGNIZED_OFFLINE_ERROR_CODES
+} from './reproducibility-browser.test.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -153,6 +159,94 @@ describe('PS-028 Reproducibility Card & Test Laboratory Procedure Page Verificat
     assert.strictEqual(isOptionalExternalFontUrl('https://fonts.googleapis.com.evil.com/fake.css'), false);
     assert.strictEqual(isOptionalExternalFontUrl('https://attacker.org/fonts.gstatic.com/font.woff2'), false);
     assert.strictEqual(isOptionalExternalFontUrl('https://fake-fonts.googleapis.com/test'), false);
+    assert.strictEqual(isOptionalExternalFontUrl('https://evil.com/fonts.googleapis.com'), false);
+    assert.strictEqual(isOptionalExternalFontUrl('https://evil.com/fonts.gstatic.com'), false);
+    assert.strictEqual(isOptionalExternalFontUrl(''), false);
+    assert.strictEqual(isOptionalExternalFontUrl(null), false);
+    assert.strictEqual(isOptionalExternalFontUrl(undefined), false);
+    assert.strictEqual(isOptionalExternalFontUrl('javascript:alert(1)'), false);
     assert.strictEqual(isOptionalExternalFontUrl('not-a-valid-url'), false);
+  });
+
+  it('8. Verifies explicitly recognized offline network error codes', () => {
+    // All known offline error codes must be recognized
+    for (const code of RECOGNIZED_OFFLINE_ERROR_CODES) {
+      assert.strictEqual(isRecognizedOfflineError(code), true, `${code} must be recognized`);
+      assert.strictEqual(isRecognizedOfflineError(`Prefix ${code} suffix`), true, `Embedded ${code} must be recognized`);
+    }
+
+    // Unrecognized or security-related error codes must NOT be recognized as offline network errors
+    assert.strictEqual(isRecognizedOfflineError('net::ERR_CERT_COMMON_NAME_INVALID'), false);
+    assert.strictEqual(isRecognizedOfflineError('net::ERR_SSL_PROTOCOL_ERROR'), false);
+    assert.strictEqual(isRecognizedOfflineError('net::ERR_BLOCKED_BY_CLIENT'), false);
+    assert.strictEqual(isRecognizedOfflineError('HTTP 404 Not Found'), false);
+    assert.strictEqual(isRecognizedOfflineError('HTTP 500 Internal Server Error'), false);
+    assert.strictEqual(isRecognizedOfflineError('Uncaught ReferenceError'), false);
+    assert.strictEqual(isRecognizedOfflineError(''), false);
+    assert.strictEqual(isRecognizedOfflineError(null), false);
+    assert.strictEqual(isRecognizedOfflineError(undefined), false);
+  });
+
+  it('9. Verifies request failure suppression logic (genuine offline failure vs non-exempt)', () => {
+    // Genuine offline network failures on genuine Google Fonts CDN hosts must be suppressed
+    assert.strictEqual(shouldSuppressRequestFailure('https://fonts.gstatic.com/font.woff2', 'net::ERR_ABORTED'), true);
+    assert.strictEqual(shouldSuppressRequestFailure('https://fonts.googleapis.com/css2', 'net::ERR_NAME_NOT_RESOLVED'), true);
+    assert.strictEqual(shouldSuppressRequestFailure('https://fonts.gstatic.com/font.woff2', 'net::ERR_INTERNET_DISCONNECTED'), true);
+    assert.strictEqual(shouldSuppressRequestFailure('https://fonts.gstatic.com/font.woff2', 'net::ERR_CONNECTION_REFUSED'), true);
+
+    // Genuine offline network errors on LOCAL assets must NOT be suppressed (must remain fatal)
+    assert.strictEqual(shouldSuppressRequestFailure('http://127.0.0.1:41525/_astro/main.css', 'net::ERR_ABORTED'), false);
+    assert.strictEqual(shouldSuppressRequestFailure('http://localhost:3000/app.js', 'net::ERR_CONNECTION_REFUSED'), false);
+
+    // Genuine offline network errors on ATTACKER spoofed URLs must NOT be suppressed
+    assert.strictEqual(shouldSuppressRequestFailure('https://fonts.googleapis.com.evil.com/font.woff2', 'net::ERR_ABORTED'), false);
+    assert.strictEqual(shouldSuppressRequestFailure('https://evil.com/fonts.gstatic.com', 'net::ERR_NAME_NOT_RESOLVED'), false);
+
+    // NON-OFFLINE errors on genuine Google Fonts CDN hosts must NOT be suppressed (must remain fatal)
+    assert.strictEqual(shouldSuppressRequestFailure('https://fonts.gstatic.com/font.woff2', 'net::ERR_CERT_AUTHORITY_INVALID'), false);
+    assert.strictEqual(shouldSuppressRequestFailure('https://fonts.googleapis.com/css2', 'net::ERR_BLOCKED_BY_ADMINISTRATOR'), false);
+    assert.strictEqual(shouldSuppressRequestFailure('https://fonts.googleapis.com/css2', ''), false);
+  });
+
+  it('10. Verifies console error suppression logic (exact URL extraction and validation)', () => {
+    // Console error with location URL matching font host and recognized offline error
+    assert.strictEqual(shouldSuppressConsoleError('Failed to load resource: net::ERR_ABORTED', 'https://fonts.gstatic.com/font.woff2'), true);
+    assert.strictEqual(shouldSuppressConsoleError('Failed to load resource: net::ERR_NAME_NOT_RESOLVED', 'https://fonts.googleapis.com/css2'), true);
+
+    // Console error with font URL embedded in message text and recognized offline error
+    assert.strictEqual(shouldSuppressConsoleError('GET https://fonts.googleapis.com/css2 net::ERR_NAME_NOT_RESOLVED', null), true);
+
+    // Console error on local asset must NOT be suppressed
+    assert.strictEqual(shouldSuppressConsoleError('Failed to load resource: net::ERR_ABORTED', 'http://127.0.0.1:41525/script.js'), false);
+
+    // Console error on attacker URL must NOT be suppressed
+    assert.strictEqual(shouldSuppressConsoleError('Failed to load resource: net::ERR_ABORTED', 'https://fonts.googleapis.com.evil.com/x'), false);
+
+    // Non-offline console error on genuine font host must NOT be suppressed (e.g. JS error)
+    assert.strictEqual(shouldSuppressConsoleError('Uncaught TypeError: Cannot read property of undefined', 'https://fonts.gstatic.com/font.woff2'), false);
+  });
+
+  it('11. Verifies HTTP 4xx/5xx responses remain fatal even for Google Fonts domains', () => {
+    // Rule: Do not suppress HTTP 4xx or 5xx responses, even when originating from Google Fonts domains
+    const simulateResponseHandler = (url, status) => {
+      const pageErrors = [];
+      if (status >= 400) {
+        pageErrors.push(new Error(`HTTP ${status} on ${url}`));
+      }
+      return pageErrors;
+    };
+
+    // Google Fonts 404/500 must produce fatal page errors
+    const font404Errors = simulateResponseHandler('https://fonts.googleapis.com/css2?family=NonExistentFont', 404);
+    assert.strictEqual(font404Errors.length, 1);
+    assert.match(font404Errors[0].message, /HTTP 404/);
+
+    const font500Errors = simulateResponseHandler('https://fonts.gstatic.com/s/redaction10/v1/corrupt.woff2', 500);
+    assert.strictEqual(font500Errors.length, 1);
+    assert.match(font500Errors[0].message, /HTTP 500/);
+
+    // Local 404/500 must produce fatal page errors
+    const local404Errors = simulateResponseHandler('http://127.0.0.1:41525/missing-page', 404);
+    assert.strictEqual(local404Errors.length, 1);
   });
 });

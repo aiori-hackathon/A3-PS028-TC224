@@ -17,17 +17,77 @@ const MIME_TYPES = {
   '.woff2': 'font/woff2',
 };
 
+export const RECOGNIZED_OFFLINE_ERROR_CODES = Object.freeze([
+  'net::ERR_INTERNET_DISCONNECTED',
+  'net::ERR_NAME_NOT_RESOLVED',
+  'net::ERR_CONNECTION_REFUSED',
+  'net::ERR_ADDRESS_UNREACHABLE',
+  'net::ERR_NETWORK_CHANGED',
+  'net::ERR_TIMED_OUT',
+  'net::ERR_CONNECTION_RESET',
+  'net::ERR_ABORTED',
+]);
+
 /**
  * Validates whether a URL corresponds strictly to the optional external Google Fonts CDN.
  * Uses exact hostname matching to prevent spoofing or accidental exemption of local assets.
  */
 export function isOptionalExternalFontUrl(rawUrl) {
+  if (typeof rawUrl !== 'string' || !rawUrl.trim()) {
+    return false;
+  }
   try {
     const parsed = new URL(rawUrl);
     return parsed.hostname === 'fonts.googleapis.com' || parsed.hostname === 'fonts.gstatic.com';
   } catch {
     return false;
   }
+}
+
+/**
+ * Checks whether an error message contains an explicitly recognized offline network failure code.
+ */
+export function isRecognizedOfflineError(errorText) {
+  if (typeof errorText !== 'string' || !errorText.trim()) {
+    return false;
+  }
+  return RECOGNIZED_OFFLINE_ERROR_CODES.some((code) => errorText.includes(code));
+}
+
+/**
+ * Extracts a candidate URL from text, if present.
+ */
+export function extractUrlFromText(text) {
+  if (typeof text !== 'string') return null;
+  const match = text.match(/https?:\/\/[^\s"'<>)]+/);
+  return match ? match[0] : null;
+}
+
+/**
+ * Evaluates whether a request failure should be suppressed.
+ * Suppressed ONLY if:
+ * 1. Target URL strictly matches an optional Google Fonts CDN host (exact hostname).
+ * 2. Failure error text strictly matches an explicitly recognized offline error code.
+ */
+export function shouldSuppressRequestFailure(url, errorText) {
+  if (!isOptionalExternalFontUrl(url)) {
+    return false;
+  }
+  return isRecognizedOfflineError(errorText);
+}
+
+/**
+ * Evaluates whether a browser console error message should be suppressed.
+ * Suppressed ONLY if:
+ * 1. Target URL (from location or message) strictly matches an optional Google Fonts host.
+ * 2. Message text contains an explicitly recognized offline error code.
+ */
+export function shouldSuppressConsoleError(msgText, locationUrl) {
+  const targetUrl = locationUrl || extractUrlFromText(msgText);
+  if (!targetUrl || !isOptionalExternalFontUrl(targetUrl)) {
+    return false;
+  }
+  return isRecognizedOfflineError(msgText);
 }
 
 async function runBrowserTests() {
@@ -87,26 +147,29 @@ async function runBrowserTests() {
     });
 
     page.on('console', (msg) => {
-      const text = msg.text();
-      // Ignore sandbox offline external resource disconnection
-      if (text.includes('ERR_INTERNET_DISCONNECTED')) return;
       if (msg.type() === 'error') {
-        if (text.includes('fonts.googleapis.com') || text.includes('fonts.gstatic.com')) return;
+        const text = msg.text();
+        const loc = msg.location();
+        if (shouldSuppressConsoleError(text, loc?.url)) {
+          return;
+        }
         console.error('[Console Error]:', text);
         consoleErrors.push(text);
       }
     });
 
     page.on('requestfailed', (req) => {
-      // Ignore optional external font CDN requests in offline/sandbox environments (exact hostname)
-      if (isOptionalExternalFontUrl(req.url())) return;
-      console.error('[Request Failed]:', req.url(), req.failure()?.errorText);
-      pageErrors.push(new Error(`Request failed: ${req.url()}`));
+      const errorText = req.failure()?.errorText || '';
+      if (shouldSuppressRequestFailure(req.url(), errorText)) {
+        return;
+      }
+      console.error('[Request Failed]:', req.url(), errorText);
+      pageErrors.push(new Error(`Request failed: ${req.url()}${errorText ? ` (${errorText})` : ''}`));
     });
 
     page.on('response', (res) => {
+      // Do not suppress HTTP 4xx or 5xx responses, even when originating from Google Fonts domains
       if (res.status() >= 400) {
-        if (isOptionalExternalFontUrl(res.url())) return;
         console.error('[Response Status >= 400]:', res.url(), res.status());
         pageErrors.push(new Error(`HTTP ${res.status()} on ${res.url()}`));
       }
