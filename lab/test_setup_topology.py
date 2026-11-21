@@ -7,6 +7,7 @@ Tests portable host-state capture, dynamic SLAAC lifetime normalization,
 and host-invariance verification without modifying system configuration.
 """
 
+import os
 from pathlib import Path
 import subprocess
 import tempfile
@@ -258,6 +259,165 @@ class TestSetupTopologyHostInvariance(unittest.TestCase):
         self.assertIsNotNone(lo_idx, "lo interface header must exist")
         self.assertIsNotNone(inet_lo_idx, "lo inet line must exist")
         self.assertTrue(inet_lo_idx > lo_idx and (inet_lo_idx - lo_idx) <= 3, "Interface block must not be broken by sorting")
+
+    SAMPLE_DOCKER_BRIDGE_FIXTURE = (
+        "1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000\n"
+        "    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00 promiscuity 0 allmulti 0 minmtu 0 maxmtu 0 numtxqueues 1 numrxqueues 1 gso_max_size 65536 gso_max_segs 65535 tso_max_size 524280 tso_max_segs 65535 gro_max_size 65536 \n"
+        "    inet 127.0.0.1/8 scope host lo\n"
+        "       valid_lft forever preferred_lft forever\n"
+        "4: docker0: <NO-CARRIER,BROADCAST,MULTICAST,UP> mtu 1500 qdisc noqueue state DOWN group default \n"
+        "    link/ether ee:4a:b0:16:ff:14 brd ff:ff:ff:ff:ff:ff promiscuity 0  allmulti 0 minmtu 68 maxmtu 65535 \n"
+        "    bridge forward_delay 1500 hello_time 200 max_age 2000 ageing_time 30000 stp_state 0 priority 32768 vlan_filtering 0 vlan_protocol 802.1Q bridge_id 8000.ee:4a:b0:16:ff:14 designated_root 8000.ee:4a:b0:16:ff:14 root_port 0 root_path_cost 0 topology_change 0 topology_change_detected 0 hello_timer    0.00 tcn_timer    0.00 topology_change_timer    0.00 gc_timer  199.43 vlan_default_pvid 1 vlan_stats_enabled 0 vlan_stats_per_port 0 group_fwd_mask 0 group_address 01:80:c2:00:00:00 mcast_snooping 1 no_linklocal_learn 0 mcast_vlan_snooping 0 mcast_router 1 mcast_query_use_ifaddr 0 mcast_querier 0 mcast_hash_elasticity 16 mcast_hash_max 4096 mcast_last_member_count 2 mcast_startup_query_count 2 mcast_last_member_interval 100 mcast_membership_interval 26000 mcast_querier_interval 25500 mcast_query_interval 12500 mcast_query_response_interval 1000 mcast_startup_query_interval 3125 mcast_stats_enabled 0 mcast_igmp_version 2 mcast_mld_version 1 nf_call_iptables 0 nf_call_ip6tables 0 nf_call_arptables 0 numtxqueues 1 numrxqueues 1 gso_max_size 65536 gso_max_segs 65535 tso_max_size 65536 tso_max_segs 65535 gro_max_size 65536 \n"
+        "    inet 172.17.0.1/16 brd 172.17.255.255 scope global docker0\n"
+        "       valid_lft forever preferred_lft forever\n"
+    )
+
+    def _create_fake_ip_environment(self, interface_fixture: str):
+        """Creates a temporary bin directory with a controlled fake ip script returning deterministic fixtures."""
+        fake_bin = self.temp_dir / "bin"
+        fake_bin.mkdir(parents=True, exist_ok=True)
+        fixture_file = self.temp_dir / "ip_addr_fixture.txt"
+        fixture_file.write_text(interface_fixture, encoding="utf-8")
+
+        fake_ip = fake_bin / "ip"
+        script_body = f"""#!/bin/bash
+if [[ "$*" == *"-d addr show"* ]]; then
+    cat "{fixture_file}"
+elif [[ "$*" == *"-4 route show"* ]]; then
+    echo "default via 172.21.32.1 dev eth0 proto static"
+elif [[ "$*" == *"-6 route show"* ]]; then
+    echo "fe80::/64 dev eth0 proto kernel metric 256"
+elif [[ "$*" == *"-4 rule show"* ]]; then
+    echo "0: from all lookup local"
+    echo "32766: from all lookup main"
+    echo "32767: from all lookup default"
+elif [[ "$*" == *"-6 rule show"* ]]; then
+    echo "0: from all lookup local"
+    echo "32766: from all lookup main"
+else
+    exec /usr/bin/ip "$@"
+fi
+"""
+        fake_ip.write_text(script_body, encoding="utf-8")
+        fake_ip.chmod(0o755)
+
+        env = os.environ.copy()
+        env["PATH"] = f"{fake_bin}:{env.get('PATH', '')}"
+        return env, fixture_file
+
+    def test_bridge_countdown_timer_normalization_passes_invariance(self):
+        """Case A: Invariance check passes when only Linux bridge dynamic countdown timers drift."""
+        env, fixture_file = self._create_fake_ip_environment(self.SAMPLE_DOCKER_BRIDGE_FIXTURE)
+        snap_file = self.temp_dir / "baseline.txt"
+
+        proc_snap = subprocess.run(
+            [str(SETUP_TOPOLOGY_SH), "snapshot-host", str(snap_file)],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(proc_snap.returncode, 0, f"snapshot-host failed: {proc_snap.stderr}")
+
+        # Update fixture with all 4 volatile timer countdown shifts observed on CI
+        shifted_timers_fixture = (
+            self.SAMPLE_DOCKER_BRIDGE_FIXTURE
+            .replace("hello_timer    0.00", "hello_timer    0.05")
+            .replace("tcn_timer    0.00", "tcn_timer    0.01")
+            .replace("topology_change_timer    0.00", "topology_change_timer    0.02")
+            .replace("gc_timer  199.43", "gc_timer  199.42")
+        )
+        fixture_file.write_text(shifted_timers_fixture, encoding="utf-8")
+
+        proc_check = subprocess.run(
+            [str(SETUP_TOPOLOGY_SH), "check-host-invariance", str(snap_file)],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(
+            proc_check.returncode,
+            0,
+            f"check-host-invariance must pass on countdown-only drift: {proc_check.stdout}\n{proc_check.stderr}"
+        )
+        self.assertIn("HOST INVARIANCE VERIFIED", proc_check.stdout)
+
+    def test_bridge_internal_whitespace_canonicalization_passes_invariance(self):
+        """Case B: Invariance check passes when only internal repeated whitespace differs in diagnostic output."""
+        env, fixture_file = self._create_fake_ip_environment(self.SAMPLE_DOCKER_BRIDGE_FIXTURE)
+        snap_file = self.temp_dir / "baseline.txt"
+
+        proc_snap = subprocess.run(
+            [str(SETUP_TOPOLOGY_SH), "snapshot-host", str(snap_file)],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(proc_snap.returncode, 0)
+
+        # Alter repeated spacing around promiscuity, allmulti, and bridge attributes
+        spacing_variant_fixture = (
+            self.SAMPLE_DOCKER_BRIDGE_FIXTURE
+            .replace("promiscuity 0  allmulti 0", "promiscuity 0 allmulti 0")
+            .replace("bridge forward_delay 1500 hello_time 200", "bridge  forward_delay  1500   hello_time  200")
+        )
+        fixture_file.write_text(spacing_variant_fixture, encoding="utf-8")
+
+        proc_check = subprocess.run(
+            [str(SETUP_TOPOLOGY_SH), "check-host-invariance", str(snap_file)],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(
+            proc_check.returncode,
+            0,
+            f"check-host-invariance must pass on whitespace-only differences: {proc_check.stdout}\n{proc_check.stderr}"
+        )
+        self.assertIn("HOST INVARIANCE VERIFIED", proc_check.stdout)
+
+    def test_bridge_stable_configuration_changes_fail_invariance(self):
+        """Case C: Invariance check strictly fails closed when stable bridge configuration attributes change."""
+        stable_mutations = [
+            ("stp_state 0", "stp_state 1"),
+            ("forward_delay 1500", "forward_delay 2000"),
+            ("vlan_filtering 0", "vlan_filtering 1"),
+            ("bridge_id 8000.ee:4a:b0:16:ff:14", "bridge_id 8000.11:22:33:44:55:66"),
+        ]
+
+        for target, tampered in stable_mutations:
+            with self.subTest(attribute=target.split()[0]):
+                env, fixture_file = self._create_fake_ip_environment(self.SAMPLE_DOCKER_BRIDGE_FIXTURE)
+                snap_file = self.temp_dir / f"baseline_{target.split()[0]}.txt"
+
+                proc_snap = subprocess.run(
+                    [str(SETUP_TOPOLOGY_SH), "snapshot-host", str(snap_file)],
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(proc_snap.returncode, 0)
+
+                tampered_fixture = self.SAMPLE_DOCKER_BRIDGE_FIXTURE.replace(target, tampered)
+                fixture_file.write_text(tampered_fixture, encoding="utf-8")
+
+                proc_check = subprocess.run(
+                    [str(SETUP_TOPOLOGY_SH), "check-host-invariance", str(snap_file)],
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(
+                    proc_check.returncode,
+                    1,
+                    f"check-host-invariance must fail when stable attribute '{target}' is changed to '{tampered}'"
+                )
+                self.assertIn("HOST INVARIANCE VIOLATION DETECTED", proc_check.stdout + proc_check.stderr)
 
 
 if __name__ == "__main__":

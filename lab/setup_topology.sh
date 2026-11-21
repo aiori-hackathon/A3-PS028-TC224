@@ -88,7 +88,12 @@ snapshot_host_state() {
     log_info "Capturing portable host network configuration snapshot to $outfile..."
     {
         echo "=== HOST INTERFACES ==="
-        ip -d addr show 2>/dev/null | sed -E -e 's/(valid_lft|preferred_lft) [0-9a-z_]+/\1 <dynamic>/g' -e 's/expires [0-9]+sec/expires <dynamic>/g'
+        ip -d addr show 2>/dev/null | sed -E \
+            -e 's/(valid_lft|preferred_lft) [0-9a-z_]+/\1 <dynamic>/g' \
+            -e 's/expires [0-9]+sec/expires <dynamic>/g' \
+            -e 's/(^|[[:space:]])(hello_timer|tcn_timer|topology_change_timer|gc_timer)[[:space:]]+[0-9]+([.][0-9]+)?/\1\2 <dynamic>/g' \
+            -e 's/([^[:space:]])[[:space:]]+/\1 /g' \
+            -e 's/[[:space:]]+$//'
         echo "=== IPV4 ROUTES ==="
         ip -4 route show | sed -E -e 's/expires [0-9]+sec/expires <dynamic>/g' -e 's/cache <[^>]+>//g' | LC_ALL=C sort
         echo "=== IPV6 ROUTES ==="
