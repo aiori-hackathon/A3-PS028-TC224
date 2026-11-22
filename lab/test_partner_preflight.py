@@ -238,25 +238,19 @@ class TestPartnerPreflight(unittest.TestCase):
             mock_hash.return_value = mock_hasher
 
             with patch("pwd.getpwnam", return_value=MagicMock()):
-                status = partner_preflight.get_helper_deployment_status()
-                self.assertTrue(status["ready"])
-                self.assertTrue(status["deployment_manifest"]["sha_match"])
+                status = partner_preflight.get_helper_deployment_status(
+                    checkout_sha_override="abcdef1234567890abcdef1234567890abcdef12"
+                )
+                self.assertTrue(status["helper_sha_match"])
+                self.assertEqual(status["helper_integrity_status"], partner_preflight.INTEGRITY_VERIFIED)
+                self.assertEqual(status["release_verification_status"], partner_preflight.RELEASE_METADATA_MISSING)
+                self.assertFalse(status["deployment_ready"])
+                self.assertFalse(status["ready"])
 
-    def test_get_checkout_sha_from_env_and_git(self):
-        """get_checkout_sha respects environment variable or git rev-parse HEAD."""
-        valid_sha = "8ea73666c9cfb5b9d3b885d42935298532e7950c"
-        with patch.dict("os.environ", {"PS028_EXPECTED_RELEASE_SHA": valid_sha}):
-            self.assertEqual(partner_preflight.get_checkout_sha(), valid_sha)
-
-        with patch.dict("os.environ", {"PS028_EXPECTED_RELEASE_SHA": "invalid-sha", "PS028_CHECKOUT_SHA": ""}):
-            with patch("subprocess.run") as mock_run:
-                mock_run.return_value = MagicMock(stdout=f"{valid_sha}\n")
-                self.assertEqual(partner_preflight.get_checkout_sha(), valid_sha)
-
-    def test_manifest_schema_with_files_array_success(self):
-        """Helper deployment status verifies files array schema and matching release SHA."""
+    def test_matching_helper_hash_and_matching_release_sha_yields_ready(self):
+        """Test 1: Matching helper hash plus matching release SHA yields current-release readiness."""
         helper_path = self.temp_dir / "privileged_helper.py"
-        helper_content = b"#!/usr/bin/env python3\nprint('privileged helper')\n"
+        helper_content = b"#!/usr/bin/env python3\n# test helper content\n"
         helper_path.write_bytes(helper_content)
         helper_sha = hashlib.sha256(helper_content).hexdigest()
 
@@ -281,22 +275,197 @@ class TestPartnerPreflight(unittest.TestCase):
                 helper_path_override=helper_path,
                 sudoers_path_override=sudoers_path,
                 manifest_path_override=manifest_path,
+                checkout_sha_override=release_sha,
                 expected_release_sha=release_sha,
             )
+            self.assertTrue(status["helper_sha_match"])
+            self.assertEqual(status["helper_integrity_status"], partner_preflight.INTEGRITY_VERIFIED)
+            self.assertEqual(status["release_sha"], release_sha)
+            self.assertEqual(status["expected_release_sha"], release_sha)
+            self.assertTrue(status["release_sha_match"])
+            self.assertEqual(status["release_verification_status"], partner_preflight.RELEASE_CURRENT)
+            self.assertTrue(status["deployment_ready"])
             self.assertTrue(status["ready"])
-            self.assertTrue(status["helper_executable"]["installed"])
-            self.assertEqual(status["helper_executable"]["verification_status"], "VERIFIED")
-            self.assertEqual(status["helper_executable"]["sha256"], helper_sha)
-            self.assertTrue(status["deployment_manifest"]["installed"])
-            self.assertTrue(status["deployment_manifest"]["sha_match"])
-            self.assertEqual(status["deployment_manifest"]["verification_status"], "VERIFIED")
-            self.assertEqual(status["deployment_manifest"]["release_sha"], release_sha)
-            self.assertEqual(status["deployment_manifest"]["expected_release_sha"], release_sha)
-            self.assertTrue(status["deployment_manifest"]["release_sha_match"])
-            self.assertIsNone(status["deployment_manifest"]["error"])
 
-    def test_manifest_backward_compatible_top_level_helper_sha(self):
-        """Helper deployment status verifies legacy manifest with top-level helper_sha256."""
+    def test_matching_helper_hash_and_different_release_sha_yields_non_current(self):
+        """Test 2: Matching helper hash plus different release SHA produces verified integrity but NON_CURRENT_RELEASE."""
+        helper_path = self.temp_dir / "privileged_helper.py"
+        helper_content = b"#!/usr/bin/env python3\n# test helper content\n"
+        helper_path.write_bytes(helper_content)
+        helper_sha = hashlib.sha256(helper_content).hexdigest()
+
+        sudoers_path = self.temp_dir / "ps028-helper"
+        sudoers_path.write_text("ps028-sv ALL=(ALL) NOPASSWD: ALL\n", encoding="utf-8")
+
+        manifest_release = "c46dfdbac218dd0a54606067fe9e91aae8e56b31"
+        checkout_release = "8ea73666c9cfb5b9d3b885d42935298532e7950c"
+
+        manifest_path = self.temp_dir / "deployment_manifest.json"
+        manifest_data = {
+            "release_sha": manifest_release,
+            "target_dir": str(self.temp_dir),
+            "file_count": 2,
+            "files": [
+                {"path": "privileged_helper.py", "sha256": helper_sha, "mode": "0750"}
+            ]
+        }
+        manifest_path.write_text(json.dumps(manifest_data), encoding="utf-8")
+
+        with patch("pwd.getpwnam", return_value=MagicMock()):
+            status = partner_preflight.get_helper_deployment_status(
+                helper_path_override=helper_path,
+                sudoers_path_override=sudoers_path,
+                manifest_path_override=manifest_path,
+                checkout_sha_override=checkout_release,
+                expected_release_sha=checkout_release,
+            )
+            self.assertTrue(status["helper_sha_match"])
+            self.assertEqual(status["helper_integrity_status"], partner_preflight.INTEGRITY_VERIFIED)
+            self.assertEqual(status["release_sha"], manifest_release)
+            self.assertEqual(status["expected_release_sha"], checkout_release)
+            self.assertFalse(status["release_sha_match"])
+            self.assertEqual(status["release_verification_status"], partner_preflight.RELEASE_NON_CURRENT)
+            self.assertFalse(status["deployment_ready"])
+            self.assertFalse(status["ready"])
+
+    def test_jarvis_audit_fixture_matching_helper_hash_non_current_release(self):
+        """Test 3: Exact JARVIS audit evidence fixture."""
+        jarvis_checkout_sha = "8ea73666c9cfb5b9d3b885d42935298532e7950c"
+        jarvis_manifest_release_sha = "c46dfdbac218dd0a54606067fe9e91aae8e56b31"
+        jarvis_helper_sha256 = "c8d996bc10f9c7a8a622e4970684b075be0e9c650d0724ca29a07e63c2ce4fca"
+
+        helper_path = self.temp_dir / "privileged_helper.py"
+        helper_path.write_bytes(b"dummy")
+
+        sudoers_path = self.temp_dir / "ps028-helper"
+        sudoers_path.write_text("ps028-sv ALL=(ALL) NOPASSWD: ALL\n", encoding="utf-8")
+
+        manifest_path = self.temp_dir / "deployment_manifest.json"
+        manifest_data = {
+            "release_sha": jarvis_manifest_release_sha,
+            "target_dir": "/usr/local/libexec/ps028",
+            "file_count": 14,
+            "files": [
+                {"path": "privileged_helper.py", "sha256": jarvis_helper_sha256, "mode": "0750"}
+            ]
+        }
+        manifest_path.write_text(json.dumps(manifest_data), encoding="utf-8")
+
+        original_sha256 = hashlib.sha256
+
+        def fake_sha256(data=b""):
+            m = MagicMock()
+            m.hexdigest.return_value = jarvis_helper_sha256
+            return m
+
+        with patch("hashlib.sha256", side_effect=fake_sha256), \
+             patch("pwd.getpwnam", return_value=MagicMock()):
+            status = partner_preflight.get_helper_deployment_status(
+                helper_path_override=helper_path,
+                sudoers_path_override=sudoers_path,
+                manifest_path_override=manifest_path,
+                checkout_sha_override=jarvis_checkout_sha,
+                expected_release_sha=jarvis_checkout_sha,
+            )
+            # Helper file matches manifest
+            self.assertTrue(status["helper_sha_match"])
+            self.assertEqual(status["helper_integrity_status"], partner_preflight.INTEGRITY_VERIFIED)
+            # Release SHA differs
+            self.assertEqual(status["release_sha"], jarvis_manifest_release_sha)
+            self.assertEqual(status["expected_release_sha"], jarvis_checkout_sha)
+            self.assertFalse(status["release_sha_match"])
+            self.assertEqual(status["release_verification_status"], partner_preflight.RELEASE_NON_CURRENT)
+            # Deployment readiness remains False
+            self.assertFalse(status["deployment_ready"])
+            self.assertFalse(status["ready"])
+
+            # Verify remediation advice generated
+            mock_rep = {
+                "os_and_kernel": {"compatible": True},
+                "python_and_libraries": {"compatible": True, "dependencies": {}},
+                "system_tools": {"compatible": True, "tools": {}},
+                "browsers": {"all_exact_match": True, "browsers": {}},
+                "privileged_helper": status,
+                "storage": {"sufficient_for_campaign": True},
+                "configuration_files": {"all_present": True},
+            }
+            actions = partner_preflight.compute_remediation_actions(mock_rep)
+            non_current_actions = [a for a in actions if "differs from current checkout SHA" in a["issue"]]
+            self.assertEqual(len(non_current_actions), 1)
+            self.assertIn("Update the partner checkout to the approved commit", non_current_actions[0]["remediation"])
+            self.assertIn("./lab/deploy_privileged_helper.sh --dry-run", non_current_actions[0]["remediation"])
+            self.assertIn("obtain operator authorization", non_current_actions[0]["remediation"])
+
+    def test_genuine_helper_hash_mismatch_reported_as_integrity_failure(self):
+        """Test 4: Genuine helper hash mismatch is reported as INTEGRITY_FAILED."""
+        helper_path = self.temp_dir / "privileged_helper.py"
+        helper_path.write_bytes(b"content-a\n")
+
+        sudoers_path = self.temp_dir / "ps028-helper"
+        sudoers_path.write_text("ps028-sv ALL=(ALL) NOPASSWD: ALL\n", encoding="utf-8")
+
+        release_sha = "8ea73666c9cfb5b9d3b885d42935298532e7950c"
+        manifest_path = self.temp_dir / "deployment_manifest.json"
+        manifest_data = {
+            "release_sha": release_sha,
+            "files": [
+                {"path": "privileged_helper.py", "sha256": "f" * 64, "mode": "0750"}
+            ]
+        }
+        manifest_path.write_text(json.dumps(manifest_data), encoding="utf-8")
+
+        with patch("pwd.getpwnam", return_value=MagicMock()):
+            status = partner_preflight.get_helper_deployment_status(
+                helper_path_override=helper_path,
+                sudoers_path_override=sudoers_path,
+                manifest_path_override=manifest_path,
+                checkout_sha_override=release_sha,
+            )
+            self.assertFalse(status["helper_sha_match"])
+            self.assertEqual(status["helper_integrity_status"], partner_preflight.INTEGRITY_FAILED)
+            self.assertEqual(status["release_verification_status"], partner_preflight.RELEASE_CURRENT)
+            self.assertFalse(status["deployment_ready"])
+            self.assertFalse(status["ready"])
+
+    def test_unreadable_helper_permission_denied_reported_as_permission_required(self):
+        """Test 5: Permission-denied helper read is reported as INTEGRITY_UNVERIFIABLE_PERMISSION_REQUIRED."""
+        helper_path = self.temp_dir / "privileged_helper.py"
+        helper_path.write_bytes(b"helper content\n")
+
+        manifest_path = self.temp_dir / "deployment_manifest.json"
+        manifest_path.write_text(json.dumps({
+            "release_sha": "8ea73666c9cfb5b9d3b885d42935298532e7950c",
+            "files": [{"path": "privileged_helper.py", "sha256": "a" * 64, "mode": "0750"}]
+        }), encoding="utf-8")
+
+        with patch.object(Path, "read_bytes", side_effect=PermissionError(f"Permission denied: {helper_path}")):
+            status = partner_preflight.get_helper_deployment_status(
+                helper_path_override=helper_path,
+                manifest_path_override=manifest_path,
+                checkout_sha_override="8ea73666c9cfb5b9d3b885d42935298532e7950c",
+            )
+            self.assertFalse(status["helper_sha_match"])
+            self.assertIsNone(status["helper_executable"]["sha256"])
+            self.assertEqual(status["helper_integrity_status"], partner_preflight.INTEGRITY_UNVERIFIABLE_PERMISSION_REQUIRED)
+            self.assertFalse(status["deployment_ready"])
+            self.assertIn("Permission denied", status["helper_executable"]["read_error"])
+
+            mock_rep = {
+                "os_and_kernel": {"compatible": True},
+                "python_and_libraries": {"compatible": True, "dependencies": {}},
+                "system_tools": {"compatible": True, "tools": {}},
+                "browsers": {"all_exact_match": True, "browsers": {}},
+                "privileged_helper": status,
+                "storage": {"sufficient_for_campaign": True},
+                "configuration_files": {"all_present": True},
+            }
+            actions = partner_preflight.compute_remediation_actions(mock_rep)
+            perm_actions = [a for a in actions if "Permission denied" in a["issue"]]
+            self.assertEqual(len(perm_actions), 1)
+            self.assertIn("sudo python3 lab/partner_preflight.py", perm_actions[0]["remediation"])
+
+    def test_legacy_top_level_helper_sha_manifest_verifies_integrity_fails_release(self):
+        """Test 6: Legacy top-level helper_sha256 manifest verifies helper integrity but fails strict release verification."""
         helper_path = self.temp_dir / "privileged_helper.py"
         helper_content = b"#!/usr/bin/env python3\n# legacy test\n"
         helper_path.write_bytes(helper_content)
@@ -316,43 +485,167 @@ class TestPartnerPreflight(unittest.TestCase):
                 helper_path_override=helper_path,
                 sudoers_path_override=sudoers_path,
                 manifest_path_override=manifest_path,
-                expected_release_sha="8ea73666c9cfb5b9d3b885d42935298532e7950c",
+                checkout_sha_override="8ea73666c9cfb5b9d3b885d42935298532e7950c",
             )
-            self.assertTrue(status["ready"])
-            self.assertTrue(status["deployment_manifest"]["sha_match"])
-            self.assertEqual(status["deployment_manifest"]["verification_status"], "VERIFIED")
-            self.assertIsNone(status["deployment_manifest"]["release_sha"])
-            self.assertIsNone(status["deployment_manifest"]["release_sha_match"])
+            self.assertTrue(status["helper_sha_match"])
+            self.assertEqual(status["helper_integrity_status"], partner_preflight.INTEGRITY_VERIFIED)
+            self.assertIsNone(status["release_sha"])
+            self.assertIsNone(status["release_sha_match"])
+            self.assertEqual(status["release_verification_status"], partner_preflight.RELEASE_METADATA_MISSING)
+            self.assertFalse(status["deployment_ready"])
+            self.assertFalse(status["ready"])
 
-    def test_manifest_genuine_hash_mismatch(self):
-        """Helper deployment status detects mismatch between helper and manifest hash."""
+    def test_missing_release_sha_fails_closed(self):
+        """Test 7: Missing release SHA fails closed (RELEASE_METADATA_MISSING)."""
         helper_path = self.temp_dir / "privileged_helper.py"
-        helper_path.write_bytes(b"content-a\n")
+        helper_content = b"content\n"
+        helper_path.write_bytes(helper_content)
+        helper_sha = hashlib.sha256(helper_content).hexdigest()
 
-        sudoers_path = self.temp_dir / "ps028-helper"
-        sudoers_path.write_text("ps028-sv ALL=(ALL) NOPASSWD: ALL\n", encoding="utf-8")
+        manifest_path = self.temp_dir / "deployment_manifest.json"
+        manifest_data = {
+            "files": [
+                {"path": "privileged_helper.py", "sha256": helper_sha, "mode": "0750"}
+            ]
+        }
+        manifest_path.write_text(json.dumps(manifest_data), encoding="utf-8")
+
+        status = partner_preflight.get_helper_deployment_status(
+            helper_path_override=helper_path,
+            manifest_path_override=manifest_path,
+            checkout_sha_override="8ea73666c9cfb5b9d3b885d42935298532e7950c",
+        )
+        self.assertTrue(status["helper_sha_match"])
+        self.assertEqual(status["helper_integrity_status"], partner_preflight.INTEGRITY_VERIFIED)
+        self.assertIsNone(status["release_sha"])
+        self.assertEqual(status["release_verification_status"], partner_preflight.RELEASE_METADATA_MISSING)
+        self.assertFalse(status["deployment_ready"])
+
+    def test_invalid_release_sha_fails_closed(self):
+        """Test 8: Invalid release SHA format fails closed (RELEASE_METADATA_INVALID)."""
+        helper_path = self.temp_dir / "privileged_helper.py"
+        helper_content = b"content\n"
+        helper_path.write_bytes(helper_content)
+        helper_sha = hashlib.sha256(helper_content).hexdigest()
+
+        manifest_path = self.temp_dir / "deployment_manifest.json"
+        manifest_data = {
+            "release_sha": "not-a-valid-40-hex-sha",
+            "files": [
+                {"path": "privileged_helper.py", "sha256": helper_sha, "mode": "0750"}
+            ]
+        }
+        manifest_path.write_text(json.dumps(manifest_data), encoding="utf-8")
+
+        status = partner_preflight.get_helper_deployment_status(
+            helper_path_override=helper_path,
+            manifest_path_override=manifest_path,
+            checkout_sha_override="8ea73666c9cfb5b9d3b885d42935298532e7950c",
+        )
+        self.assertEqual(status["release_verification_status"], partner_preflight.RELEASE_METADATA_INVALID)
+        self.assertFalse(status["release_sha_match"])
+        self.assertFalse(status["deployment_ready"])
+
+    def test_unavailable_git_checkout_sha_fails_closed(self):
+        """Test 9: Unavailable Git checkout SHA fails closed (CHECKOUT_SHA_UNAVAILABLE)."""
+        helper_path = self.temp_dir / "privileged_helper.py"
+        helper_content = b"content\n"
+        helper_path.write_bytes(helper_content)
+        helper_sha = hashlib.sha256(helper_content).hexdigest()
 
         manifest_path = self.temp_dir / "deployment_manifest.json"
         manifest_data = {
             "release_sha": "8ea73666c9cfb5b9d3b885d42935298532e7950c",
             "files": [
-                {"path": "privileged_helper.py", "sha256": "f" * 64, "mode": "0750"}
+                {"path": "privileged_helper.py", "sha256": helper_sha, "mode": "0750"}
             ]
         }
         manifest_path.write_text(json.dumps(manifest_data), encoding="utf-8")
 
-        with patch("pwd.getpwnam", return_value=MagicMock()):
+        with patch("subprocess.run", side_effect=Exception("git failed")), \
+             patch.dict("os.environ", {}, clear=True):
             status = partner_preflight.get_helper_deployment_status(
                 helper_path_override=helper_path,
-                sudoers_path_override=sudoers_path,
                 manifest_path_override=manifest_path,
+                checkout_sha_override=None,
             )
-            self.assertFalse(status["ready"])
-            self.assertFalse(status["deployment_manifest"]["sha_match"])
-            self.assertEqual(status["deployment_manifest"]["verification_status"], "UNVERIFIED_HASH_MISMATCH")
+            self.assertEqual(status["release_verification_status"], partner_preflight.RELEASE_CHECKOUT_UNAVAILABLE)
+            self.assertIsNone(status["release_sha_match"])
+            self.assertFalse(status["deployment_ready"])
+
+    def test_stale_or_conflicting_env_pin_cannot_override_checkout(self):
+        """Test 10: Stale or conflicting environment pin cannot override actual repository checkout."""
+        actual_checkout = "8ea73666c9cfb5b9d3b885d42935298532e7950c"
+        stale_pin = "c46dfdbac218dd0a54606067fe9e91aae8e56b31"
+
+        # Conflicting pin
+        with patch.dict("os.environ", {"PS028_EXPECTED_RELEASE_SHA": stale_pin}):
+            resolved = partner_preflight.get_checkout_sha(checkout_sha_override=actual_checkout)
+            self.assertIsNone(resolved)
+
+        # Malformed pin
+        with patch.dict("os.environ", {"PS028_EXPECTED_RELEASE_SHA": "invalid_pin"}):
+            resolved_bad = partner_preflight.get_checkout_sha(checkout_sha_override=actual_checkout)
+            self.assertIsNone(resolved_bad)
+
+        # Matching pin passes
+        with patch.dict("os.environ", {"PS028_EXPECTED_RELEASE_SHA": actual_checkout}):
+            resolved_ok = partner_preflight.get_checkout_sha(checkout_sha_override=actual_checkout)
+            self.assertEqual(resolved_ok, actual_checkout)
+
+    def test_human_readable_report_current_and_non_current_diagnostics(self):
+        """Test 11: Current-release and non-current-release diagnostics in human-readable report."""
+        import io
+        from contextlib import redirect_stdout
+
+        # Current release report
+        current_report = partner_preflight.run_partner_preflight(
+            checkout_sha_override="8ea73666c9cfb5b9d3b885d42935298532e7950c"
+        )
+        current_report["privileged_helper"] = {
+            "service_account_ps028_sv": True,
+            "helper_executable": {"installed": True},
+            "sudoers_drop_in": {"installed": True},
+            "deployment_manifest": {"installed": True},
+            "helper_integrity_status": partner_preflight.INTEGRITY_VERIFIED,
+            "release_verification_status": partner_preflight.RELEASE_CURRENT,
+            "release_sha": "8ea73666c9cfb5b9d3b885d42935298532e7950c",
+            "expected_release_sha": "8ea73666c9cfb5b9d3b885d42935298532e7950c",
+            "deployment_ready": True,
+        }
+        f1 = io.StringIO()
+        with redirect_stdout(f1):
+            partner_preflight.print_human_report(current_report)
+        out1 = f1.getvalue()
+        self.assertIn("Installed & Verified (SHA-256 matches manifest entry) [OK]", out1)
+        self.assertIn("Current Approved Release (8ea73666c9cfb5b9d3b885d42935298532e7950c) [OK]", out1)
+        self.assertIn("Deploy Ready : [OK] (Ready for Authorization)", out1)
+
+        # JARVIS non-current release report
+        jarvis_report = partner_preflight.run_partner_preflight(
+            checkout_sha_override="8ea73666c9cfb5b9d3b885d42935298532e7950c"
+        )
+        jarvis_report["privileged_helper"] = {
+            "service_account_ps028_sv": True,
+            "helper_executable": {"installed": True},
+            "sudoers_drop_in": {"installed": True},
+            "deployment_manifest": {"installed": True},
+            "helper_integrity_status": partner_preflight.INTEGRITY_VERIFIED,
+            "release_verification_status": partner_preflight.RELEASE_NON_CURRENT,
+            "release_sha": "c46dfdbac218dd0a54606067fe9e91aae8e56b31",
+            "expected_release_sha": "8ea73666c9cfb5b9d3b885d42935298532e7950c",
+            "deployment_ready": False,
+        }
+        f2 = io.StringIO()
+        with redirect_stdout(f2):
+            partner_preflight.print_human_report(jarvis_report)
+        out2 = f2.getvalue()
+        self.assertIn("Installed & Verified (SHA-256 matches manifest entry) [OK]", out2)
+        self.assertIn("Non-Current Release (Installed: c46dfdbac218dd0a54606067fe9e91aae8e56b31, Checkout: 8ea73666c9cfb5b9d3b885d42935298532e7950c) [ACTION REQUIRED]", out2)
+        self.assertIn("Deploy Ready : [ACTION REQUIRED]", out2)
 
     def test_manifest_missing_helper_entry(self):
-        """Manifest without privileged_helper.py in files array is flagged malformed."""
+        """Test 12a: Manifest without privileged_helper.py in files array is flagged malformed."""
         helper_path = self.temp_dir / "privileged_helper.py"
         helper_path.write_bytes(b"content\n")
 
@@ -368,14 +661,15 @@ class TestPartnerPreflight(unittest.TestCase):
         status = partner_preflight.get_helper_deployment_status(
             helper_path_override=helper_path,
             manifest_path_override=manifest_path,
+            checkout_sha_override="8ea73666c9cfb5b9d3b885d42935298532e7950c",
         )
-        self.assertFalse(status["ready"])
-        self.assertFalse(status["deployment_manifest"]["sha_match"])
-        self.assertEqual(status["deployment_manifest"]["verification_status"], "UNVERIFIED_MALFORMED_MANIFEST")
+        self.assertFalse(status["deployment_ready"])
+        self.assertFalse(status["helper_sha_match"])
+        self.assertEqual(status["helper_integrity_status"], partner_preflight.INTEGRITY_UNVERIFIABLE_MANIFEST_INVALID)
         self.assertIn("Missing 'privileged_helper.py' entry", status["deployment_manifest"]["error"])
 
     def test_manifest_duplicate_helper_entries(self):
-        """Manifest with multiple privileged_helper.py entries in files array is rejected."""
+        """Test 12b: Manifest with multiple privileged_helper.py entries in files array is rejected."""
         helper_path = self.temp_dir / "privileged_helper.py"
         helper_content = b"content\n"
         helper_path.write_bytes(helper_content)
@@ -394,13 +688,14 @@ class TestPartnerPreflight(unittest.TestCase):
         status = partner_preflight.get_helper_deployment_status(
             helper_path_override=helper_path,
             manifest_path_override=manifest_path,
+            checkout_sha_override="8ea73666c9cfb5b9d3b885d42935298532e7950c",
         )
-        self.assertFalse(status["ready"])
-        self.assertEqual(status["deployment_manifest"]["verification_status"], "UNVERIFIED_MALFORMED_MANIFEST")
+        self.assertFalse(status["deployment_ready"])
+        self.assertEqual(status["helper_integrity_status"], partner_preflight.INTEGRITY_UNVERIFIABLE_MANIFEST_INVALID)
         self.assertIn("Duplicate 'privileged_helper.py' entries", status["deployment_manifest"]["error"])
 
     def test_manifest_invalid_sha256_format(self):
-        """Manifest with non-hex or non-64-character SHA is rejected as malformed."""
+        """Test 12c: Manifest with non-hex or non-64-character SHA is rejected as malformed."""
         helper_path = self.temp_dir / "privileged_helper.py"
         helper_path.write_bytes(b"content\n")
 
@@ -415,13 +710,14 @@ class TestPartnerPreflight(unittest.TestCase):
         status = partner_preflight.get_helper_deployment_status(
             helper_path_override=helper_path,
             manifest_path_override=manifest_path,
+            checkout_sha_override="8ea73666c9cfb5b9d3b885d42935298532e7950c",
         )
-        self.assertFalse(status["ready"])
-        self.assertEqual(status["deployment_manifest"]["verification_status"], "UNVERIFIED_MALFORMED_MANIFEST")
+        self.assertFalse(status["deployment_ready"])
+        self.assertEqual(status["helper_integrity_status"], partner_preflight.INTEGRITY_UNVERIFIABLE_MANIFEST_INVALID)
         self.assertIn("Invalid SHA-256", status["deployment_manifest"]["error"])
 
     def test_manifest_malformed_json_and_non_dict(self):
-        """Manifest with broken JSON syntax or non-object root is rejected as malformed."""
+        """Test 12d: Manifest with broken JSON syntax or non-object root is rejected as malformed."""
         helper_path = self.temp_dir / "privileged_helper.py"
         helper_path.write_bytes(b"content\n")
 
@@ -431,163 +727,20 @@ class TestPartnerPreflight(unittest.TestCase):
         status = partner_preflight.get_helper_deployment_status(
             helper_path_override=helper_path,
             manifest_path_override=manifest_path,
+            checkout_sha_override="8ea73666c9cfb5b9d3b885d42935298532e7950c",
         )
-        self.assertFalse(status["ready"])
-        self.assertEqual(status["deployment_manifest"]["verification_status"], "UNVERIFIED_MALFORMED_MANIFEST")
+        self.assertFalse(status["deployment_ready"])
+        self.assertEqual(status["helper_integrity_status"], partner_preflight.INTEGRITY_UNVERIFIABLE_MANIFEST_INVALID)
         self.assertIn("Malformed manifest JSON", status["deployment_manifest"]["error"])
 
         manifest_path.write_text("[1, 2, 3]", encoding="utf-8")
         status2 = partner_preflight.get_helper_deployment_status(
             helper_path_override=helper_path,
             manifest_path_override=manifest_path,
+            checkout_sha_override="8ea73666c9cfb5b9d3b885d42935298532e7950c",
         )
-        self.assertEqual(status2["deployment_manifest"]["verification_status"], "UNVERIFIED_MALFORMED_MANIFEST")
+        self.assertEqual(status2["helper_integrity_status"], partner_preflight.INTEGRITY_UNVERIFIABLE_MANIFEST_INVALID)
         self.assertIn("Manifest JSON root must be an object/dict", status2["deployment_manifest"]["error"])
-
-    def test_unreadable_helper_file_permission_denied(self):
-        """Preflight marks unreadable helper file as UNVERIFIED_PERMISSION_REQUIRED with actionable guidance."""
-        helper_path = self.temp_dir / "privileged_helper.py"
-        helper_path.write_bytes(b"helper content\n")
-
-        manifest_path = self.temp_dir / "deployment_manifest.json"
-        manifest_path.write_text(json.dumps({
-            "files": [{"path": "privileged_helper.py", "sha256": "a" * 64, "mode": "0750"}]
-        }), encoding="utf-8")
-
-        with patch.object(Path, "read_bytes", side_effect=PermissionError(f"Permission denied: {helper_path}")):
-            status = partner_preflight.get_helper_deployment_status(
-                helper_path_override=helper_path,
-                manifest_path_override=manifest_path,
-            )
-            self.assertFalse(status["ready"])
-            self.assertIsNone(status["helper_executable"]["sha256"])
-            self.assertEqual(status["helper_executable"]["verification_status"], "UNVERIFIED_PERMISSION_REQUIRED")
-            self.assertEqual(status["deployment_manifest"]["verification_status"], "UNVERIFIED_PERMISSION_REQUIRED")
-            self.assertIn("Permission denied", status["helper_executable"]["read_error"])
-
-            # Verify remediation guidance generated from this status
-            mock_rep = {
-                "os_and_kernel": {"compatible": True},
-                "python_and_libraries": {"compatible": True, "dependencies": {}},
-                "system_tools": {"compatible": True, "tools": {}},
-                "browsers": {"all_exact_match": True, "browsers": {}},
-                "privileged_helper": status,
-                "storage": {"sufficient_for_campaign": True},
-                "configuration_files": {"all_present": True},
-            }
-            actions = partner_preflight.compute_remediation_actions(mock_rep)
-            perm_actions = [a for a in actions if "Permission denied" in a["issue"]]
-            self.assertEqual(len(perm_actions), 1)
-            self.assertIn("sudo python3 lab/partner_preflight.py", perm_actions[0]["remediation"])
-
-    def test_manifest_installed_release_sha_mismatch(self):
-        """Mismatch between manifest release SHA and checkout SHA triggers UNVERIFIED_RELEASE_MISMATCH."""
-        helper_path = self.temp_dir / "privileged_helper.py"
-        helper_content = b"content\n"
-        helper_path.write_bytes(helper_content)
-        helper_sha = hashlib.sha256(helper_content).hexdigest()
-
-        manifest_path = self.temp_dir / "deployment_manifest.json"
-        manifest_release = "0000000000000000000000000000000000000001"
-        expected_release = "8ea73666c9cfb5b9d3b885d42935298532e7950c"
-        manifest_data = {
-            "release_sha": manifest_release,
-            "files": [
-                {"path": "privileged_helper.py", "sha256": helper_sha, "mode": "0750"}
-            ]
-        }
-        manifest_path.write_text(json.dumps(manifest_data), encoding="utf-8")
-
-        status = partner_preflight.get_helper_deployment_status(
-            helper_path_override=helper_path,
-            manifest_path_override=manifest_path,
-            expected_release_sha=expected_release,
-        )
-        self.assertFalse(status["ready"])
-        self.assertFalse(status["deployment_manifest"]["sha_match"])
-        self.assertEqual(status["deployment_manifest"]["verification_status"], "UNVERIFIED_RELEASE_MISMATCH")
-        self.assertFalse(status["deployment_manifest"]["release_sha_match"])
-        self.assertEqual(status["deployment_manifest"]["release_sha"], manifest_release)
-        self.assertEqual(status["deployment_manifest"]["expected_release_sha"], expected_release)
-
-        # Check remediation action
-        mock_rep = {
-            "os_and_kernel": {"compatible": True},
-            "python_and_libraries": {"compatible": True, "dependencies": {}},
-            "system_tools": {"compatible": True, "tools": {}},
-            "browsers": {"all_exact_match": True, "browsers": {}},
-            "privileged_helper": status,
-            "storage": {"sufficient_for_campaign": True},
-            "configuration_files": {"all_present": True},
-        }
-        actions = partner_preflight.compute_remediation_actions(mock_rep)
-        mismatch_actions = [a for a in actions if "release SHA" in a["issue"]]
-        self.assertEqual(len(mismatch_actions), 1)
-        self.assertIn("Re-deploy privileged helper from the current repository checkout", mismatch_actions[0]["remediation"])
-
-    def test_manifest_exact_matching_installed_release_sha(self):
-        """Matching release SHA and matching helper hash gives VERIFIED state."""
-        helper_path = self.temp_dir / "privileged_helper.py"
-        helper_content = b"content\n"
-        helper_path.write_bytes(helper_content)
-        helper_sha = hashlib.sha256(helper_content).hexdigest()
-
-        sudoers_path = self.temp_dir / "ps028-helper"
-        sudoers_path.write_text("sudoers\n", encoding="utf-8")
-
-        release_sha = "8ea73666c9cfb5b9d3b885d42935298532e7950c"
-        manifest_path = self.temp_dir / "deployment_manifest.json"
-        manifest_data = {
-            "release_sha": release_sha,
-            "files": [
-                {"path": "privileged_helper.py", "sha256": helper_sha, "mode": "0750"}
-            ]
-        }
-        manifest_path.write_text(json.dumps(manifest_data), encoding="utf-8")
-
-        with patch("pwd.getpwnam", return_value=MagicMock()):
-            status = partner_preflight.get_helper_deployment_status(
-                helper_path_override=helper_path,
-                sudoers_path_override=sudoers_path,
-                manifest_path_override=manifest_path,
-                expected_release_sha=release_sha,
-            )
-            self.assertTrue(status["ready"])
-            self.assertEqual(status["deployment_manifest"]["verification_status"], "VERIFIED")
-            self.assertTrue(status["deployment_manifest"]["release_sha_match"])
-
-    def test_print_human_report_diagnostics(self):
-        """print_human_report outputs expected diagnostic text for permission denied and release mismatch."""
-        import io
-        from contextlib import redirect_stdout
-
-        base_report = partner_preflight.run_partner_preflight()
-        base_report["privileged_helper"] = {
-            "service_account_ps028_sv": True,
-            "helper_executable": {"installed": True, "verification_status": "UNVERIFIED_PERMISSION_REQUIRED"},
-            "sudoers_drop_in": {"installed": True},
-            "deployment_manifest": {
-                "installed": True,
-                "sha_match": False,
-                "verification_status": "UNVERIFIED_PERMISSION_REQUIRED",
-                "error": "Permission denied",
-            },
-        }
-        base_report["remediation_actions"] = [
-            {
-                "category": "Privileged Helper",
-                "issue": "Cannot read /usr/local/libexec/ps028/privileged_helper.py (Permission denied)",
-                "remediation": "Run read-only preflight with sufficient permission (sudo python3 lab/partner_preflight.py)",
-            }
-        ]
-
-        f = io.StringIO()
-        with redirect_stdout(f):
-            partner_preflight.print_human_report(base_report)
-        out = f.getvalue()
-        self.assertIn("Installed (Permission Denied to read)", out)
-        self.assertIn("Unverified (Permission Denied to read helper)", out)
-        self.assertIn("sudo python3 lab/partner_preflight.py", out)
 
     def test_readiness_state_model_five_states(self):
         """Verifies the 5-state readiness model transitions."""

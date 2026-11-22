@@ -65,6 +65,20 @@ STATE_BROWSER_TOOLCHAIN_READY = "BROWSER_TOOLCHAIN_READY"
 STATE_HELPER_DEPLOYMENT_READY = "HELPER_DEPLOYMENT_READY"
 STATE_REPLICATION_READY_FOR_AUTHORIZATION = "REPLICATION_READY_FOR_AUTHORIZATION"
 
+# Helper File Integrity Verification States
+INTEGRITY_VERIFIED = "INTEGRITY_VERIFIED"
+INTEGRITY_FAILED = "INTEGRITY_FAILED"
+INTEGRITY_UNVERIFIABLE_PERMISSION_REQUIRED = "INTEGRITY_UNVERIFIABLE_PERMISSION_REQUIRED"
+INTEGRITY_UNVERIFIABLE_MANIFEST_INVALID = "INTEGRITY_UNVERIFIABLE_MANIFEST_INVALID"
+INTEGRITY_NOT_INSTALLED = "INTEGRITY_NOT_INSTALLED"
+
+# Release Verification States
+RELEASE_CURRENT = "CURRENT_RELEASE"
+RELEASE_NON_CURRENT = "NON_CURRENT_RELEASE"
+RELEASE_METADATA_MISSING = "RELEASE_METADATA_MISSING"
+RELEASE_CHECKOUT_UNAVAILABLE = "CHECKOUT_SHA_UNAVAILABLE"
+RELEASE_METADATA_INVALID = "RELEASE_METADATA_INVALID"
+
 
 def parse_semver(ver_str: str) -> Tuple[int, ...]:
     """Extracts numeric version tuple from a version string (e.g. '6.1.0-1ubuntu1' -> (6, 1, 0))."""
@@ -542,31 +556,61 @@ def get_storage_status(target_path: Path = REPO_ROOT) -> Dict[str, Any]:
         }
 
 
-def get_checkout_sha() -> Optional[str]:
+def get_checkout_sha(
+    repo_root: Optional[Path] = None,
+    checkout_sha_override: Optional[str] = None,
+    expected_pin: Optional[str] = None,
+) -> Optional[str]:
     """
-    Resolves the explicitly pinned repository checkout SHA.
-    Checks environment variable PS028_EXPECTED_RELEASE_SHA first, then git rev-parse HEAD.
+    Resolves and verifies the repository checkout SHA.
+    1. Resolves the actual Git checkout SHA from checkout_sha_override or `git rev-parse HEAD`.
+    2. Validates any supplied expected release pin (from expected_pin or PS028_EXPECTED_RELEASE_SHA).
+       - An expected pin must be a valid 40-character hexadecimal string.
+       - A conflicting or stale pin cannot override the actual checkout; if it does not match,
+         the checkout cannot be validated as the approved release and returns None (fail-closed).
+    3. Returns the verified 40-character lowercase hexadecimal checkout SHA, or None if unavailable/conflicting.
     """
-    env_sha = os.environ.get("PS028_EXPECTED_RELEASE_SHA") or os.environ.get("PS028_CHECKOUT_SHA")
-    if env_sha and re.match(r'^[0-9a-fA-F]{40}$', env_sha.strip()):
-        return env_sha.strip().lower()
+    actual_checkout: Optional[str] = None
 
-    try:
-        res = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=str(REPO_ROOT),
-            capture_output=True,
-            text=True,
-            check=True,
-            timeout=5.0
-        )
-        sha = res.stdout.strip().lower()
-        if re.match(r'^[0-9a-fA-F]{40}$', sha):
-            return sha
-    except Exception:
-        pass
+    if checkout_sha_override is not None:
+        raw_override = checkout_sha_override.strip()
+        if re.match(r'^[0-9a-fA-F]{40}$', raw_override):
+            actual_checkout = raw_override.lower()
+        else:
+            return None
+    else:
+        root = repo_root or REPO_ROOT
+        try:
+            res = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=str(root),
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=5.0
+            )
+            raw_git = res.stdout.strip()
+            if re.match(r'^[0-9a-fA-F]{40}$', raw_git):
+                actual_checkout = raw_git.lower()
+        except Exception:
+            pass
 
-    return None
+    pin = expected_pin or os.environ.get("PS028_EXPECTED_RELEASE_SHA") or os.environ.get("PS028_CHECKOUT_SHA")
+    if pin is not None and pin.strip():
+        raw_pin = pin.strip()
+        if not re.match(r'^[0-9a-fA-F]{40}$', raw_pin):
+            # Malformed pin: fail closed
+            return None
+        pin_lower = raw_pin.lower()
+        if actual_checkout is None:
+            # Checkout unavailable: fail closed
+            return None
+        if actual_checkout != pin_lower:
+            # Stale or conflicting environment pin: cannot override actual checkout, fail closed
+            return None
+        return actual_checkout
+
+    return actual_checkout
 
 
 def get_helper_deployment_status(
@@ -574,16 +618,29 @@ def get_helper_deployment_status(
     sudoers_path_override: Optional[Path] = None,
     manifest_path_override: Optional[Path] = None,
     expected_release_sha: Optional[str] = None,
+    checkout_sha_override: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Inspects deployment of privileged helper, sudoers drop-in, and deployment manifest.
-    Verifies helper integrity against deployment manifest SHA-256 and release commit SHA.
+    Independently evaluates helper-file integrity and release verification.
     """
     helper_path = helper_path_override or Path("/usr/local/libexec/ps028/privileged_helper.py")
     sudoers_path = sudoers_path_override or Path("/etc/sudoers.d/ps028-helper")
     manifest_path = manifest_path_override or Path("/usr/local/libexec/ps028/deployment_manifest.json")
 
-    checkout_sha = (expected_release_sha or get_checkout_sha() or "").lower() or None
+    checkout_sha = get_checkout_sha(
+        checkout_sha_override=checkout_sha_override,
+        expected_pin=expected_release_sha,
+    )
+    reported_expected_release_sha = checkout_sha or (
+        expected_release_sha.strip().lower()
+        if (expected_release_sha and re.match(r'^[0-9a-fA-F]{40}$', expected_release_sha.strip()))
+        else None
+    ) or (
+        os.environ.get("PS028_EXPECTED_RELEASE_SHA", "").strip().lower()
+        if re.match(r'^[0-9a-fA-F]{40}$', os.environ.get("PS028_EXPECTED_RELEASE_SHA", "").strip())
+        else None
+    )
 
     helper_installed = False
     helper_mode = None
@@ -626,6 +683,7 @@ def get_helper_deployment_status(
     manifest_error: Optional[str] = None
     expected_helper_sha: Optional[str] = None
     manifest_release_sha: Optional[str] = None
+    manifest_release_sha_invalid = False
 
     try:
         if manifest_path.is_file():
@@ -646,78 +704,79 @@ def get_helper_deployment_status(
 
     if manifest_data is not None and not manifest_error:
         # Extract and validate release_sha if present
-        raw_release_sha = manifest_data.get("release_sha")
-        if raw_release_sha is not None:
+        if "release_sha" in manifest_data:
+            raw_release_sha = manifest_data["release_sha"]
             if isinstance(raw_release_sha, str) and re.match(r'^[0-9a-fA-F]{40}$', raw_release_sha.strip()):
                 manifest_release_sha = raw_release_sha.strip().lower()
             else:
+                manifest_release_sha_invalid = True
                 manifest_error = f"Invalid release_sha in manifest: {raw_release_sha!r} (must be 40-character hex)"
 
         # Extract and validate expected_helper_sha from files array or top-level helper_sha256
-        if not manifest_error:
-            if "files" in manifest_data:
-                files_entry = manifest_data["files"]
-                if not isinstance(files_entry, list):
-                    manifest_error = "Manifest 'files' section must be a list"
-                else:
-                    helper_entries = []
-                    for idx, item in enumerate(files_entry):
-                        if not isinstance(item, dict):
-                            manifest_error = f"Malformed file record at index {idx} in manifest files"
-                            break
-                        if item.get("path") == "privileged_helper.py":
-                            helper_entries.append(item)
-
-                    if not manifest_error:
-                        if len(helper_entries) == 0:
-                            manifest_error = "Missing 'privileged_helper.py' entry in manifest files"
-                        elif len(helper_entries) > 1:
-                            manifest_error = f"Duplicate 'privileged_helper.py' entries in manifest files (found {len(helper_entries)})"
-                        else:
-                            raw_sha = helper_entries[0].get("sha256")
-                            if not isinstance(raw_sha, str) or not re.match(r'^[0-9a-fA-F]{64}$', raw_sha.strip()):
-                                manifest_error = f"Invalid SHA-256 for privileged_helper.py in manifest: {raw_sha!r}"
-                            else:
-                                expected_helper_sha = raw_sha.strip().lower()
-            elif "helper_sha256" in manifest_data:
-                # Backward compatibility with top-level helper_sha256
-                raw_top_sha = manifest_data["helper_sha256"]
-                if not isinstance(raw_top_sha, str) or not re.match(r'^[0-9a-fA-F]{64}$', raw_top_sha.strip()):
-                    manifest_error = f"Invalid top-level helper_sha256 in manifest: {raw_top_sha!r}"
-                else:
-                    expected_helper_sha = raw_top_sha.strip().lower()
+        if "files" in manifest_data:
+            files_entry = manifest_data["files"]
+            if not isinstance(files_entry, list):
+                manifest_error = "Manifest 'files' section must be a list"
             else:
-                manifest_error = "Manifest lacks both 'files' array and top-level 'helper_sha256'"
+                helper_entries = []
+                for idx, item in enumerate(files_entry):
+                    if not isinstance(item, dict):
+                        manifest_error = f"Malformed file record at index {idx} in manifest files"
+                        break
+                    if item.get("path") == "privileged_helper.py":
+                        helper_entries.append(item)
 
-    # Helper hash match comparison
-    helper_sha_match = False
-    if helper_sha256 and expected_helper_sha and not manifest_error and not helper_permission_denied:
-        helper_sha_match = (helper_sha256 == expected_helper_sha)
+                if not manifest_error:
+                    if len(helper_entries) == 0:
+                        manifest_error = "Missing 'privileged_helper.py' entry in manifest files"
+                    elif len(helper_entries) > 1:
+                        manifest_error = f"Duplicate 'privileged_helper.py' entries in manifest files (found {len(helper_entries)})"
+                    else:
+                        raw_sha = helper_entries[0].get("sha256")
+                        if not isinstance(raw_sha, str) or not re.match(r'^[0-9a-fA-F]{64}$', raw_sha.strip()):
+                            manifest_error = f"Invalid SHA-256 for privileged_helper.py in manifest: {raw_sha!r}"
+                        else:
+                            expected_helper_sha = raw_sha.strip().lower()
+        elif "helper_sha256" in manifest_data:
+            # Backward compatibility with top-level helper_sha256
+            raw_top_sha = manifest_data["helper_sha256"]
+            if not isinstance(raw_top_sha, str) or not re.match(r'^[0-9a-fA-F]{64}$', raw_top_sha.strip()):
+                manifest_error = f"Invalid top-level helper_sha256 in manifest: {raw_top_sha!r}"
+            else:
+                expected_helper_sha = raw_top_sha.strip().lower()
+        else:
+            manifest_error = "Manifest lacks both 'files' array and top-level 'helper_sha256'"
 
-    # Release SHA comparison
-    release_sha_match: Optional[bool] = None
-    if checkout_sha is not None and manifest_release_sha is not None:
-        release_sha_match = (checkout_sha == manifest_release_sha)
-    elif checkout_sha is not None and manifest_release_sha is None:
-        # Legacy manifest without release_sha
-        release_sha_match = None
-
-    # Determine structured verification status
-    if helper_permission_denied:
-        verification_status = "UNVERIFIED_PERMISSION_REQUIRED"
-    elif not helper_installed or not manifest_installed:
-        verification_status = "NOT_INSTALLED"
-    elif manifest_error:
-        verification_status = "UNVERIFIED_MALFORMED_MANIFEST"
-    elif release_sha_match is False:
-        verification_status = "UNVERIFIED_RELEASE_MISMATCH"
-    elif not helper_sha_match:
-        verification_status = "UNVERIFIED_HASH_MISMATCH"
+    # 1. Independent Helper Integrity Determination
+    if not helper_installed:
+        helper_integrity_status = INTEGRITY_NOT_INSTALLED
+    elif helper_permission_denied:
+        helper_integrity_status = INTEGRITY_UNVERIFIABLE_PERMISSION_REQUIRED
+    elif not manifest_installed or manifest_error is not None or expected_helper_sha is None:
+        helper_integrity_status = INTEGRITY_UNVERIFIABLE_MANIFEST_INVALID
+    elif helper_sha256 != expected_helper_sha:
+        helper_integrity_status = INTEGRITY_FAILED
     else:
-        verification_status = "VERIFIED"
+        helper_integrity_status = INTEGRITY_VERIFIED
 
-    # Overall manifest SHA match boolean (True ONLY when verified and no release mismatch)
-    manifest_sha_match = (verification_status == "VERIFIED")
+    helper_sha_match = (helper_integrity_status == INTEGRITY_VERIFIED)
+
+    # 2. Independent Release Verification Determination
+    if not manifest_installed or (manifest_data is not None and "release_sha" not in manifest_data):
+        release_verification_status = RELEASE_METADATA_MISSING
+        release_sha_match = None
+    elif manifest_release_sha_invalid:
+        release_verification_status = RELEASE_METADATA_INVALID
+        release_sha_match = False
+    elif checkout_sha is None:
+        release_verification_status = RELEASE_CHECKOUT_UNAVAILABLE
+        release_sha_match = None
+    elif manifest_release_sha == checkout_sha:
+        release_verification_status = RELEASE_CURRENT
+        release_sha_match = True
+    else:
+        release_verification_status = RELEASE_NON_CURRENT
+        release_sha_match = False
 
     # Check dedicated service account ps028-sv
     has_service_account = False
@@ -728,12 +787,14 @@ def get_helper_deployment_status(
     except KeyError:
         pass
 
-    ready = (
+    # 3. Overall Strict Deployment Readiness
+    deployment_ready = (
         helper_installed and
-        sudoers_installed and
+        (helper_integrity_status == INTEGRITY_VERIFIED) and
         manifest_installed and
-        manifest_sha_match and
-        (release_sha_match is not False) and
+        (manifest_error is None) and
+        (release_verification_status == RELEASE_CURRENT) and
+        sudoers_installed and
         has_service_account
     )
 
@@ -743,7 +804,11 @@ def get_helper_deployment_status(
             "installed": helper_installed,
             "mode": helper_mode,
             "sha256": helper_sha256,
-            "verification_status": verification_status,
+            "helper_sha_match": helper_sha_match,
+            "sha_match": helper_sha_match,
+            "helper_integrity_status": helper_integrity_status,
+            "integrity_status": helper_integrity_status,
+            "verification_status": helper_integrity_status,
             "read_error": helper_read_error,
         },
         "sudoers_drop_in": {
@@ -754,16 +819,26 @@ def get_helper_deployment_status(
         "deployment_manifest": {
             "path": str(manifest_path),
             "installed": manifest_installed,
-            "sha_match": manifest_sha_match,
-            "verification_status": verification_status,
+            "sha_match": helper_sha_match,
+            "helper_sha_match": helper_sha_match,
+            "helper_integrity_status": helper_integrity_status,
             "release_sha": manifest_release_sha,
-            "expected_release_sha": checkout_sha,
+            "expected_release_sha": reported_expected_release_sha,
             "release_sha_match": release_sha_match,
+            "release_verification_status": release_verification_status,
+            "verification_status": release_verification_status,
             "expected_helper_sha256": expected_helper_sha,
             "error": manifest_error or (helper_read_error if helper_permission_denied else None),
         },
+        "helper_sha_match": helper_sha_match,
+        "helper_integrity_status": helper_integrity_status,
+        "release_sha": manifest_release_sha,
+        "expected_release_sha": reported_expected_release_sha,
+        "release_sha_match": release_sha_match,
+        "release_verification_status": release_verification_status,
         "service_account_ps028_sv": has_service_account,
-        "ready": ready,
+        "deployment_ready": deployment_ready,
+        "ready": deployment_ready,
     }
 
 
@@ -879,46 +954,73 @@ def compute_remediation_actions(report: Dict[str, Any]) -> List[Dict[str, str]]:
 
     # 5. Privileged Helper
     helper = report["privileged_helper"]
-    if not helper.get("ready", False):
+    if not helper.get("deployment_ready", helper.get("ready", False)):
         if not helper.get("service_account_ps028_sv", False):
             actions.append({
                 "category": "Security Identity",
                 "issue": "Dedicated service account 'ps028-sv' does not exist",
                 "remediation": "Create service account: sudo useradd -r -s /usr/sbin/nologin -d /nonexistent -M ps028-sv",
             })
-        if not helper.get("helper_executable", {}).get("installed", False):
+
+        h_status = helper.get("helper_integrity_status")
+        r_status = helper.get("release_verification_status")
+
+        if h_status == INTEGRITY_NOT_INSTALLED:
             actions.append({
                 "category": "Privileged Helper",
                 "issue": "Privileged helper is not deployed to /usr/local/libexec/ps028/",
-                "remediation": "Perform deployment dry-run: ./lab/deploy_privileged_helper.sh --dry-run; then deploy with authorization.",
+                "remediation": "Perform deployment dry-run: ./lab/deploy_privileged_helper.sh --dry-run; obtain authorization before deploying.",
             })
-        elif helper.get("helper_executable", {}).get("verification_status") == "UNVERIFIED_PERMISSION_REQUIRED":
+        elif h_status == INTEGRITY_UNVERIFIABLE_PERMISSION_REQUIRED:
             actions.append({
                 "category": "Privileged Helper",
                 "issue": "Cannot read /usr/local/libexec/ps028/privileged_helper.py to verify checksum (Permission denied)",
                 "remediation": "Run read-only preflight with sufficient permission (e.g. sudo python3 lab/partner_preflight.py) to allow checksum verification of root-owned helper.",
             })
-        elif not helper.get("deployment_manifest", {}).get("installed", False):
-            actions.append({
-                "category": "Privileged Helper",
-                "issue": "Deployment manifest is missing at /usr/local/libexec/ps028/deployment_manifest.json",
-                "remediation": "Re-run ./lab/deploy_privileged_helper.sh with root privileges after verifying clean Git tree.",
-            })
-        elif helper.get("deployment_manifest", {}).get("verification_status") == "UNVERIFIED_RELEASE_MISMATCH":
-            mf = helper.get("deployment_manifest", {})
-            actions.append({
-                "category": "Privileged Helper",
-                "issue": f"Installed helper release SHA '{mf.get('release_sha')}' does not match repository checkout SHA '{mf.get('expected_release_sha')}'",
-                "remediation": "Re-deploy privileged helper from the current repository checkout: sudo ./lab/deploy_privileged_helper.sh",
-            })
-        elif not helper.get("deployment_manifest", {}).get("sha_match", False):
+        elif h_status == INTEGRITY_UNVERIFIABLE_MANIFEST_INVALID:
             mf_err = helper.get("deployment_manifest", {}).get("error")
             err_detail = f" ({mf_err})" if mf_err else ""
             actions.append({
                 "category": "Privileged Helper",
-                "issue": f"Helper executable SHA-256 does not match deployment manifest{err_detail}",
-                "remediation": "Re-run ./lab/deploy_privileged_helper.sh with root privileges after verifying clean Git tree.",
+                "issue": f"Deployment manifest is missing or invalid{err_detail}",
+                "remediation": "Re-run ./lab/deploy_privileged_helper.sh --dry-run to inspect, then deploy with root privileges after verifying clean Git tree.",
             })
+        elif h_status == INTEGRITY_FAILED:
+            actions.append({
+                "category": "Privileged Helper",
+                "issue": "Helper executable SHA-256 does not match deployment manifest (Checksum failure)",
+                "remediation": "Helper executable appears corrupted or modified. Re-deploy privileged helper with authorization from approved checkout: sudo ./lab/deploy_privileged_helper.sh",
+            })
+
+        # Release provenance remediation
+        if r_status == RELEASE_NON_CURRENT:
+            mf_rel = helper.get("release_sha")
+            exp_rel = helper.get("expected_release_sha")
+            actions.append({
+                "category": "Privileged Helper",
+                "issue": f"Installed helper release SHA '{mf_rel}' differs from current checkout SHA '{exp_rel}' (Non-current release)",
+                "remediation": "Update the partner checkout to the approved commit, perform deployment dry-run (./lab/deploy_privileged_helper.sh --dry-run), and obtain operator authorization before re-deploying helper.",
+            })
+        elif r_status == RELEASE_METADATA_MISSING:
+            actions.append({
+                "category": "Privileged Helper",
+                "issue": "Deployment manifest lacks release commit SHA (Legacy manifest)",
+                "remediation": "Re-deploy privileged helper from the approved release checkout to record release provenance: sudo ./lab/deploy_privileged_helper.sh",
+            })
+        elif r_status == RELEASE_METADATA_INVALID:
+            mf_err = helper.get("deployment_manifest", {}).get("error")
+            actions.append({
+                "category": "Privileged Helper",
+                "issue": f"Deployment manifest contains invalid release SHA format ({mf_err})",
+                "remediation": "Re-deploy privileged helper with authorization from approved checkout: sudo ./lab/deploy_privileged_helper.sh",
+            })
+        elif r_status == RELEASE_CHECKOUT_UNAVAILABLE:
+            actions.append({
+                "category": "Privileged Helper",
+                "issue": "Repository checkout SHA is unavailable or conflicts with environment release pin",
+                "remediation": "Ensure repository has a valid Git checkout (git rev-parse HEAD) and that PS028_EXPECTED_RELEASE_SHA matches the local checkout.",
+            })
+
         if not helper.get("sudoers_drop_in", {}).get("installed", False):
             actions.append({
                 "category": "Privileged Helper",
@@ -954,6 +1056,7 @@ def run_partner_preflight(
     sudoers_path_override: Optional[Path] = None,
     manifest_path_override: Optional[Path] = None,
     expected_release_sha: Optional[str] = None,
+    checkout_sha_override: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Executes the complete non-mutating partner preflight inspection and
@@ -970,6 +1073,7 @@ def run_partner_preflight(
         sudoers_path_override=sudoers_path_override,
         manifest_path_override=manifest_path_override,
         expected_release_sha=expected_release_sha,
+        checkout_sha_override=checkout_sha_override,
     )
     configs_info = get_configuration_files()
 
@@ -984,7 +1088,7 @@ def run_partner_preflight(
     )
 
     browsers_ok = browsers_info["all_exact_match"]
-    helper_ok = helper_info["ready"]
+    helper_ok = helper_info.get("deployment_ready", helper_info.get("ready", False))
 
     # Evaluate 5-state model
     if not host_prereqs_ok:
@@ -1091,35 +1195,44 @@ def print_human_report(report: Dict[str, Any]) -> None:
     helper = report["privileged_helper"]
     h_exec = helper.get("helper_executable", {})
     mf = helper.get("deployment_manifest", {})
-    v_stat = mf.get("verification_status")
+    h_status = helper.get("helper_integrity_status") or h_exec.get("helper_integrity_status")
+    r_status = helper.get("release_verification_status") or mf.get("release_verification_status")
 
-    if not h_exec.get("installed", False):
+    if h_status == INTEGRITY_NOT_INSTALLED:
         helper_str = "Not Deployed [PENDING]"
-    elif h_exec.get("verification_status") == "UNVERIFIED_PERMISSION_REQUIRED":
+    elif h_status == INTEGRITY_UNVERIFIABLE_PERMISSION_REQUIRED:
         helper_str = "Installed (Permission Denied to read) [ACTION REQUIRED]"
+    elif h_status == INTEGRITY_UNVERIFIABLE_MANIFEST_INVALID:
+        helper_str = "Installed (Unverified - Manifest Missing/Invalid) [ACTION REQUIRED]"
+    elif h_status == INTEGRITY_FAILED:
+        helper_str = "Installed (Checksum Mismatch - Integrity Failed) [FAIL]"
+    elif h_status == INTEGRITY_VERIFIED:
+        helper_str = "Installed & Verified (SHA-256 matches manifest entry) [OK]"
     else:
-        helper_str = "Installed [OK]"
+        helper_str = f"Unknown ({h_status})"
 
-    if mf.get("sha_match", False):
-        manifest_str = "Installed & Verified [OK]"
-    elif v_stat == "UNVERIFIED_PERMISSION_REQUIRED":
-        manifest_str = "Unverified (Permission Denied to read helper) [ACTION REQUIRED]"
-    elif v_stat == "UNVERIFIED_RELEASE_MISMATCH":
-        manifest_str = f"Release Mismatch ({mf.get('release_sha')} != {mf.get('expected_release_sha')}) [ACTION REQUIRED]"
-    elif v_stat == "UNVERIFIED_HASH_MISMATCH":
-        manifest_str = "Checksum Mismatch [ACTION REQUIRED]"
-    elif v_stat == "UNVERIFIED_MALFORMED_MANIFEST":
-        manifest_str = f"Malformed Manifest ({mf.get('error')}) [ACTION REQUIRED]"
-    elif mf.get("installed", False):
-        manifest_str = f"Unverified ({mf.get('error') or 'verification failed'}) [ACTION REQUIRED]"
+    if r_status == RELEASE_CURRENT:
+        release_str = f"Current Approved Release ({helper.get('release_sha')}) [OK]"
+    elif r_status == RELEASE_NON_CURRENT:
+        release_str = f"Non-Current Release (Installed: {helper.get('release_sha')}, Checkout: {helper.get('expected_release_sha')}) [ACTION REQUIRED]"
+    elif r_status == RELEASE_METADATA_MISSING:
+        release_str = "Release Metadata Missing (Legacy Manifest) [ACTION REQUIRED]"
+    elif r_status == RELEASE_METADATA_INVALID:
+        release_str = f"Invalid Release Metadata ({mf.get('error')}) [ACTION REQUIRED]"
+    elif r_status == RELEASE_CHECKOUT_UNAVAILABLE:
+        release_str = "Checkout SHA Unavailable or Pin Conflict [ACTION REQUIRED]"
     else:
-        manifest_str = "Not Deployed [PENDING]"
+        release_str = "Not Verified [PENDING]"
+
+    dep_ready_str = "[OK] (Ready for Authorization)" if helper.get("deployment_ready") else "[ACTION REQUIRED]"
 
     print("6. Privileged Helper Deployment Status:")
     print(f"   Service Acct : {'ps028-sv [OK]' if helper['service_account_ps028_sv'] else 'ps028-sv [MISSING]'}")
     print(f"   Helper Binary: {helper_str}")
     print(f"   Sudoers Rule : {'Installed [OK]' if helper['sudoers_drop_in']['installed'] else 'Not Deployed [PENDING]'}")
-    print(f"   Manifest     : {manifest_str}")
+    print(f"   Manifest     : {'Installed [OK]' if mf.get('installed') else 'Not Deployed [PENDING]'}")
+    print(f"   Release Verif: {release_str}")
+    print(f"   Deploy Ready : {dep_ready_str}")
     print()
 
     # 7. Configuration Files
