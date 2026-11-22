@@ -513,7 +513,7 @@ recover_prior_transaction() {
         echo "[WARN] Incomplete prior transaction detected in ${STATE_FILE}. Initiating state-dependent recovery..." >&2
 
         python3 -c '
-import sys, os, stat, json, hashlib, subprocess, shutil
+import sys, os, stat, json, hashlib, subprocess, shutil, importlib.util, marshal
 from pathlib import Path
 
 state_file = Path(sys.argv[1])
@@ -711,25 +711,71 @@ def verify_manifest(dir_path):
         if act_h != exp_h:
             return False, f"File {rel_p} hash mismatch: {act_h} vs {exp_h}"
 
-    allowed_dirs = {".", "lab", "lab/www"}
+    canonical_lab_py_modules = [
+        "__init__.py",
+        "identity.py",
+        "concurrency.py",
+        "impair.py",
+        "run_trial.py",
+        "analyze.py",
+        "teardown.py",
+        "dns_server.py",
+    ]
+    permitted_pyc_names = {
+        Path(importlib.util.cache_from_source(f"lab/{m}")).name
+        for m in canonical_lab_py_modules
+    }
+
+    allowed_dirs = {".", "lab", "lab/www", "lab/__pycache__"}
     for root, dirs, files in os.walk(dir_path, followlinks=False):
         rel_root = str(Path(root).relative_to(dir_path))
         if rel_root not in allowed_dirs:
             return False, f"Unexpected directory: {rel_root}"
+        if rel_root == "lab/__pycache__" and len(dirs) > 0:
+            return False, f"Nested directory inside bytecode cache: {dirs}"
         for d in dirs:
             dp = Path(root) / d
-            if dp.is_symlink():
+            if dp.is_symlink() or os.path.islink(str(dp)):
                 return False, f"Symlink directory: {dp}"
+            rel_dir = str(dp.relative_to(dir_path))
+            if rel_dir not in allowed_dirs:
+                return False, f"Unexpected directory: {rel_dir}"
             st_d = dp.stat()
             if not is_test and (st_d.st_uid != 0 or st_d.st_gid != 0):
                 return False, f"Directory {dp} not owned by root:root"
+            if st_d.st_mode & 0o022:
+                return False, f"Directory {dp} is group- or world-writable: {oct(st_d.st_mode)}"
             if (st_d.st_mode & 0o777) not in (0o755, 0o750):
                 return False, f"Directory {dp} unsafe mode: {oct(st_d.st_mode)}"
+            if st_d.st_mode & 0o7000:
+                return False, f"Directory {dp} has special bits: {oct(st_d.st_mode)}"
         for fn in files:
             fp = Path(root) / fn
-            if fp.is_symlink():
+            if fp.is_symlink() or os.path.islink(str(fp)):
                 return False, f"Symlink file: {fp}"
+            st_f = fp.stat()
+            if not stat.S_ISREG(st_f.st_mode):
+                return False, f"Special non-regular file: {fp}"
             rel_file = str(fp.relative_to(dir_path))
+            if rel_root == "lab/__pycache__":
+                if not is_test and (st_f.st_uid != 0 or st_f.st_gid != 0):
+                    return False, f"Bytecode cache file {rel_file} not owned by root:root"
+                if st_f.st_mode & 0o022:
+                    return False, f"Bytecode cache file {rel_file} is group- or world-writable"
+                if (st_f.st_mode & 0o777) not in (0o644, 0o640):
+                    return False, f"Bytecode cache file {rel_file} unsafe mode: {oct(st_f.st_mode)}"
+                if st_f.st_mode & 0o7000:
+                    return False, f"Bytecode cache file {rel_file} has special bits"
+                if not fn.endswith(".pyc") or fn not in permitted_pyc_names:
+                    return False, f"Unexpected or unpermitted file in bytecode cache: {rel_file}"
+                pyc_bytes = fp.read_bytes()
+                if len(pyc_bytes) < 16 or pyc_bytes[:4] != importlib.util.MAGIC_NUMBER:
+                    return False, f"Bytecode cache file {rel_file} invalid magic number or corrupted"
+                try:
+                    marshal.loads(pyc_bytes[16:])
+                except Exception as exc:
+                    return False, f"Bytecode cache file {rel_file} invalid code object: {exc}"
+                continue
             if rel_file != "deployment_manifest.json" and rel_file not in expected_files:
                 return False, f"Unmanifested extra file on disk: {rel_file}"
     return True, "OK"
@@ -1306,7 +1352,7 @@ if [[ -e "${TARGET_DIR}" ]]; then
     fi
 
     python3 -c '
-import sys, json, hashlib, os, subprocess
+import sys, json, hashlib, os, subprocess, importlib.util, marshal, stat
 from pathlib import Path
 
 target_dir = Path(sys.argv[1])
@@ -1456,16 +1502,38 @@ if manifest_file.exists():
             sys.stderr.write(f"[ERROR] Existing file altered (hash mismatch): {rel_str} (expected {exp_h}, actual {act_h})\n")
             sys.exit(1)
 
-    allowed_audit_dirs = {".", "lab", "lab/www"}
+    canonical_lab_py_modules = [
+        "__init__.py",
+        "identity.py",
+        "concurrency.py",
+        "impair.py",
+        "run_trial.py",
+        "analyze.py",
+        "teardown.py",
+        "dns_server.py",
+    ]
+    permitted_pyc_names = {
+        Path(importlib.util.cache_from_source(f"lab/{m}")).name
+        for m in canonical_lab_py_modules
+    }
+
+    allowed_audit_dirs = {".", "lab", "lab/www", "lab/__pycache__"}
     for root, dirs, files in os.walk(target_dir, followlinks=False):
         rel_root = str(Path(root).relative_to(target_dir))
         if rel_root not in allowed_audit_dirs:
             sys.stderr.write(f"[ERROR] Unexpected directory in existing installation: {rel_root}\n")
             sys.exit(1)
+        if rel_root == "lab/__pycache__" and len(dirs) > 0:
+            sys.stderr.write(f"[ERROR] Nested directory inside bytecode cache is forbidden: {dirs}\n")
+            sys.exit(1)
         for d in dirs:
             dp = Path(root) / d
-            if dp.is_symlink():
+            if dp.is_symlink() or os.path.islink(str(dp)):
                 sys.stderr.write(f"[ERROR] Symlink directory detected in existing installation: {dp}\n")
+                sys.exit(1)
+            rel_dir = str(dp.relative_to(target_dir))
+            if rel_dir not in allowed_audit_dirs:
+                sys.stderr.write(f"[ERROR] Unexpected directory in existing installation: {rel_dir}\n")
                 sys.exit(1)
             st_d = dp.stat()
             if audit_root and (st_d.st_uid != 0 or st_d.st_gid != 0):
@@ -1477,14 +1545,49 @@ if manifest_file.exists():
             if (st_d.st_mode & 0o777) not in (0o755, 0o750):
                 sys.stderr.write(f"[ERROR] Directory {dp} unsafe mode: {oct(st_d.st_mode)}\n")
                 sys.exit(1)
+            if st_d.st_mode & 0o7000:
+                sys.stderr.write(f"[ERROR] Directory {dp} has special bits: {oct(st_d.st_mode)}\n")
+                sys.exit(1)
         for fn in files:
             fp = Path(root) / fn
-            if fp.is_symlink():
+            rel = str(fp.relative_to(target_dir))
+            if fp.is_symlink() or os.path.islink(str(fp)):
                 sys.stderr.write(f"[ERROR] Symlink detected in existing installation: {fp}\n")
                 sys.exit(1)
+            st_f = fp.stat()
+            if not stat.S_ISREG(st_f.st_mode):
+                sys.stderr.write(f"[ERROR] Special non-regular file detected in existing installation: {fp}\n")
+                sys.exit(1)
+
+            if rel_root == "lab/__pycache__":
+                if audit_root and (st_f.st_uid != 0 or st_f.st_gid != 0):
+                    sys.stderr.write(f"[ERROR] Bytecode cache file {rel} unexpected ownership: UID={st_f.st_uid}, GID={st_f.st_gid}\n")
+                    sys.exit(1)
+                if st_f.st_mode & 0o022:
+                    sys.stderr.write(f"[ERROR] Bytecode cache file {rel} is group- or world-writable: {oct(st_f.st_mode)}\n")
+                    sys.exit(1)
+                if st_f.st_mode & 0o7000:
+                    sys.stderr.write(f"[ERROR] Bytecode cache file {rel} has dangerous special bits: {oct(st_f.st_mode)}\n")
+                    sys.exit(1)
+                if (st_f.st_mode & 0o777) not in (0o644, 0o640):
+                    sys.stderr.write(f"[ERROR] Bytecode cache file {rel} unsafe mode: {oct(st_f.st_mode)}. Allowed: 0644 or 0640\n")
+                    sys.exit(1)
+                if not fn.endswith(".pyc") or fn not in permitted_pyc_names:
+                    sys.stderr.write(f"[ERROR] Unexpected or unpermitted file in bytecode cache: {rel}\n")
+                    sys.exit(1)
+                pyc_bytes = fp.read_bytes()
+                if len(pyc_bytes) < 16 or pyc_bytes[:4] != importlib.util.MAGIC_NUMBER:
+                    sys.stderr.write(f"[ERROR] Bytecode cache file {rel} has invalid magic number or corrupted header\n")
+                    sys.exit(1)
+                try:
+                    marshal.loads(pyc_bytes[16:])
+                except Exception as exc:
+                    sys.stderr.write(f"[ERROR] Bytecode cache file {rel} contains invalid marshalled code object: {exc}\n")
+                    sys.exit(1)
+                continue
+
             if fn == "deployment_manifest.json":
                 continue
-            rel = str(fp.relative_to(target_dir))
             if rel not in registered_files:
                 sys.stderr.write(f"[ERROR] Unmanifested file detected in existing installation: {rel}\n")
                 sys.exit(1)
@@ -2152,9 +2255,11 @@ target_dir_str = sys.argv[3]
 files_record = []
 for p in sorted(staging_dir.rglob("*")):
     if p.is_file() and p.name != "deployment_manifest.json":
+        rel = str(p.relative_to(staging_dir))
+        if rel.startswith("lab/__pycache__/") or rel == "lab/__pycache__":
+            continue
         h = hashlib.sha256(p.read_bytes()).hexdigest()
         mode = f"{p.stat().st_mode & 0o777:04o}"
-        rel = str(p.relative_to(staging_dir))
         files_record.append({"path": rel, "sha256": h, "mode": mode})
 
 manifest = {
@@ -2353,7 +2458,7 @@ fi
 
 POST_VERIFY_SUCCESS=1
 if ! python3 -c '
-import sys, json, hashlib, os, subprocess
+import sys, json, hashlib, os, subprocess, importlib.util, marshal, stat
 from pathlib import Path
 
 target_dir = Path(sys.argv[1])

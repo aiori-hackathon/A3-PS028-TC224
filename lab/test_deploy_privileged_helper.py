@@ -53,11 +53,14 @@ Tests cover:
 """
 
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
+import py_compile
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -2847,6 +2850,222 @@ TIMESTAMP=1794900000
 
     # Alias to support direct invocation by alternative name from Section 6
     test_56_fixture_mode_rejects_insecure_ancestor_directory = test_84_fixture_mode_rejects_insecure_ancestor_directory
+
+    def test_85_manifested_installation_with_legitimate_pycache_dry_run_passes(self):
+        """85. Manifested installation with legitimate runtime bytecode passes dry-run without modifications."""
+        res1 = self._run_deploy()
+        self.assertEqual(res1.returncode, 0, res1.stderr)
+
+        pycache_dir = self.target_dir / "lab" / "__pycache__"
+        pycache_dir.mkdir(mode=0o755)
+        source_file = self.target_dir / "lab" / "identity.py"
+        c_path = Path(importlib.util.cache_from_source(str(source_file)))
+        py_compile.compile(str(source_file), cfile=str(c_path))
+        c_path.chmod(0o644)
+
+        # Snapshot state before dry-run
+        snapshot_before = {}
+        for p in self.target_dir.rglob("*"):
+            if p.is_file():
+                snapshot_before[str(p.relative_to(self.target_dir))] = (p.read_bytes(), p.stat().st_mode)
+
+        res2 = self._run_deploy(extra_args=["--dry-run", "--release-sha", self.commit_sha])
+        self.assertEqual(res2.returncode, 0, f"Dry-run failed:\n{res2.stderr}")
+        self.assertIn("All deployment prerequisites, provenance, source files, service identity, and sudoers syntax verified", res2.stdout)
+
+        # Verify dry-run created, modified, or deleted no files
+        snapshot_after = {}
+        for p in self.target_dir.rglob("*"):
+            if p.is_file():
+                snapshot_after[str(p.relative_to(self.target_dir))] = (p.read_bytes(), p.stat().st_mode)
+        self.assertEqual(snapshot_before, snapshot_after)
+
+    def test_86_jarvis_like_cache_inventory_manifested_installation(self):
+        """86. Manifested installation with full JARVIS-like cache inventory passes audit."""
+        res1 = self._run_deploy()
+        self.assertEqual(res1.returncode, 0, res1.stderr)
+
+        pycache_dir = self.target_dir / "lab" / "__pycache__"
+        pycache_dir.mkdir(mode=0o755)
+
+        jarvis_modules = [
+            "__init__.py",
+            "identity.py",
+            "concurrency.py",
+            "impair.py",
+            "run_trial.py",
+            "analyze.py",
+            "teardown.py",
+        ]
+        for mod in jarvis_modules:
+            src = self.target_dir / "lab" / mod
+            c_path = Path(importlib.util.cache_from_source(str(src)))
+            py_compile.compile(str(src), cfile=str(c_path))
+            c_path.chmod(0o644)
+
+        res2 = self._run_deploy(extra_args=["--dry-run", "--release-sha", self.commit_sha])
+        self.assertEqual(res2.returncode, 0, f"JARVIS-like dry-run failed:\n{res2.stderr}")
+
+    def test_87_reject_unsafe_bytecode_entries_in_pycache(self):
+        """87. Reject unsafe bytecode entries (symlink, unpermitted name, non-pyc, nested dir, unsafe modes, corrupted)."""
+        res1 = self._run_deploy()
+        self.assertEqual(res1.returncode, 0, res1.stderr)
+
+        pycache_dir = self.target_dir / "lab" / "__pycache__"
+        pycache_dir.mkdir(mode=0o755)
+        source_file = self.target_dir / "lab" / "identity.py"
+        c_path = Path(importlib.util.cache_from_source(str(source_file)))
+        py_compile.compile(str(source_file), cfile=str(c_path))
+        c_path.chmod(0o644)
+
+        # 1. Symlink inside __pycache__
+        symlink_target = self.temp_dir / "fake_target.pyc"
+        symlink_target.write_bytes(b"fake")
+        symlink_pyc = pycache_dir / Path(importlib.util.cache_from_source(str(self.target_dir / "lab" / "concurrency.py"))).name
+        symlink_pyc.symlink_to(symlink_target)
+        try:
+            res = self._run_deploy(extra_args=["--dry-run", "--release-sha", self.commit_sha])
+            self.assertNotEqual(res.returncode, 0)
+            self.assertIn("Symlink detected", res.stderr)
+        finally:
+            symlink_pyc.unlink()
+
+        # 2. Unexpected .pyc filename / unknown module
+        unknown_pyc = pycache_dir / f"unknown_module.{sys.implementation.cache_tag}.pyc"
+        unknown_pyc.write_bytes(c_path.read_bytes())
+        unknown_pyc.chmod(0o644)
+        try:
+            res = self._run_deploy(extra_args=["--dry-run", "--release-sha", self.commit_sha])
+            self.assertNotEqual(res.returncode, 0)
+            self.assertIn("Unexpected or unpermitted file in bytecode cache", res.stderr)
+        finally:
+            unknown_pyc.unlink()
+
+        # 3. Non-.pyc file in __pycache__
+        txt_file = pycache_dir / "notes.txt"
+        txt_file.write_text("not bytecode\n")
+        txt_file.chmod(0o644)
+        try:
+            res = self._run_deploy(extra_args=["--dry-run", "--release-sha", self.commit_sha])
+            self.assertNotEqual(res.returncode, 0)
+            self.assertIn("Unexpected or unpermitted file in bytecode cache", res.stderr)
+        finally:
+            txt_file.unlink()
+
+        # 4. Nested directory inside __pycache__
+        nested_dir = pycache_dir / "nested"
+        nested_dir.mkdir(mode=0o755)
+        try:
+            res = self._run_deploy(extra_args=["--dry-run", "--release-sha", self.commit_sha])
+            self.assertNotEqual(res.returncode, 0)
+            self.assertIn("Nested directory inside bytecode cache is forbidden", res.stderr)
+        finally:
+            nested_dir.rmdir()
+
+        # 5. Group- or world-writable cache file
+        c_path.chmod(0o666)
+        try:
+            res = self._run_deploy(extra_args=["--dry-run", "--release-sha", self.commit_sha])
+            self.assertNotEqual(res.returncode, 0)
+            self.assertIn("group- or world-writable", res.stderr)
+        finally:
+            c_path.chmod(0o644)
+
+        # 6. Unsafe directory permissions on __pycache__
+        pycache_dir.chmod(0o777)
+        try:
+            res = self._run_deploy(extra_args=["--dry-run", "--release-sha", self.commit_sha])
+            self.assertNotEqual(res.returncode, 0)
+            self.assertIn("group- or world-writable", res.stderr)
+        finally:
+            pycache_dir.chmod(0o755)
+
+        # 7. Corrupted / invalid bytecode header
+        valid_bytes = c_path.read_bytes()
+        c_path.write_bytes(b"corrupted_header_less_than_16_bytes")
+        try:
+            res = self._run_deploy(extra_args=["--dry-run", "--release-sha", self.commit_sha])
+            self.assertNotEqual(res.returncode, 0)
+            self.assertIn("invalid magic number or corrupted header", res.stderr)
+        finally:
+            c_path.write_bytes(valid_bytes)
+
+    def test_88_preserve_fail_closed_behavior_for_unpermitted_dirs_and_files(self):
+        """88. Preserve fail-closed behavior for unexpected directories and files outside __pycache__."""
+        res1 = self._run_deploy()
+        self.assertEqual(res1.returncode, 0, res1.stderr)
+
+        # 1. Unexpected directory outside permitted cache directory
+        extra_dir = self.target_dir / "lab" / "unexpected_dir"
+        extra_dir.mkdir(mode=0o755)
+        try:
+            res = self._run_deploy(extra_args=["--dry-run", "--release-sha", self.commit_sha])
+            self.assertNotEqual(res.returncode, 0)
+            self.assertIn("Unexpected directory in existing installation", res.stderr)
+        finally:
+            extra_dir.rmdir()
+
+        # 2. Unmanifested file outside permitted cache directory
+        extra_file = self.target_dir / "lab" / "extra_unmanifested.py"
+        extra_file.write_text("# rogue\n")
+        extra_file.chmod(0o644)
+        try:
+            res = self._run_deploy(extra_args=["--dry-run", "--release-sha", self.commit_sha])
+            self.assertNotEqual(res.returncode, 0)
+            self.assertIn("Unmanifested file detected in existing installation", res.stderr)
+        finally:
+            extra_file.unlink()
+
+        # 3. Canonical 14-file manifest inventory remains exact (no pyc added to manifest)
+        manifest_text = (self.target_dir / "deployment_manifest.json").read_text(encoding="utf-8")
+        manifest_data = json.loads(manifest_text)
+        self.assertEqual(manifest_data["file_count"], 14)
+        manifest_paths = [f["path"] for f in manifest_data["files"]]
+        self.assertEqual(len(manifest_paths), 14)
+        self.assertFalse(any("__pycache__" in p for p in manifest_paths))
+
+    def test_89_transaction_and_rollback_caches_not_copied_into_new_stage(self):
+        """89. Transactional upgrade does not inherit old caches into new stage; rollback preserves old cache."""
+        res1 = self._run_deploy()
+        self.assertEqual(res1.returncode, 0, res1.stderr)
+
+        pycache_dir = self.target_dir / "lab" / "__pycache__"
+        pycache_dir.mkdir(mode=0o755)
+        src = self.target_dir / "lab" / "identity.py"
+        c_path = Path(importlib.util.cache_from_source(str(src)))
+        py_compile.compile(str(src), cfile=str(c_path))
+        c_path.chmod(0o644)
+        cache_content_before = c_path.read_bytes()
+
+        # Update mock repo with a new commit for upgrade
+        (self.mock_repo / "lab" / "identity.py").write_text("# updated identity module\n", encoding="utf-8")
+        subprocess.run(["git", "add", "."], cwd=self.mock_repo, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "Update identity module"], cwd=self.mock_repo, check=True, capture_output=True)
+        new_commit_sha = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=self.mock_repo, text=True
+        ).strip()
+
+        # 1. Rollback case: simulate failure during post-verification
+        fail_env = self.env.copy()
+        fail_env["PS028_TEST_FAIL_POST_VERIFY"] = "1"
+        res_fail = self._run_deploy(extra_args=["--release-sha", new_commit_sha], custom_env=fail_env)
+        self.assertNotEqual(res_fail.returncode, 0)
+
+        # Rollback must restore original installation and its __pycache__ intact
+        self.assertTrue(pycache_dir.is_dir())
+        self.assertTrue(c_path.is_file())
+        self.assertEqual(c_path.read_bytes(), cache_content_before)
+
+        # 2. Successful upgrade: caches are not copied to new stage
+        res_up = self._run_deploy(extra_args=["--release-sha", new_commit_sha])
+        self.assertEqual(res_up.returncode, 0, f"Upgrade failed:\n{res_up.stderr}")
+
+        # Active installation is built fresh from Git blob extraction; does not contain old __pycache__
+        self.assertFalse((self.target_dir / "lab" / "__pycache__").exists())
+        # Manifest has exactly 14 files
+        mf = json.loads((self.target_dir / "deployment_manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(mf["release_sha"], new_commit_sha)
+        self.assertEqual(mf["file_count"], 14)
 
 
 
