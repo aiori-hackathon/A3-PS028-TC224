@@ -46,6 +46,84 @@ class TestNginxConfiguration(unittest.TestCase):
             f"Expected only 'keepalive_timeout 0;', found: {all_matches}"
         )
 
+    def test_pid_directive_omitted_from_nginx_conf(self):
+        """Verify lab/nginx.conf omits static pid directive to prevent collision with launcher -g."""
+        self.assertTrue(NGINX_CONF.is_file(), f"Missing {NGINX_CONF}")
+        content = NGINX_CONF.read_text(encoding="utf-8")
+        active_pid_matches = [
+            line.strip() for line in content.splitlines()
+            if line.strip().startswith("pid ")
+        ]
+        self.assertEqual(
+            active_pid_matches, [],
+            f"lab/nginx.conf must not declare a static 'pid' directive: found {active_pid_matches}"
+        )
+
+    def test_real_nginx_binary_syntax_validation_with_runtime_g_directives(self):
+        """Verify real Nginx binary syntax check succeeds with launcher -g structure without duplicate pid collision."""
+        with tempfile.TemporaryDirectory(prefix="ps028_nginx_syntax_") as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            pid_file = tmp_path / "nginx.pid"
+            err_log = tmp_path / "nginx_error.log"
+            g_opt = f"pid {pid_file}; error_log {err_log} info;"
+
+            res = subprocess.run(
+                ["nginx", "-t", "-p", f"{REPO_ROOT}/", "-c", str(NGINX_CONF), "-g", g_opt],
+                capture_output=True,
+                text=True
+            )
+            # The syntax parser confirms syntax is ok and must never report duplicate pid
+            self.assertIn("syntax is ok", res.stderr)
+            self.assertNotIn('"pid" directive is duplicate', res.stderr)
+
+    def test_real_nginx_binary_complete_validation_with_loopback(self):
+        """Verify real Nginx binary full validation (syntax + test) succeeds on host using -p, -c, and -g."""
+        with tempfile.TemporaryDirectory(prefix="ps028_nginx_test_") as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            pid_file = tmp_path / "nginx.pid"
+            err_log = tmp_path / "nginx_error.log"
+            g_opt = f"pid {pid_file}; error_log {err_log} info;"
+
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind(("127.0.0.1", 0))
+                port = s.getsockname()[1]
+
+            conf_content = NGINX_CONF.read_text(encoding="utf-8")
+            conf_content = conf_content.replace("listen 10.0.2.10:80;", f"listen 127.0.0.1:{port};")
+            conf_content = conf_content.replace("listen [2001:db8:2::10]:80;", f"listen [::1]:{port};")
+            conf_file = tmp_path / "nginx.conf"
+            conf_file.write_text(conf_content, encoding="utf-8")
+
+            res = subprocess.run(
+                ["nginx", "-t", "-p", f"{REPO_ROOT}/", "-c", str(conf_file), "-g", g_opt],
+                capture_output=True,
+                text=True
+            )
+            self.assertEqual(res.returncode, 0, f"nginx -t failed: {res.stderr}")
+            self.assertIn("syntax is ok", res.stderr)
+            self.assertIn("test is successful", res.stderr)
+
+    def test_regression_reproduced_duplicate_pid_failure(self):
+        """Verify regression reproduction: static pid in nginx.conf triggers duplicate directive failure under launcher -g."""
+        with tempfile.TemporaryDirectory(prefix="ps028_nginx_repro_") as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            static_pid = tmp_path / "static_nginx.pid"
+            runtime_pid = tmp_path / "runtime_nginx.pid"
+            err_log = tmp_path / "nginx_error.log"
+
+            conf_content = f"pid {static_pid};\n" + NGINX_CONF.read_text(encoding="utf-8")
+            conf_file = tmp_path / "nginx_duplicate.conf"
+            conf_file.write_text(conf_content, encoding="utf-8")
+
+            g_opt = f"pid {runtime_pid}; error_log {err_log} info;"
+            res = subprocess.run(
+                ["nginx", "-t", "-p", f"{REPO_ROOT}/", "-c", str(conf_file), "-g", g_opt],
+                capture_output=True,
+                text=True
+            )
+            self.assertNotEqual(res.returncode, 0)
+            self.assertIn('"pid" directive is duplicate', res.stderr)
+
 
 class TestLiveHTTPIsolation(unittest.TestCase):
     """Live verification of HTTP 200 over IPv4/IPv6 and connection closing."""

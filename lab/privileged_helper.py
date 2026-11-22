@@ -4594,12 +4594,6 @@ def start_nginx_privileged(
         if SERVER_NETNS not in res.stdout:
             raise PrivilegedHelperError(f"Network namespace {SERVER_NETNS} does not exist. Run topology setup first.")
 
-        # Test syntax inside netns
-        t_cmd = ["ip", "netns", "exec", SERVER_NETNS, "nginx", "-t", "-p", f"{root_dir}/", "-c", str(conf)]
-        t_res = subprocess.run(t_cmd, capture_output=True, text=True)
-        if t_res.returncode != 0:
-            raise PrivilegedHelperError(f"Nginx configuration syntax test failed: {t_res.stderr.strip()}")
-
         target_pid_file = Path("/run/ps028/nginx.pid") if not is_test_fixture else (root_dir / "lab" / "nginx.pid")
         if not is_test_fixture and not target_pid_file.parent.is_dir():
             raise PrivilegedHelperError(
@@ -4617,6 +4611,18 @@ def start_nginx_privileged(
         log_dir.mkdir(parents=True, exist_ok=True)
         err_log = log_dir / "nginx_error.log"
 
+        g_directives = f"pid {target_pid_file}; error_log {err_log} info; user {effective_user};"
+
+        # Test syntax inside netns with runtime -g directives
+        t_cmd = [
+            "ip", "netns", "exec", SERVER_NETNS,
+            "nginx", "-t", "-p", f"{root_dir}/", "-c", str(conf),
+            "-g", g_directives
+        ]
+        t_res = subprocess.run(t_cmd, capture_output=True, text=True)
+        if t_res.returncode != 0:
+            raise PrivilegedHelperError(f"Nginx configuration syntax test failed: {t_res.stderr.strip()}")
+
         if target_pid_file.exists():
             try:
                 old_pid = int(target_pid_file.read_text().strip())
@@ -4629,7 +4635,7 @@ def start_nginx_privileged(
         cmd = [
             "ip", "netns", "exec", SERVER_NETNS,
             "nginx", "-p", f"{root_dir}/", "-c", str(conf),
-            "-g", f"pid {target_pid_file}; error_log {err_log} info; user {effective_user};"
+            "-g", g_directives
         ]
         res = subprocess.run(cmd, capture_output=True, text=True)
         if res.returncode != 0:

@@ -4329,6 +4329,84 @@ class TestDedicatedNginxWorkerIdentity(unittest.TestCase):
                 )
             self.assertIn("cannot be the operator account", str(cm.exception).lower())
 
+    def test_start_nginx_passes_matching_g_directives_to_syntax_and_startup(self):
+        """start_nginx_privileged constructs unified g_directives and passes -g to both syntax check and startup."""
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="ps028-sv\n")
+            with patch("time.time", side_effect=[0.0, 0.1, 5.0]):
+                with self.assertRaises(priv_helper.PrivilegedHelperError):
+                    priv_helper.start_nginx_privileged(
+                        repo_root=self.temp_dir,
+                        config_file=self.conf,
+                        worker_user="test_worker",
+                        lock_file=self.lock_file,
+                        is_test_fixture=True
+                    )
+            nginx_calls = [
+                call_args[0][0] for call_args in mock_run.call_args_list
+                if isinstance(call_args[0][0], list) and "nginx" in call_args[0][0]
+            ]
+            self.assertGreaterEqual(len(nginx_calls), 2, "Expected both syntax check and start commands")
+            syntax_cmd = next(c for c in nginx_calls if "-t" in c)
+            start_cmd = next(c for c in nginx_calls if "-t" not in c)
+
+            self.assertIn("-g", syntax_cmd)
+            self.assertIn("-g", start_cmd)
+            syntax_g_idx = syntax_cmd.index("-g") + 1
+            start_g_idx = start_cmd.index("-g") + 1
+            self.assertEqual(syntax_cmd[syntax_g_idx], start_cmd[start_g_idx])
+            self.assertIn(f"pid {self.lab_dir / 'nginx.pid'}", syntax_cmd[syntax_g_idx])
+            self.assertIn("user test_worker;", syntax_cmd[syntax_g_idx])
+
+    def test_start_nginx_production_mode_uses_authoritative_run_ps028_pid(self):
+        """In production mode, start_nginx_privileged constructs g_directives pointing strictly to /run/ps028/nginx.pid."""
+        fake_entry = MagicMock(pw_name="ps028-sv", pw_uid=998, pw_gid=998, pw_shell="/usr/sbin/nologin")
+        fake_grp = MagicMock(gr_name="ps028-sv", gr_gid=998)
+        with patch("pwd.getpwnam", return_value=fake_entry), \
+             patch("grp.getgrgid", return_value=fake_grp), \
+             patch("os.getgrouplist", return_value=[998]), \
+             patch("pathlib.Path.is_dir", return_value=True), \
+             patch("pathlib.Path.mkdir"), \
+             patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="ps028-sv\n")
+            with patch("time.time", side_effect=[0.0, 0.1, 5.0]):
+                with self.assertRaises(priv_helper.PrivilegedHelperError):
+                    priv_helper.start_nginx_privileged(
+                        repo_root=self.temp_dir,
+                        config_file=self.conf,
+                        lock_file=self.lock_file,
+                        is_test_fixture=False
+                    )
+            nginx_calls = [
+                call_args[0][0] for call_args in mock_run.call_args_list
+                if isinstance(call_args[0][0], list) and "nginx" in call_args[0][0]
+            ]
+            self.assertGreaterEqual(len(nginx_calls), 1)
+            syntax_cmd = next(c for c in nginx_calls if "-t" in c)
+            g_val = syntax_cmd[syntax_cmd.index("-g") + 1]
+            self.assertIn("pid /run/ps028/nginx.pid;", g_val)
+            self.assertIn("error_log /var/log/ps028/nginx_error.log info;", g_val)
+            self.assertIn("user ps028-sv;", g_val)
+
+    def test_start_nginx_catches_duplicate_pid_syntax_failure(self):
+        """start_nginx_privileged fails closed if nginx -t syntax verification fails (e.g. duplicate pid)."""
+        fake_stderr = '2026/11/22 15:38:07 [emerg] "pid" directive is duplicate in /usr/local/libexec/ps028/lab/nginx.conf:28'
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                MagicMock(returncode=0, stdout="ps028-sv\n"),
+                MagicMock(returncode=1, stderr=fake_stderr),
+            ]
+            with self.assertRaises(priv_helper.PrivilegedHelperError) as cm:
+                priv_helper.start_nginx_privileged(
+                    repo_root=self.temp_dir,
+                    config_file=self.conf,
+                    worker_user="test_worker",
+                    lock_file=self.lock_file,
+                    is_test_fixture=True
+                )
+            self.assertIn("Nginx configuration syntax test failed", str(cm.exception))
+            self.assertIn('"pid" directive is duplicate', str(cm.exception))
+
 
 class TestBrowserExecutableHardening(unittest.TestCase):
     """
