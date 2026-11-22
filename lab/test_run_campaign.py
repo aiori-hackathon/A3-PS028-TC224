@@ -231,7 +231,9 @@ class TestCampaignCLIAndConfig(unittest.TestCase):
                 strict_partner=True,
                 repetitions=20,
                 scenarios=["S0", "S1", "S2", "S3", "S4", "S5", "S6"],
-                browsers=["google-chrome", "firefox"]
+                browsers=["google-chrome", "firefox"],
+                partner_institution="University Partner Laboratory",
+                operator_id="REPL-OP-01"
             )
         self.assertIn("Strict partner replication failed browser preflight", str(ctx.exception))
 
@@ -250,12 +252,21 @@ class TestCampaignCLIAndConfig(unittest.TestCase):
                 repetitions=20,
                 scenarios=["S0", "S1", "S2", "S3", "S4", "S5", "S6"],
                 browsers=["google-chrome", "firefox"],
-                output_dir=Path(td) / "test_campaign"
+                output_dir=Path(td) / "test_campaign",
+                partner_institution="University Partner Laboratory",
+                operator_id="REPL-OP-01"
             )
             manifest = runner.initialize_manifest()
             self.assertEqual(len(manifest.matrix_slots), 280)
             self.assertTrue(manifest.strict_partner)
             self.assertEqual(manifest.protocol_version, "1.0.0")
+            self.assertEqual(
+                manifest.partner_info,
+                {
+                    "partner_institution": "University Partner Laboratory",
+                    "operator_id": "REPL-OP-01"
+                }
+            )
 
 
 
@@ -1967,6 +1978,360 @@ class TestInterruptionLifecycleAndSignalSafety(unittest.TestCase):
         self.assertIn("Descendant discovery incomplete", rec_errors[0])
 
         self.assertEqual(len(slot1["attempts"]), 0)
+
+
+class TestPartnerCampaignMetadata(unittest.TestCase):
+    """
+    Verifies partner campaign metadata integrity (Work Package A8):
+    1. CLI argument parsing for --partner-institution and --operator-id.
+    2. Strict-partner rejection of missing, empty, or placeholder metadata.
+    3. Proper propagation through CampaignRunner into CampaignManifest.
+    4. Serialization of nested 'partner_info' in campaign_manifest.json.
+    5. Round-trip manifest persistence and loading.
+    6. Safe resume verification of partner metadata.
+    7. Validation that documented runbook command is accepted.
+    """
+    def setUp(self):
+        self.temp_dir = Path(tempfile.mkdtemp(prefix="ps028_partner_meta_"))
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_cli_parsing_partner_metadata(self):
+        """1. CLI parses --partner-institution and --operator-id flags."""
+        args = run_campaign.parse_args([
+            "--partner-institution", "Autonomous Systems Laboratory",
+            "--operator-id", "OP-REPL-2026",
+            "--strict-partner",
+        ])
+        self.assertEqual(args.partner_institution, "Autonomous Systems Laboratory")
+        self.assertEqual(args.operator_id, "OP-REPL-2026")
+        self.assertTrue(args.strict_partner)
+
+    def test_documented_runbook_command_accepted_by_cli(self):
+        """2. Documented runbook command arguments parse cleanly."""
+        cmd = [
+            "--strict-partner",
+            "--partner-institution", "Independent Verification Group",
+            "--operator-id", "IVG-OP-42",
+            "--output-dir", str(self.temp_dir / "evidence"),
+            "--repetitions", "20",
+            "--browsers", "google-chrome,firefox",
+            "--scenarios", "S0,S1,S2,S3,S4,S5,S6"
+        ]
+        args = run_campaign.parse_args(cmd)
+        self.assertTrue(args.strict_partner)
+        self.assertEqual(args.partner_institution, "Independent Verification Group")
+        self.assertEqual(args.operator_id, "IVG-OP-42")
+        self.assertEqual(args.repetitions, 20)
+        self.assertEqual(args.browsers, "google-chrome,firefox")
+        self.assertEqual(args.scenarios, "S0,S1,S2,S3,S4,S5,S6")
+
+    def test_strict_partner_rejects_missing_metadata(self):
+        """3. Strict partner mode rejects missing partner institution or operator ID."""
+        with self.assertRaises(run_campaign.CampaignConfigError) as ctx1:
+            run_campaign.CampaignRunner(
+                strict_partner=True,
+                repetitions=20,
+                scenarios=["S0", "S1", "S2", "S3", "S4", "S5", "S6"],
+                browsers=["google-chrome", "firefox"],
+                partner_institution=None,
+                operator_id="OP-001"
+            )
+        self.assertIn("partner institution", str(ctx1.exception).lower())
+
+        with self.assertRaises(run_campaign.CampaignConfigError) as ctx2:
+            run_campaign.CampaignRunner(
+                strict_partner=True,
+                repetitions=20,
+                scenarios=["S0", "S1", "S2", "S3", "S4", "S5", "S6"],
+                browsers=["google-chrome", "firefox"],
+                partner_institution="Valid Lab",
+                operator_id=None
+            )
+        self.assertIn("operator id", str(ctx2.exception).lower())
+
+    def test_strict_partner_rejects_placeholder_metadata(self):
+        """4. Strict partner mode rejects placeholder tokens and template brackets."""
+        placeholders = [
+            "",
+            "   ",
+            "UNASSIGNED",
+            "unassigned",
+            "PENDING",
+            "Pending",
+            "PLACEHOLDER",
+            "UNKNOWN",
+            "NONE",
+            "NULL",
+            "<PARTNER_INSTITUTION>",
+            "<OPERATOR_ID>",
+            "<SOME_TOKEN>"
+        ]
+        for token in placeholders:
+            with self.subTest(token=token):
+                with self.assertRaises(run_campaign.CampaignConfigError) as ctx:
+                    run_campaign.CampaignRunner(
+                        strict_partner=True,
+                        repetitions=20,
+                        scenarios=["S0", "S1", "S2", "S3", "S4", "S5", "S6"],
+                        browsers=["google-chrome", "firefox"],
+                        partner_institution=token,
+                        operator_id="VALID-OP-01"
+                    )
+                self.assertIn("partner institution", str(ctx.exception).lower())
+
+                with self.assertRaises(run_campaign.CampaignConfigError) as ctx:
+                    run_campaign.CampaignRunner(
+                        strict_partner=True,
+                        repetitions=20,
+                        scenarios=["S0", "S1", "S2", "S3", "S4", "S5", "S6"],
+                        browsers=["google-chrome", "firefox"],
+                        partner_institution="Valid Lab",
+                        operator_id=token
+                    )
+                self.assertIn("operator id", str(ctx.exception).lower())
+
+    def test_partner_info_nested_serialization_in_manifest(self):
+        """5. Persists nested 'partner_info' object in campaign_manifest.json."""
+        slots = run_campaign.build_matrix_slots(["S0"], ["google-chrome"], 1)
+        manifest = run_campaign.CampaignManifest(
+            campaign_id="test-partner-meta-camp",
+            output_dir=self.temp_dir,
+            scenarios=["S0"],
+            browsers=["google-chrome"],
+            repetitions=1,
+            is_simulation=True,
+            matrix_slots=slots,
+            partner_institution="Metrology Research Institute",
+            operator_id="MRI-OP-09"
+        )
+        self.assertEqual(
+            manifest.partner_info,
+            {
+                "partner_institution": "Metrology Research Institute",
+                "operator_id": "MRI-OP-09"
+            }
+        )
+        self.assertEqual(manifest.partner_institution, "Metrology Research Institute")
+        self.assertEqual(manifest.operator_id, "MRI-OP-09")
+
+        d = manifest.to_dict()
+        self.assertIn("partner_info", d)
+        self.assertEqual(
+            d["partner_info"],
+            {
+                "partner_institution": "Metrology Research Institute",
+                "operator_id": "MRI-OP-09"
+            }
+        )
+
+        manifest.save_atomically()
+        mpath = self.temp_dir / run_campaign.MANIFEST_FILENAME
+        self.assertTrue(mpath.is_file())
+
+        raw_data = json.loads(mpath.read_text(encoding="utf-8"))
+        self.assertIn("partner_info", raw_data)
+        self.assertEqual(
+            raw_data["partner_info"],
+            {
+                "partner_institution": "Metrology Research Institute",
+                "operator_id": "MRI-OP-09"
+            }
+        )
+
+    def test_manifest_round_trip_loading_preserves_partner_info(self):
+        """6. Manifest round-trip load preserves partner_info."""
+        slots = run_campaign.build_matrix_slots(["S0"], ["google-chrome"], 1)
+        manifest = run_campaign.CampaignManifest(
+            campaign_id="test-round-trip-camp",
+            output_dir=self.temp_dir,
+            scenarios=["S0"],
+            browsers=["google-chrome"],
+            repetitions=1,
+            is_simulation=True,
+            matrix_slots=slots,
+            partner_info={
+                "partner_institution": "Advanced Network Lab",
+                "operator_id": "NET-OP-77"
+            }
+        )
+        manifest.save_atomically()
+
+        loaded = run_campaign.CampaignManifest.load(self.temp_dir / run_campaign.MANIFEST_FILENAME)
+        self.assertEqual(
+            loaded.partner_info,
+            {
+                "partner_institution": "Advanced Network Lab",
+                "operator_id": "NET-OP-77"
+            }
+        )
+        self.assertEqual(loaded.partner_institution, "Advanced Network Lab")
+        self.assertEqual(loaded.operator_id, "NET-OP-77")
+
+    def test_resume_succeeds_with_matching_partner_metadata(self):
+        """7. Resume succeeds when partner metadata matches manifest exactly."""
+        slots = run_campaign.build_matrix_slots(["S0"], ["google-chrome"], 1)
+        manifest = run_campaign.CampaignManifest(
+            campaign_id="resume-match-camp",
+            output_dir=self.temp_dir,
+            scenarios=["S0"],
+            browsers=["google-chrome"],
+            repetitions=1,
+            is_simulation=True,
+            matrix_slots=slots,
+            partner_institution="National Measurement Lab",
+            operator_id="NML-OP-01"
+        )
+        manifest.save_atomically()
+
+        runner = run_campaign.CampaignRunner(
+            scenarios=["S0"],
+            browsers=["google-chrome"],
+            repetitions=1,
+            output_dir=self.temp_dir,
+            is_simulation=True,
+            resume=True,
+            partner_institution="National Measurement Lab",
+            operator_id="NML-OP-01"
+        )
+        resumed_manifest = runner.initialize_manifest()
+        self.assertEqual(
+            resumed_manifest.partner_info,
+            {
+                "partner_institution": "National Measurement Lab",
+                "operator_id": "NML-OP-01"
+            }
+        )
+
+    def test_resume_rejects_mismatching_partner_institution(self):
+        """8. Resume fails if partner institution differs from manifest."""
+        slots = run_campaign.build_matrix_slots(["S0"], ["google-chrome"], 1)
+        manifest = run_campaign.CampaignManifest(
+            campaign_id="resume-mismatch-inst",
+            output_dir=self.temp_dir,
+            scenarios=["S0"],
+            browsers=["google-chrome"],
+            repetitions=1,
+            is_simulation=True,
+            matrix_slots=slots,
+            partner_institution="Original Institution",
+            operator_id="OP-001"
+        )
+        manifest.save_atomically()
+
+        runner = run_campaign.CampaignRunner(
+            scenarios=["S0"],
+            browsers=["google-chrome"],
+            repetitions=1,
+            output_dir=self.temp_dir,
+            is_simulation=True,
+            resume=True,
+            partner_institution="Different Institution",
+            operator_id="OP-001"
+        )
+        with self.assertRaises(run_campaign.CampaignResumeError) as ctx:
+            runner.initialize_manifest()
+        self.assertIn("Resume partner_institution mismatch", str(ctx.exception))
+
+    def test_resume_rejects_mismatching_operator_id(self):
+        """9. Resume fails if operator ID differs from manifest."""
+        slots = run_campaign.build_matrix_slots(["S0"], ["google-chrome"], 1)
+        manifest = run_campaign.CampaignManifest(
+            campaign_id="resume-mismatch-op",
+            output_dir=self.temp_dir,
+            scenarios=["S0"],
+            browsers=["google-chrome"],
+            repetitions=1,
+            is_simulation=True,
+            matrix_slots=slots,
+            partner_institution="Original Institution",
+            operator_id="OP-ORIGINAL"
+        )
+        manifest.save_atomically()
+
+        runner = run_campaign.CampaignRunner(
+            scenarios=["S0"],
+            browsers=["google-chrome"],
+            repetitions=1,
+            output_dir=self.temp_dir,
+            is_simulation=True,
+            resume=True,
+            partner_institution="Original Institution",
+            operator_id="OP-DIFFERENT"
+        )
+        with self.assertRaises(run_campaign.CampaignResumeError) as ctx:
+            runner.initialize_manifest()
+        self.assertIn("Resume operator_id mismatch", str(ctx.exception))
+
+    def test_resume_rejects_omitted_metadata_when_manifest_has_partner_info(self):
+        """10. Resume fails if partner metadata is omitted when manifest had partner metadata."""
+        slots = run_campaign.build_matrix_slots(["S0"], ["google-chrome"], 1)
+        manifest = run_campaign.CampaignManifest(
+            campaign_id="resume-omitted-meta",
+            output_dir=self.temp_dir,
+            scenarios=["S0"],
+            browsers=["google-chrome"],
+            repetitions=1,
+            is_simulation=True,
+            matrix_slots=slots,
+            partner_institution="Institution Required",
+            operator_id="OP-001"
+        )
+        manifest.save_atomically()
+
+        runner = run_campaign.CampaignRunner(
+            scenarios=["S0"],
+            browsers=["google-chrome"],
+            repetitions=1,
+            output_dir=self.temp_dir,
+            is_simulation=True,
+            resume=True,
+            partner_institution=None,
+            operator_id=None
+        )
+        with self.assertRaises(run_campaign.CampaignResumeError) as ctx:
+            runner.initialize_manifest()
+        self.assertIn("Resume partner_institution mismatch", str(ctx.exception))
+
+    def test_strict_partner_resume_rejects_placeholder_in_manifest(self):
+        """11. Resuming strict partner campaign fails if manifest on disk contains placeholder metadata."""
+        slots = run_campaign.build_matrix_slots(["S0", "S1", "S2", "S3", "S4", "S5", "S6"], ["google-chrome", "firefox"], 20)
+        manifest = run_campaign.CampaignManifest(
+            campaign_id="resume-strict-placeholder",
+            output_dir=self.temp_dir,
+            scenarios=["S0", "S1", "S2", "S3", "S4", "S5", "S6"],
+            browsers=["google-chrome", "firefox"],
+            repetitions=20,
+            is_simulation=False,
+            strict_partner=True,
+            matrix_slots=slots,
+            partner_institution="UNASSIGNED",
+            operator_id="PENDING"
+        )
+        manifest.save_atomically()
+
+        with patch("lab.partner_preflight.get_browser_runtimes") as mock_runtimes:
+            mock_runtimes.return_value = {
+                "all_exact_match": True,
+                "browsers": {
+                    "google-chrome": {"status": "READY", "pinned_expected": "156.0.8078.73"},
+                    "firefox": {"status": "READY", "pinned_expected": "159.0"}
+                }
+            }
+            runner = run_campaign.CampaignRunner(
+                strict_partner=True,
+                repetitions=20,
+                scenarios=["S0", "S1", "S2", "S3", "S4", "S5", "S6"],
+                browsers=["google-chrome", "firefox"],
+                output_dir=self.temp_dir,
+                resume=True,
+                partner_institution="Real Institution",
+                operator_id="Real-OP-01"
+            )
+            with self.assertRaises(run_campaign.CampaignResumeError) as ctx:
+                runner.initialize_manifest()
+            self.assertIn("placeholder", str(ctx.exception).lower())
 
 
 if __name__ == "__main__":

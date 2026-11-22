@@ -916,17 +916,29 @@ def verify_partner_campaign_directory(
         )
 
     # Mandatory Partner Information (when required)
+    p_info = manifest_data.get("partner_info")
     if require_partner_info:
-        p_info = manifest_data.get("partner_info") or {}
+        p_info = p_info or {}
         p_inst = p_info.get("partner_institution") or manifest_data.get("partner_institution", "")
         p_op = p_info.get("operator_id") or manifest_data.get("operator_id", "")
-        placeholder_tokens = {"UNASSIGNED", "PENDING", "PLACEHOLDER", "UNKNOWN", ""}
-        if not p_inst or str(p_inst).strip().upper() in placeholder_tokens:
+        placeholder_tokens = {"UNASSIGNED", "PENDING", "PLACEHOLDER", "UNKNOWN", "NONE", "NULL", ""}
+
+        def _is_placeholder(val: Any) -> bool:
+            if not val:
+                return True
+            s = str(val).strip()
+            if not s or s.upper() in placeholder_tokens:
+                return True
+            if s.startswith("<") and s.endswith(">"):
+                return True
+            return False
+
+        if _is_placeholder(p_inst):
             raise VerificationError(
                 f"Partner evidence contains unassigned partner_institution: '{p_inst}'. "
                 "Authentic partner replication requires valid partner institution metadata."
             )
-        if not p_op or str(p_op).strip().upper() in placeholder_tokens:
+        if _is_placeholder(p_op):
             raise VerificationError(
                 f"Partner evidence contains pending operator_id: '{p_op}'. "
                 "Authentic partner replication requires valid operator ID metadata."
@@ -1200,6 +1212,7 @@ def verify_partner_campaign_directory(
         "scenarios": sorted(list(scenarios_present)),
         "browsers": sorted(list(browsers_present)),
         "matrix_verified": True,
+        "partner_info": p_info if p_info else None,
         "checksum_files_checked": checked_files,
         "derived_audit": derived_audit,
     }

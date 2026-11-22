@@ -593,6 +593,32 @@ def validate_attempt_evidence(
 # Campaign Manifest & Atomic Persistence
 # ==============================================================================
 
+PARTNER_PLACEHOLDER_TOKENS = frozenset({
+    "UNASSIGNED",
+    "PENDING",
+    "PLACEHOLDER",
+    "UNKNOWN",
+    "NONE",
+    "NULL",
+    ""
+})
+
+
+def is_placeholder_partner_metadata(value: Optional[str]) -> bool:
+    """
+    Returns True if value is None, empty, whitespace-only, a known placeholder token,
+    or an unpopulated template bracket (e.g. '<PARTNER_INSTITUTION>').
+    """
+    if value is None:
+        return True
+    s = str(value).strip()
+    if not s or s.upper() in PARTNER_PLACEHOLDER_TOKENS:
+        return True
+    if s.startswith("<") and s.endswith(">"):
+        return True
+    return False
+
+
 class CampaignManifest:
     """
     Encapsulates campaign state, matrix slots, attempts, configuration,
@@ -613,7 +639,10 @@ class CampaignManifest:
         completed_at: Optional[str] = None,
         halt_reason: Optional[str] = None,
         strict_partner: bool = False,
-        protocol_version: str = PROTOCOL_VERSION
+        protocol_version: str = PROTOCOL_VERSION,
+        partner_info: Optional[Dict[str, Any]] = None,
+        partner_institution: Optional[str] = None,
+        operator_id: Optional[str] = None
     ):
         self.campaign_id = campaign_id
         self.output_dir = Path(output_dir).resolve()
@@ -631,6 +660,31 @@ class CampaignManifest:
         self.protocol_version = protocol_version
         self.manifest_path = self.output_dir / MANIFEST_FILENAME
         self.lock_path = self.output_dir / LOCK_FILENAME
+
+        if partner_info is not None:
+            self.partner_info: Optional[Dict[str, str]] = {
+                "partner_institution": str(partner_info.get("partner_institution", "")),
+                "operator_id": str(partner_info.get("operator_id", "")),
+            }
+        elif partner_institution is not None or operator_id is not None:
+            self.partner_info = {
+                "partner_institution": str(partner_institution or ""),
+                "operator_id": str(operator_id or ""),
+            }
+        else:
+            self.partner_info = None
+
+    @property
+    def partner_institution(self) -> Optional[str]:
+        if self.partner_info is not None:
+            return self.partner_info.get("partner_institution")
+        return None
+
+    @property
+    def operator_id(self) -> Optional[str]:
+        if self.partner_info is not None:
+            return self.partner_info.get("operator_id")
+        return None
 
     def update_summary(self) -> Dict[str, Any]:
         """Calculates current campaign summary metrics."""
@@ -659,7 +713,7 @@ class CampaignManifest:
 
     def to_dict(self) -> Dict[str, Any]:
         self.updated_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        return {
+        data = {
             "schema_version": SCHEMA_VERSION,
             "protocol_version": self.protocol_version,
             "campaign_id": self.campaign_id,
@@ -681,6 +735,9 @@ class CampaignManifest:
             "summary": self.update_summary(),
             "matrix_slots": [s.to_dict() for s in self.matrix_slots]
         }
+        if self.partner_info is not None:
+            data["partner_info"] = self.partner_info
+        return data
 
     def save_atomically(self) -> None:
         """
@@ -717,6 +774,13 @@ class CampaignManifest:
         config = data.get("configuration", {})
         slots = [MatrixSlot.from_dict(s) for s in data.get("matrix_slots", [])]
 
+        partner_info = data.get("partner_info")
+        if partner_info is None and ("partner_institution" in data or "operator_id" in data):
+            partner_info = {
+                "partner_institution": data.get("partner_institution", ""),
+                "operator_id": data.get("operator_id", ""),
+            }
+
         return cls(
             campaign_id=data["campaign_id"],
             output_dir=manifest_path.parent,
@@ -731,7 +795,8 @@ class CampaignManifest:
             completed_at=data.get("completed_at"),
             halt_reason=data.get("summary", {}).get("halt_reason"),
             strict_partner=data.get("strict_partner", False),
-            protocol_version=data.get("protocol_version", PROTOCOL_VERSION)
+            protocol_version=data.get("protocol_version", PROTOCOL_VERSION),
+            partner_info=partner_info
         )
 
 
@@ -744,11 +809,14 @@ def reconcile_manifest_for_resume(
     expected_scenarios: List[str],
     expected_browsers: List[str],
     expected_reps: int,
-    is_simulation: bool
+    is_simulation: bool,
+    expected_partner_institution: Optional[str] = None,
+    expected_operator_id: Optional[str] = None,
+    strict_partner: bool = False
 ) -> int:
     """
     Reconciles an existing manifest for a safe resume operation:
-    1. Validates configuration compatibility.
+    1. Validates configuration and partner metadata compatibility.
     2. Validates evidence for every slot marked COMPLETED using A7 rules.
     3. If evidence is valid, slot remains COMPLETED and is skipped.
     4. If evidence is corrupted or missing, resets slot to PENDING (old attempts preserved).
@@ -770,6 +838,41 @@ def reconcile_manifest_for_resume(
         raise CampaignResumeError(
             f"Resume mode mismatch: requested simulation={is_simulation}, manifest has {manifest.is_simulation}"
         )
+    if strict_partner != manifest.strict_partner:
+        raise CampaignResumeError(
+            f"Resume strict_partner mismatch: requested {strict_partner}, manifest has {manifest.strict_partner}"
+        )
+
+    # Validate partner metadata compatibility on resume
+    manifest_partner = manifest.partner_info or {}
+    manifest_inst = manifest_partner.get("partner_institution") or ""
+    manifest_op = manifest_partner.get("operator_id") or ""
+
+    if strict_partner or manifest.strict_partner:
+        if is_placeholder_partner_metadata(manifest_inst):
+            raise CampaignResumeError(
+                f"Resume failed: existing manifest has unassigned or placeholder partner_institution: '{manifest_inst}'"
+            )
+        if is_placeholder_partner_metadata(manifest_op):
+            raise CampaignResumeError(
+                f"Resume failed: existing manifest has unassigned or placeholder operator_id: '{manifest_op}'"
+            )
+
+    if expected_partner_institution is not None or manifest_inst:
+        exp_inst = expected_partner_institution or ""
+        if exp_inst != manifest_inst:
+            raise CampaignResumeError(
+                f"Resume partner_institution mismatch: requested '{expected_partner_institution}', "
+                f"manifest has '{manifest_inst}'"
+            )
+
+    if expected_operator_id is not None or manifest_op:
+        exp_op = expected_operator_id or ""
+        if exp_op != manifest_op:
+            raise CampaignResumeError(
+                f"Resume operator_id mismatch: requested '{expected_operator_id}', "
+                f"manifest has '{manifest_op}'"
+            )
 
     verified_completed = 0
     for slot in manifest.matrix_slots:
@@ -1033,9 +1136,27 @@ class CampaignRunner:
         exit_on_interruption: bool = True,
         coordinator: Optional[InterruptionCoordinator] = None,
         browser_cmd_override: Optional[List[str]] = None,
-        strict_partner: bool = False
+        strict_partner: bool = False,
+        partner_institution: Optional[str] = None,
+        operator_id: Optional[str] = None,
+        partner_info: Optional[Dict[str, Any]] = None
     ):
         self.strict_partner = strict_partner
+        if partner_info is not None:
+            self.partner_institution = partner_info.get("partner_institution")
+            self.operator_id = partner_info.get("operator_id")
+        else:
+            self.partner_institution = partner_institution
+            self.operator_id = operator_id
+
+        if self.partner_institution is not None or self.operator_id is not None:
+            self.partner_info: Optional[Dict[str, str]] = {
+                "partner_institution": str(self.partner_institution or ""),
+                "operator_id": str(self.operator_id or ""),
+            }
+        else:
+            self.partner_info = None
+
         self.scenarios = [s.upper() for s in (scenarios or DEFAULT_SCENARIOS)]
         for sc in self.scenarios:
             if sc not in run_trial.ALLOWED_SCENARIOS:
@@ -1061,6 +1182,16 @@ class CampaignRunner:
                 raise CampaignConfigError(
                     f"Strict partner replication requires both canonical browsers ['google-chrome', 'firefox'], "
                     f"got {browsers}"
+                )
+            if is_placeholder_partner_metadata(self.partner_institution):
+                raise CampaignConfigError(
+                    f"Strict partner replication requires a valid, non-placeholder partner institution "
+                    f"(--partner-institution), got: {self.partner_institution!r}."
+                )
+            if is_placeholder_partner_metadata(self.operator_id):
+                raise CampaignConfigError(
+                    f"Strict partner replication requires a valid, non-placeholder operator ID "
+                    f"(--operator-id), got: {self.operator_id!r}."
                 )
 
         if repetitions < 1:
@@ -1199,7 +1330,10 @@ class CampaignRunner:
                 expected_scenarios=self.scenarios,
                 expected_browsers=self.browsers,
                 expected_reps=self.repetitions,
-                is_simulation=self.is_simulation
+                is_simulation=self.is_simulation,
+                expected_partner_institution=self.partner_institution,
+                expected_operator_id=self.operator_id,
+                strict_partner=self.strict_partner
             )
             return manifest
 
@@ -1220,6 +1354,9 @@ class CampaignRunner:
             status="IN_PROGRESS",
             strict_partner=self.strict_partner,
             protocol_version=PROTOCOL_VERSION,
+            partner_info=self.partner_info,
+            partner_institution=self.partner_institution,
+            operator_id=self.operator_id
         )
         manifest.save_atomically()
         return manifest
@@ -1751,6 +1888,18 @@ def parse_args(args: Optional[List[str]] = None) -> argparse.Namespace:
         help="Enforce strict partner replication profile: 280 trials (S0-S6 x 2 pinned browsers x 20 reps), live execution only, exact pinned browser versions required"
     )
     parser.add_argument(
+        "--partner-institution",
+        dest="partner_institution",
+        default=None,
+        help="Partner institution name conducting the replication"
+    )
+    parser.add_argument(
+        "--operator-id",
+        dest="operator_id",
+        default=None,
+        help="Unique operator identifier responsible for replication execution"
+    )
+    parser.add_argument(
         "--simulation",
         action="store_true",
         help="Execute in simulation mode (offline/dry-run, clearly tagged in manifest)"
@@ -1815,6 +1964,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                 print(f"Campaign ID:       {res['campaign_id']}")
                 print(f"Status:            \033[1;32m{res['status']}\033[0m")
                 print(f"Completed At:      {res['completed_at']}")
+                if res.get("partner_info"):
+                    p_info = res["partner_info"]
+                    print(f"Partner Inst:      {p_info.get('partner_institution')}")
+                    print(f"Operator ID:       {p_info.get('operator_id')}")
                 print(f"Slots Total:       {summary['total_slots']} (completed={summary['completed_slots']}, pending={summary['pending_slots']}, failed={summary['failed_slots']})")
                 print(f"Attempts:          {summary['total_attempts']} (valid_live={summary['valid_live_attempts']}, failed={summary['failed_attempts']})")
                 print(f"Manifest Path:     {manifest_path}")
@@ -1848,7 +2001,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             trial_timeout=args.timeout,
             browser_timeout=args.browser_timeout,
             fail_fast_on_measurement=args.fail_fast,
-            strict_partner=args.strict_partner
+            strict_partner=args.strict_partner,
+            partner_institution=args.partner_institution,
+            operator_id=args.operator_id
         )
         res = runner.run()
 
@@ -1861,6 +2016,10 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(f"Campaign ID:       {res['campaign_id']}")
             print(f"Status:            \033[1;32m{res['status']}\033[0m")
             print(f"Execution Mode:    {res['execution_mode']}")
+            if res.get("partner_info"):
+                p_info = res["partner_info"]
+                print(f"Partner Inst:      {p_info.get('partner_institution')}")
+                print(f"Operator ID:       {p_info.get('operator_id')}")
             print(f"Scenarios:         {res['configuration']['scenarios']}")
             print(f"Browsers:          {res['configuration']['browsers']}")
             print(f"Repetitions:       {res['configuration']['repetitions']}")
