@@ -8,6 +8,7 @@ Work Package B: Preflight Gates, Version Matching, State Model, and Remediation
 import hashlib
 import json
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
@@ -592,6 +593,72 @@ class TestPartnerPreflight(unittest.TestCase):
         with patch.dict("os.environ", {"PS028_EXPECTED_RELEASE_SHA": actual_checkout}):
             resolved_ok = partner_preflight.get_checkout_sha(checkout_sha_override=actual_checkout)
             self.assertEqual(resolved_ok, actual_checkout)
+
+    def test_explicit_expected_release_argument_conflict_cannot_override_checkout(self):
+        """Test 10b: Explicit expected_release_sha argument in conflict cannot override repository checkout."""
+        actual_checkout = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            cwd=str(partner_preflight.REPO_ROOT),
+            text=True
+        ).strip()
+        conflicting_sha = "c46dfdbac218dd0a54606067fe9e91aae8e56b31"
+        if conflicting_sha == actual_checkout:
+            conflicting_sha = "0" * 40
+
+        helper_path = self.temp_dir / "privileged_helper.py"
+        helper_content = b"#!/usr/bin/env python3\n# test helper content\n"
+        helper_path.write_bytes(helper_content)
+        helper_sha = hashlib.sha256(helper_content).hexdigest()
+
+        sudoers_path = self.temp_dir / "ps028-helper"
+        sudoers_path.write_text("ps028-sv ALL=(ALL) NOPASSWD: ALL\n", encoding="utf-8")
+
+        manifest_path = self.temp_dir / "deployment_manifest.json"
+        manifest_data = {
+            "release_sha": actual_checkout,
+            "target_dir": str(self.temp_dir),
+            "file_count": 1,
+            "files": [
+                {"path": "privileged_helper.py", "sha256": helper_sha, "mode": "0750"}
+            ]
+        }
+        manifest_path.write_text(json.dumps(manifest_data), encoding="utf-8")
+
+        with patch("pwd.getpwnam", return_value=MagicMock()):
+            # 1. Conflicting expected_release_sha argument
+            status_conflict = partner_preflight.get_helper_deployment_status(
+                helper_path_override=helper_path,
+                sudoers_path_override=sudoers_path,
+                manifest_path_override=manifest_path,
+                expected_release_sha=conflicting_sha,
+            )
+
+            # Helper binary hash and manifest helper hash match
+            self.assertTrue(status_conflict["helper_sha_match"])
+            self.assertEqual(status_conflict["helper_integrity_status"], partner_preflight.INTEGRITY_VERIFIED)
+
+            # Supplied SHA cannot override actual checkout; fails closed to CHECKOUT_SHA_UNAVAILABLE
+            self.assertEqual(status_conflict["release_verification_status"], partner_preflight.RELEASE_CHECKOUT_UNAVAILABLE)
+            self.assertIsNone(status_conflict["release_sha_match"])
+
+            # Deployment readiness remains False
+            self.assertFalse(status_conflict["deployment_ready"])
+            self.assertFalse(status_conflict["ready"])
+
+            # 2. Matching expected_release_sha argument remains accepted
+            status_match = partner_preflight.get_helper_deployment_status(
+                helper_path_override=helper_path,
+                sudoers_path_override=sudoers_path,
+                manifest_path_override=manifest_path,
+                expected_release_sha=actual_checkout,
+            )
+
+            self.assertTrue(status_match["helper_sha_match"])
+            self.assertEqual(status_match["helper_integrity_status"], partner_preflight.INTEGRITY_VERIFIED)
+            self.assertEqual(status_match["release_verification_status"], partner_preflight.RELEASE_CURRENT)
+            self.assertTrue(status_match["release_sha_match"])
+            self.assertTrue(status_match["deployment_ready"])
+            self.assertTrue(status_match["ready"])
 
     def test_human_readable_report_current_and_non_current_diagnostics(self):
         """Test 11: Current-release and non-current-release diagnostics in human-readable report."""
