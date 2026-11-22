@@ -542,27 +542,75 @@ def get_storage_status(target_path: Path = REPO_ROOT) -> Dict[str, Any]:
         }
 
 
-def get_helper_deployment_status() -> Dict[str, Any]:
+def get_checkout_sha() -> Optional[str]:
+    """
+    Resolves the explicitly pinned repository checkout SHA.
+    Checks environment variable PS028_EXPECTED_RELEASE_SHA first, then git rev-parse HEAD.
+    """
+    env_sha = os.environ.get("PS028_EXPECTED_RELEASE_SHA") or os.environ.get("PS028_CHECKOUT_SHA")
+    if env_sha and re.match(r'^[0-9a-fA-F]{40}$', env_sha.strip()):
+        return env_sha.strip().lower()
+
+    try:
+        res = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=str(REPO_ROOT),
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=5.0
+        )
+        sha = res.stdout.strip().lower()
+        if re.match(r'^[0-9a-fA-F]{40}$', sha):
+            return sha
+    except Exception:
+        pass
+
+    return None
+
+
+def get_helper_deployment_status(
+    helper_path_override: Optional[Path] = None,
+    sudoers_path_override: Optional[Path] = None,
+    manifest_path_override: Optional[Path] = None,
+    expected_release_sha: Optional[str] = None,
+) -> Dict[str, Any]:
     """
     Inspects deployment of privileged helper, sudoers drop-in, and deployment manifest.
-    Verifies helper integrity against deployment manifest SHA-256.
+    Verifies helper integrity against deployment manifest SHA-256 and release commit SHA.
     """
-    helper_path = Path("/usr/local/libexec/ps028/privileged_helper.py")
-    sudoers_path = Path("/etc/sudoers.d/ps028-helper")
-    manifest_path = Path("/usr/local/libexec/ps028/deployment_manifest.json")
+    helper_path = helper_path_override or Path("/usr/local/libexec/ps028/privileged_helper.py")
+    sudoers_path = sudoers_path_override or Path("/etc/sudoers.d/ps028-helper")
+    manifest_path = manifest_path_override or Path("/usr/local/libexec/ps028/deployment_manifest.json")
+
+    checkout_sha = (expected_release_sha or get_checkout_sha() or "").lower() or None
 
     helper_installed = False
     helper_mode = None
     helper_sha256 = None
+    helper_permission_denied = False
+    helper_read_error: Optional[str] = None
+
     try:
         if helper_path.is_file():
             helper_installed = True
-            helper_mode = oct(helper_path.stat().st_mode & 0o777)
-            h = hashlib.sha256()
-            h.update(helper_path.read_bytes())
-            helper_sha256 = h.hexdigest()
-    except (PermissionError, OSError):
-        pass
+            try:
+                st = helper_path.stat()
+                helper_mode = oct(st.st_mode & 0o777)
+            except (PermissionError, OSError) as exc:
+                helper_read_error = f"Cannot stat helper: {exc}"
+
+            try:
+                helper_bytes = helper_path.read_bytes()
+                h = hashlib.sha256(helper_bytes)
+                helper_sha256 = h.hexdigest().lower()
+            except PermissionError as exc:
+                helper_permission_denied = True
+                helper_read_error = f"Permission denied while reading helper executable: {exc}"
+            except OSError as exc:
+                helper_read_error = f"Cannot read helper executable: {exc}"
+    except (PermissionError, OSError) as exc:
+        helper_read_error = f"Cannot access helper path: {exc}"
 
     sudoers_installed = False
     sudoers_mode = None
@@ -574,17 +622,102 @@ def get_helper_deployment_status() -> Dict[str, Any]:
         pass
 
     manifest_installed = False
-    manifest_sha_match = False
     manifest_data: Optional[Dict[str, Any]] = None
+    manifest_error: Optional[str] = None
+    expected_helper_sha: Optional[str] = None
+    manifest_release_sha: Optional[str] = None
+
     try:
         if manifest_path.is_file():
             manifest_installed = True
-            manifest_data = json.loads(manifest_path.read_text(encoding="utf-8"))
-            expected_helper_sha = manifest_data.get("helper_sha256")
-            if helper_sha256 and expected_helper_sha:
-                manifest_sha_match = (helper_sha256.lower() == expected_helper_sha.lower())
-    except Exception:
-        pass
+            try:
+                manifest_text = manifest_path.read_text(encoding="utf-8")
+                raw_data = json.loads(manifest_text)
+                if not isinstance(raw_data, dict):
+                    manifest_error = "Manifest JSON root must be an object/dict"
+                else:
+                    manifest_data = raw_data
+            except json.JSONDecodeError as exc:
+                manifest_error = f"Malformed manifest JSON: {exc}"
+            except (PermissionError, OSError) as exc:
+                manifest_error = f"Cannot read manifest file: {exc}"
+    except (PermissionError, OSError) as exc:
+        manifest_error = f"Cannot access manifest path: {exc}"
+
+    if manifest_data is not None and not manifest_error:
+        # Extract and validate release_sha if present
+        raw_release_sha = manifest_data.get("release_sha")
+        if raw_release_sha is not None:
+            if isinstance(raw_release_sha, str) and re.match(r'^[0-9a-fA-F]{40}$', raw_release_sha.strip()):
+                manifest_release_sha = raw_release_sha.strip().lower()
+            else:
+                manifest_error = f"Invalid release_sha in manifest: {raw_release_sha!r} (must be 40-character hex)"
+
+        # Extract and validate expected_helper_sha from files array or top-level helper_sha256
+        if not manifest_error:
+            if "files" in manifest_data:
+                files_entry = manifest_data["files"]
+                if not isinstance(files_entry, list):
+                    manifest_error = "Manifest 'files' section must be a list"
+                else:
+                    helper_entries = []
+                    for idx, item in enumerate(files_entry):
+                        if not isinstance(item, dict):
+                            manifest_error = f"Malformed file record at index {idx} in manifest files"
+                            break
+                        if item.get("path") == "privileged_helper.py":
+                            helper_entries.append(item)
+
+                    if not manifest_error:
+                        if len(helper_entries) == 0:
+                            manifest_error = "Missing 'privileged_helper.py' entry in manifest files"
+                        elif len(helper_entries) > 1:
+                            manifest_error = f"Duplicate 'privileged_helper.py' entries in manifest files (found {len(helper_entries)})"
+                        else:
+                            raw_sha = helper_entries[0].get("sha256")
+                            if not isinstance(raw_sha, str) or not re.match(r'^[0-9a-fA-F]{64}$', raw_sha.strip()):
+                                manifest_error = f"Invalid SHA-256 for privileged_helper.py in manifest: {raw_sha!r}"
+                            else:
+                                expected_helper_sha = raw_sha.strip().lower()
+            elif "helper_sha256" in manifest_data:
+                # Backward compatibility with top-level helper_sha256
+                raw_top_sha = manifest_data["helper_sha256"]
+                if not isinstance(raw_top_sha, str) or not re.match(r'^[0-9a-fA-F]{64}$', raw_top_sha.strip()):
+                    manifest_error = f"Invalid top-level helper_sha256 in manifest: {raw_top_sha!r}"
+                else:
+                    expected_helper_sha = raw_top_sha.strip().lower()
+            else:
+                manifest_error = "Manifest lacks both 'files' array and top-level 'helper_sha256'"
+
+    # Helper hash match comparison
+    helper_sha_match = False
+    if helper_sha256 and expected_helper_sha and not manifest_error and not helper_permission_denied:
+        helper_sha_match = (helper_sha256 == expected_helper_sha)
+
+    # Release SHA comparison
+    release_sha_match: Optional[bool] = None
+    if checkout_sha is not None and manifest_release_sha is not None:
+        release_sha_match = (checkout_sha == manifest_release_sha)
+    elif checkout_sha is not None and manifest_release_sha is None:
+        # Legacy manifest without release_sha
+        release_sha_match = None
+
+    # Determine structured verification status
+    if helper_permission_denied:
+        verification_status = "UNVERIFIED_PERMISSION_REQUIRED"
+    elif not helper_installed or not manifest_installed:
+        verification_status = "NOT_INSTALLED"
+    elif manifest_error:
+        verification_status = "UNVERIFIED_MALFORMED_MANIFEST"
+    elif release_sha_match is False:
+        verification_status = "UNVERIFIED_RELEASE_MISMATCH"
+    elif not helper_sha_match:
+        verification_status = "UNVERIFIED_HASH_MISMATCH"
+    else:
+        verification_status = "VERIFIED"
+
+    # Overall manifest SHA match boolean (True ONLY when verified and no release mismatch)
+    manifest_sha_match = (verification_status == "VERIFIED")
 
     # Check dedicated service account ps028-sv
     has_service_account = False
@@ -600,6 +733,7 @@ def get_helper_deployment_status() -> Dict[str, Any]:
         sudoers_installed and
         manifest_installed and
         manifest_sha_match and
+        (release_sha_match is not False) and
         has_service_account
     )
 
@@ -609,6 +743,8 @@ def get_helper_deployment_status() -> Dict[str, Any]:
             "installed": helper_installed,
             "mode": helper_mode,
             "sha256": helper_sha256,
+            "verification_status": verification_status,
+            "read_error": helper_read_error,
         },
         "sudoers_drop_in": {
             "path": str(sudoers_path),
@@ -619,6 +755,12 @@ def get_helper_deployment_status() -> Dict[str, Any]:
             "path": str(manifest_path),
             "installed": manifest_installed,
             "sha_match": manifest_sha_match,
+            "verification_status": verification_status,
+            "release_sha": manifest_release_sha,
+            "expected_release_sha": checkout_sha,
+            "release_sha_match": release_sha_match,
+            "expected_helper_sha256": expected_helper_sha,
+            "error": manifest_error or (helper_read_error if helper_permission_denied else None),
         },
         "service_account_ps028_sv": has_service_account,
         "ready": ready,
@@ -750,11 +892,38 @@ def compute_remediation_actions(report: Dict[str, Any]) -> List[Dict[str, str]]:
                 "issue": "Privileged helper is not deployed to /usr/local/libexec/ps028/",
                 "remediation": "Perform deployment dry-run: ./lab/deploy_privileged_helper.sh --dry-run; then deploy with authorization.",
             })
-        elif not helper.get("deployment_manifest", {}).get("sha_match", False):
+        elif helper.get("helper_executable", {}).get("verification_status") == "UNVERIFIED_PERMISSION_REQUIRED":
             actions.append({
                 "category": "Privileged Helper",
-                "issue": "Helper executable SHA-256 does not match deployment manifest",
+                "issue": "Cannot read /usr/local/libexec/ps028/privileged_helper.py to verify checksum (Permission denied)",
+                "remediation": "Run read-only preflight with sufficient permission (e.g. sudo python3 lab/partner_preflight.py) to allow checksum verification of root-owned helper.",
+            })
+        elif not helper.get("deployment_manifest", {}).get("installed", False):
+            actions.append({
+                "category": "Privileged Helper",
+                "issue": "Deployment manifest is missing at /usr/local/libexec/ps028/deployment_manifest.json",
                 "remediation": "Re-run ./lab/deploy_privileged_helper.sh with root privileges after verifying clean Git tree.",
+            })
+        elif helper.get("deployment_manifest", {}).get("verification_status") == "UNVERIFIED_RELEASE_MISMATCH":
+            mf = helper.get("deployment_manifest", {})
+            actions.append({
+                "category": "Privileged Helper",
+                "issue": f"Installed helper release SHA '{mf.get('release_sha')}' does not match repository checkout SHA '{mf.get('expected_release_sha')}'",
+                "remediation": "Re-deploy privileged helper from the current repository checkout: sudo ./lab/deploy_privileged_helper.sh",
+            })
+        elif not helper.get("deployment_manifest", {}).get("sha_match", False):
+            mf_err = helper.get("deployment_manifest", {}).get("error")
+            err_detail = f" ({mf_err})" if mf_err else ""
+            actions.append({
+                "category": "Privileged Helper",
+                "issue": f"Helper executable SHA-256 does not match deployment manifest{err_detail}",
+                "remediation": "Re-run ./lab/deploy_privileged_helper.sh with root privileges after verifying clean Git tree.",
+            })
+        if not helper.get("sudoers_drop_in", {}).get("installed", False):
+            actions.append({
+                "category": "Privileged Helper",
+                "issue": "Sudoers drop-in is not deployed to /etc/sudoers.d/ps028-helper",
+                "remediation": "Deploy sudoers rule via ./lab/deploy_privileged_helper.sh with root privileges.",
             })
 
     # 6. Storage
@@ -780,7 +949,12 @@ def compute_remediation_actions(report: Dict[str, Any]) -> List[Dict[str, str]]:
     return actions
 
 
-def run_partner_preflight() -> Dict[str, Any]:
+def run_partner_preflight(
+    helper_path_override: Optional[Path] = None,
+    sudoers_path_override: Optional[Path] = None,
+    manifest_path_override: Optional[Path] = None,
+    expected_release_sha: Optional[str] = None,
+) -> Dict[str, Any]:
     """
     Executes the complete non-mutating partner preflight inspection and
     evaluates the strict 5-state readiness model.
@@ -791,7 +965,12 @@ def run_partner_preflight() -> Dict[str, Any]:
     browsers_info = get_browser_runtimes()
     caps_info = get_system_capabilities()
     storage_info = get_storage_status()
-    helper_info = get_helper_deployment_status()
+    helper_info = get_helper_deployment_status(
+        helper_path_override=helper_path_override,
+        sudoers_path_override=sudoers_path_override,
+        manifest_path_override=manifest_path_override,
+        expected_release_sha=expected_release_sha,
+    )
     configs_info = get_configuration_files()
 
     # Core host prerequisites (non-browser, non-helper)
@@ -910,11 +1089,37 @@ def print_human_report(report: Dict[str, Any]) -> None:
 
     # 6. Privileged Helper Deployment
     helper = report["privileged_helper"]
+    h_exec = helper.get("helper_executable", {})
+    mf = helper.get("deployment_manifest", {})
+    v_stat = mf.get("verification_status")
+
+    if not h_exec.get("installed", False):
+        helper_str = "Not Deployed [PENDING]"
+    elif h_exec.get("verification_status") == "UNVERIFIED_PERMISSION_REQUIRED":
+        helper_str = "Installed (Permission Denied to read) [ACTION REQUIRED]"
+    else:
+        helper_str = "Installed [OK]"
+
+    if mf.get("sha_match", False):
+        manifest_str = "Installed & Verified [OK]"
+    elif v_stat == "UNVERIFIED_PERMISSION_REQUIRED":
+        manifest_str = "Unverified (Permission Denied to read helper) [ACTION REQUIRED]"
+    elif v_stat == "UNVERIFIED_RELEASE_MISMATCH":
+        manifest_str = f"Release Mismatch ({mf.get('release_sha')} != {mf.get('expected_release_sha')}) [ACTION REQUIRED]"
+    elif v_stat == "UNVERIFIED_HASH_MISMATCH":
+        manifest_str = "Checksum Mismatch [ACTION REQUIRED]"
+    elif v_stat == "UNVERIFIED_MALFORMED_MANIFEST":
+        manifest_str = f"Malformed Manifest ({mf.get('error')}) [ACTION REQUIRED]"
+    elif mf.get("installed", False):
+        manifest_str = f"Unverified ({mf.get('error') or 'verification failed'}) [ACTION REQUIRED]"
+    else:
+        manifest_str = "Not Deployed [PENDING]"
+
     print("6. Privileged Helper Deployment Status:")
     print(f"   Service Acct : {'ps028-sv [OK]' if helper['service_account_ps028_sv'] else 'ps028-sv [MISSING]'}")
-    print(f"   Helper Binary: {'Installed [OK]' if helper['helper_executable']['installed'] else 'Not Deployed [PENDING]'}")
+    print(f"   Helper Binary: {helper_str}")
     print(f"   Sudoers Rule : {'Installed [OK]' if helper['sudoers_drop_in']['installed'] else 'Not Deployed [PENDING]'}")
-    print(f"   Manifest     : {'Installed & Verified [OK]' if helper['deployment_manifest']['sha_match'] else 'Pending / Unverified [PENDING]'}")
+    print(f"   Manifest     : {manifest_str}")
     print()
 
     # 7. Configuration Files
